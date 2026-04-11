@@ -1,0 +1,49 @@
+# Dependências
+node_modules/
+
+# Variáveis de ambiente — NUNCA commitar
+.env
+.env.local
+.env.production
+
+# Bancos de dados locais — dados ficam no servidor, não no git
+data/
+
+# Certificados digitais A1 — sensíveis, não commitar
+certificados/*.pfx
+certificados/*.p12
+certificados/*.key
+
+# Uploads de usuários
+data/*/uploads/
+
+# Logs
+*.log
+logs/
+
+# Backups locais
+backups/
+
+# Fontes e documentos de trabalho
+fontes/
+conferencia/
+
+# Relatórios gerados
+*.xlsx
+relatorio_*.html
+reconciliacao_*.html
+
+# Arquivos temporários de scripts
+scripts/contratos_extraidos.json
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+*.swp
+
+# Build
+dist/

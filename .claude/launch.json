@@ -1,0 +1,20 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "montana-unificado",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--watch", "src/server.js"],
+      "port": 3002,
+      "autoPort": false,
+      "cwd": "C:\\Users\\Avell\\OneDrive\\Área de Trabalho\\Montana_Seg_Conciliacao\\app_unificado"
+    },
+    {
+      "name": "Montana Frontend React/Vite (porta 5173)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5173,
+      "cwd": "C:\\Users\\Avell\\montana-app"
+    }
+  ]
+}

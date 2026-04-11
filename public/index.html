@@ -1,0 +1,2341 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Montana Multi-Empresa — Conciliação v3</title>
+<link rel="icon" href="/montana.ico">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<!-- Loading Overlay (UX-1) -->
+<div id="loading-overlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:12px">
+  <div style="width:48px;height:48px;border:4px solid rgba(255,255,255,.2);border-top-color:#60a5fa;border-radius:50%;animation:spin .7s linear infinite"></div>
+  <div class="loading-msg" style="color:#e2e8f0;font-size:13px;font-weight:600">Carregando…</div>
+</div>
+
+<!-- Seletor de empresa (Multi-Empresa Unificado) -->
+<div id="company-banner" style="background:#0d6efd;color:#fff;padding:5px 16px;font-size:12px;font-weight:700;display:flex;align-items:center;gap:10px;letter-spacing:.5px">
+  <span id="cb-icone">🏢</span>
+  <span id="cb-nome">MONTANA ASSESSORIA EMPRESARIAL LTDA — CNPJ 14.092.519/0001-51</span>
+  <span style="margin-left:auto;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+    <button onclick="switchCompany('assessoria')" id="btn-assessoria"
+      style="background:rgba(255,255,255,.35);color:#fff;border:1px solid rgba(255,255,255,.5);padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;cursor:pointer">
+      🏢 Assessoria
+    </button>
+    <button onclick="switchCompany('seguranca')" id="btn-seguranca"
+      style="background:rgba(255,255,255,.15);color:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.3);padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;cursor:pointer">
+      🔒 Segurança
+    </button>
+    <button onclick="switchCompany('portodovau')" id="btn-portodovau"
+      style="background:rgba(255,255,255,.15);color:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.3);padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;cursor:pointer">
+      🛡️ Porto do Vau
+    </button>
+    <button onclick="switchCompany('mustang')" id="btn-mustang"
+      style="background:rgba(255,255,255,.15);color:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.3);padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;cursor:pointer">
+      🐎 Mustang
+    </button>
+    <span style="background:rgba(255,255,255,.2);padding:2px 8px;border-radius:10px;font-size:11px">PORTA 3002</span>
+  </span>
+</div>
+
+<!-- Header -->
+<div class="hdr">
+  <div style="font-size:28px">⚖️</div>
+  <div>
+    <h1 id="hdr-title">Montana Multi-Empresa — Conciliação v3</h1>
+    <p>Sistema de Conciliação Financeira · Backend Node.js + SQLite · Porta 3002</p>
+  </div>
+  <div class="hdr-stats">
+    <div class="hdr-stat"><div class="hdr-stat-v" id="h-ext">—</div><div class="hdr-stat-l">Extratos</div></div>
+    <div class="hdr-stat"><div class="hdr-stat-v" id="h-nfs">—</div><div class="hdr-stat-l">NFs</div></div>
+    <div class="hdr-stat"><div class="hdr-stat-v" id="h-cont">—</div><div class="hdr-stat-l">Contratos</div></div>
+    <div class="hdr-stat"><div class="hdr-stat-v" id="h-pgs">—</div><div class="hdr-stat-l">Pagamentos</div></div>
+    <div class="hdr-stat"><div class="hdr-stat-v" id="h-vinc">—</div><div class="hdr-stat-l">Vinculados</div></div>
+  </div>
+</div>
+
+<!-- Global Period Filter -->
+<div class="gbar">
+  <div style="display:flex;align-items:center;gap:6px">
+    <span style="font-size:16px">📅</span>
+    <span style="color:#e2e8f0;font-size:11px;font-weight:700">PERÍODO</span>
+  </div>
+  <div><label>Tipo</label>
+    <select id="gf-tipo" onchange="globalPeriodChange()">
+      <option value="">Todos</option>
+      <option value="mes">Mês</option>
+      <option value="trimestre">Trimestre</option>
+      <option value="ano">Ano</option>
+      <option value="custom">Personalizado</option>
+    </select>
+  </div>
+  <div id="gf-mes-wrap" style="display:none"><label>Mês/Ano</label><input type="month" id="gf-mes" onchange="applyGlobalPeriod()"></div>
+  <div id="gf-trim-wrap" style="display:none"><label>Trimestre</label>
+    <select id="gf-trim" onchange="applyGlobalPeriod()">
+      <option value="2026-T1">T1/2026</option><option value="2025-T4">T4/2025</option>
+      <option value="2025-T3">T3/2025</option><option value="2025-T2">T2/2025</option>
+      <option value="2025-T1">T1/2025</option><option value="2024-T4">T4/2024</option>
+      <option value="2024-T3">T3/2024</option><option value="2024-T2">T2/2024</option>
+      <option value="2024-T1">T1/2024</option>
+    </select>
+  </div>
+  <div id="gf-ano-wrap" style="display:none"><label>Ano</label>
+    <select id="gf-ano" onchange="applyGlobalPeriod()"><option value="2026">2026</option><option value="2025">2025</option><option value="2024">2024</option></select>
+  </div>
+  <div id="gf-custom-wrap" style="display:none;align-items:center;gap:6px">
+    <div><label>De</label><input type="date" id="gf-de" onchange="applyGlobalPeriod()"></div>
+    <div><label>Até</label><input type="date" id="gf-ate" onchange="applyGlobalPeriod()"></div>
+  </div>
+  <div class="gbar-info">
+    <span id="gf-label">Todos os períodos</span>
+    <button onclick="clearGlobalPeriod()" style="margin-left:8px">Limpar</button>
+  </div>
+  <!-- Busca Global -->
+  <div style="position:relative;margin-left:auto">
+    <input id="busca-global-input" type="text" placeholder="🔍 Buscar NF, extrato, contrato…"
+      oninput="buscaGlobalDebounce()" onkeydown="if(event.key==='Escape')fecharBuscaGlobal()"
+      style="padding:6px 12px 6px 10px;font-size:11px;border:1px solid #475569;border-radius:20px;background:#334155;color:#e2e8f0;width:240px;outline:none"
+      autocomplete="off">
+    <div id="busca-global-result" style="display:none;position:absolute;top:calc(100% + 6px);right:0;width:480px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.15);z-index:9999;max-height:420px;overflow-y:auto"></div>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <div class="tab active" data-tab="dash" onclick="showTab('dash',this)">📊 Dashboard</div>
+  <div class="tab" data-tab="ext" onclick="showTab('ext',this)">🏦 Extratos</div>
+  <div class="tab" data-tab="nfs" onclick="showTab('nfs',this)">🧾 Notas Fiscais</div>
+  <div class="tab" data-tab="cont" onclick="showTab('cont',this)">📋 Contratos</div>
+  <div class="tab" data-tab="pag" onclick="showTab('pag',this)">💵 Pagamentos</div>
+  <div class="tab" data-tab="desp" onclick="showTab('desp',this)">💸 Despesas</div>
+  <div class="tab" data-tab="pref" onclick="showTab('pref',this)" style="color:#7c3aed;font-weight:700">🏛️ Prefeitura</div>
+  <div class="tab" data-tab="import" onclick="showTab('import',this)">📥 Importar</div>
+  <div class="tab" data-tab="fluxo" onclick="showTab('fluxo',this)">📈 Fluxo de Caixa</div>
+  <div class="tab" data-tab="relat" onclick="showTab('relat',this)">📄 Relatórios</div>
+  <div class="tab" data-tab="certidoes" onclick="showTab('certidoes',this)" style="color:#059669;font-weight:700">📋 Certidões</div>
+  <div class="tab" data-tab="licitacoes" onclick="showTab('licitacoes',this)" style="color:#0369a1;font-weight:700">🏛️ Licitações</div>
+  <div class="tab" data-tab="calculadora" onclick="showTab('calculadora',this)" style="color:#7c3aed;font-weight:700">🧮 Calculadora</div>
+  <div class="tab" data-tab="dre" onclick="showTab('dre',this)" style="color:#d97706;font-weight:700">📊 DRE</div>
+  <div class="tab" data-tab="margem" onclick="showTab('margem',this)" style="color:#dc2626;font-weight:700">💰 Margem</div>
+  <div class="tab" data-tab="reajuste" onclick="showTab('reajuste',this)" style="color:#7c3aed;font-weight:700">📈 Reajuste</div>
+  <div class="tab" data-tab="retencoes" onclick="showTab('retencoes',this)" style="color:#0e7490;font-weight:700">🏛️ Retenções</div>
+  <div class="tab" data-tab="conta-vinculada" onclick="showTab('conta-vinculada',this)" style="color:#0891b2;font-weight:700">🏦 Conta Vinculada</div>
+  <div class="tab" data-tab="rh" onclick="showTab('rh',this)" style="color:#0891b2;font-weight:700">👥 RH / DP</div>
+  <div class="tab" data-tab="ponto" onclick="showTab('ponto',this)" style="color:#0f766e;font-weight:700">🕐 Ponto</div>
+  <div class="tab" data-tab="boletins" onclick="showTab('boletins',this)" style="color:#7c2d12;font-weight:700">📄 Boletins</div>
+  <div class="tab" data-tab="conciliacao3v" onclick="showTab('conciliacao3v',this)" style="color:#059669;font-weight:700">🔗 Conciliação 3V</div>
+  <div class="tab" data-tab="keywords" onclick="showTab('keywords',this)" style="color:#64748b;font-weight:700">⚙️ Keywords</div>
+  <div class="tab" id="tab-usuarios" data-tab="usuarios" onclick="showTab('usuarios',this)" style="color:#1d4ed8;font-weight:700;display:none">👥 Usuários</div>
+  <div class="tab" data-tab="consolidado" onclick="showTab('consolidado',this)" style="color:#7c3aed;font-weight:700">🏛️ Consolidado</div>
+  <div class="tab" data-tab="auditoria" onclick="showTab('auditoria',this)" style="color:#475569;font-weight:700">🔍 Auditoria</div>
+  <div class="tab" data-tab="estoque" onclick="showTab('estoque',this)" style="color:#0f766e;font-weight:700">📦 Estoque</div>
+  <div class="tab" id="tab-config" data-tab="config" onclick="showTab('config',this)" style="color:#475569;font-weight:700">⚙️ Config</div>
+</div>
+
+<!-- Dashboard -->
+<div id="pg-dash" class="pg active">
+  <!-- Alerta: créditos sem NF correspondente -->
+  <div id="dash-alerta-sem-nf" style="display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 16px;margin-bottom:10px;display:flex;align-items:center;gap:10px;cursor:pointer" onclick="showTab('ext',document.querySelector('[data-tab=ext]'))">
+    <span style="font-size:16px">⚠️</span>
+    <span id="dash-alerta-sem-nf-texto" style="font-size:12px;color:#92400e;font-weight:600"></span>
+    <span style="font-size:10px;color:#b45309;margin-left:auto">Clique para ver extratos →</span>
+  </div>
+  <!-- Linha 1: KPIs principais -->
+  <div class="kpis" id="dash-kpis"><div class="loading">Carregando dashboard</div></div>
+
+  <!-- Linha 2: Gráfico de fluxo + Conciliação -->
+  <div style="display:grid;grid-template-columns:1fr 320px;gap:14px;margin-bottom:14px" id="dash-row2">
+    <div class="dash-panel">
+      <div class="dash-panel-title">📊 Fluxo de Caixa Mensal</div>
+      <div id="dash-chart" style="display:flex;align-items:flex-end;gap:8px;height:180px;padding-top:8px"></div>
+      <div id="dash-chart-labels" style="display:flex;gap:8px;margin-top:6px"></div>
+      <div class="dash-legend">
+        <span style="--lg-color:#22c55e" class="lg-credit">Créditos (entradas)</span>
+        <span style="--lg-color:#ef4444" class="lg-debit">Débitos (saídas)</span>
+      </div>
+    </div>
+    <div class="dash-panel">
+      <div class="dash-panel-title">🎯 Status da Conciliação</div>
+      <div id="dash-donut"></div>
+    </div>
+  </div>
+
+  <!-- Linha 3: Alertas + Últimos créditos -->
+  <div style="display:grid;grid-template-columns:320px 1fr;gap:14px;margin-bottom:14px" id="dash-row3">
+    <div class="dash-panel">
+      <div class="dash-panel-title">🚨 Alertas e Pendências</div>
+      <div id="dash-alertas" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+    <div class="dash-panel">
+      <div class="dash-panel-title">💰 Últimos Créditos Recebidos</div>
+      <div class="tw" style="max-height:280px;overflow-y:auto">
+        <table><thead id="dash-cred-head"></thead><tbody id="dash-cred-body"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Linha 4: Top contratos + Widget Ponto -->
+  <div style="display:grid;grid-template-columns:1fr 300px;gap:14px;margin-bottom:14px">
+    <div class="dash-panel">
+      <div class="dash-panel-title">📋 Top Contratos — Receita vs Despesa</div>
+      <div class="tw">
+        <table><thead id="dash-top-head"></thead><tbody id="dash-top-body"></tbody></table>
+      </div>
+    </div>
+    <div class="dash-panel">
+      <div class="dash-panel-title" style="display:flex;align-items:center;justify-content:space-between">
+        <span>🕐 Ponto — Hoje</span>
+        <button onclick="showTab('ponto',document.querySelector('[data-tab=ponto]'))" style="font-size:9px;padding:2px 8px;border:1px solid #e2e8f0;background:#f8fafc;border-radius:4px;cursor:pointer;color:#64748b">Ver tudo →</button>
+      </div>
+      <div id="dash-ponto" style="display:flex;flex-direction:column;gap:6px;padding-top:4px">
+        <div style="text-align:center;color:#94a3b8;font-size:11px;padding:20px">Carregando…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Extratos -->
+<div id="pg-ext" class="pg">
+  <div class="toolbar">
+    <span style="font-size:16px">🔗</span>
+    <span class="toolbar-title">VINCULAÇÃO DE LANÇAMENTOS</span>
+    <span style="font-size:11px;color:#475569">Vinculados: <strong id="vinc-count">0</strong> · Pendentes: <strong id="vinc-pending">0</strong></span>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button onclick="salvarVinculacoes()" style="background:#dcfce7;color:#15803d;border:1px solid #86efac">💾 Salvar Vinculações</button>
+      <button onclick="autoVincular()" style="background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd">🤖 Auto-Vincular (keywords)</button>
+      <button onclick="conciliarAutoValor()" style="background:#ede9fe;color:#7c3aed;border:1px solid #c4b5fd" title="Vincula automaticamente extratos a NFs com mesmo valor (±R$0,05) em até 3 dias de diferença">🔢 Conciliar por Valor</button>
+      <button onclick="exportCSV('conciliacao')" style="background:#fef3c7;color:#d97706;border:1px solid #fcd34d">📥 Exportar CSV</button>
+    </div>
+  </div>
+  <div class="fbar" id="ext-filters"></div>
+  <div class="counter" id="ext-counter"></div>
+  <div class="tw"><table id="tbl-ext"><thead id="ext-head"></thead><tbody id="ext-body"></tbody></table></div>
+  <div class="pag" id="ext-pag"></div>
+</div>
+
+<!-- Notas Fiscais -->
+<div id="pg-nfs" class="pg">
+  <div class="fbar" id="nfs-filters"></div>
+  <div id="nfs-alerta-sem-data" style="display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 16px;margin-bottom:10px;display:flex;align-items:center;gap:10px">
+    <span style="font-size:18px">⚠️</span>
+    <span id="nfs-alerta-sem-data-texto" style="font-size:11px;color:#92400e;font-weight:600;flex:1"></span>
+    <button onclick="abrirCorrecaoNfs()" style="padding:5px 14px;background:#d97706;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">✏️ Corrigir agora</button>
+  </div>
+  <div class="counter" id="nfs-counter"></div>
+  <div class="tw"><table id="tbl-nfs"><thead id="nfs-head"></thead><tbody id="nfs-body"></tbody></table></div>
+  <div class="pag" id="nfs-pag"></div>
+
+  <!-- Modal de correção em lote -->
+  <div id="modal-corrigir-nfs" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;padding:24px;width:860px;max-width:96vw;max-height:90vh;overflow-y:auto">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div>
+          <div style="font-weight:800;font-size:15px;color:#1e293b">✏️ Corrigir NFs sem Data de Emissão</div>
+          <div style="font-size:10px;color:#94a3b8;margin-top:2px">Preencha data, competência e contrato de cada NF. ⚠️ = possível duplicata.</div>
+        </div>
+        <button onclick="document.getElementById('modal-corrigir-nfs').style.display='none'" style="background:none;border:none;font-size:20px;cursor:pointer;color:#64748b">✕</button>
+      </div>
+      <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;background:#eff6ff;border-radius:8px;padding:10px 14px">
+        <span style="font-size:11px;color:#1d4ed8;font-weight:600">Aplicar a todas:</span>
+        <input type="date" id="nfs-corr-data-global" style="padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:11px">
+        <input type="text" id="nfs-corr-comp-global" placeholder="Competência (ex: jan/26)" style="padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:11px;width:140px">
+        <select id="nfs-corr-cont-global" style="padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:11px;width:200px">
+          <option value="">— selecionar contrato —</option>
+        </select>
+        <button onclick="aplicarGlobalNfsCorr()" style="padding:5px 12px;background:#3b82f6;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Aplicar</button>
+      </div>
+      <div id="nfs-corr-body"></div>
+      <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+        <button onclick="document.getElementById('modal-corrigir-nfs').style.display='none'" style="padding:7px 16px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;background:#f8fafc;cursor:pointer">Cancelar</button>
+        <button onclick="salvarCorrecaoNfsLote()" style="padding:7px 18px;background:#15803d;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">💾 Salvar todas as correções</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Contratos -->
+<div id="pg-cont" class="pg">
+  <div class="kpis" id="cont-kpis"></div>
+  <!-- Painel de Saúde dos Contratos -->
+  <div id="cont-saude-panel" style="margin-bottom:16px"></div>
+  <div id="cont-cards"></div>
+</div>
+
+<!-- Pagamentos -->
+<div id="pg-pag" class="pg">
+  <div class="fbar" id="pag-filters"></div>
+  <div class="counter" id="pag-counter"></div>
+  <div class="tw"><table id="tbl-pag"><thead id="pag-head"></thead><tbody id="pag-body"></tbody></table></div>
+  <div class="pag" id="pag-pag"></div>
+</div>
+
+<!-- Despesas -->
+<div id="pg-desp" class="pg">
+  <div class="kpis" id="desp-kpis"></div>
+  <div id="desp-compensacao"></div>
+  <div id="desp-form-wrap" style="display:none"></div>
+  <div class="toolbar" id="desp-toolbar">
+    <span style="font-size:16px">💸</span>
+    <span class="toolbar-title">DESPESAS</span>
+    <span style="font-size:11px;color:#475569">Total: <strong id="desp-total-count">0</strong> · Pendentes: <strong id="desp-pend-count">0</strong></span>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button onclick="toggleDespForm()" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:5px 14px;font-size:10px;border-radius:6px;cursor:pointer;font-weight:700">+ Nova Despesa</button>
+    </div>
+  </div>
+  <div class="fbar" id="desp-filters"></div>
+  <div class="tw"><table id="tbl-desp"><thead id="desp-head"></thead><tbody id="desp-body"></tbody></table></div>
+  <div class="pag" id="desp-pag"></div>
+</div>
+
+<!-- Prefeitura de Palmas -->
+<div id="pg-pref" class="pg">
+  <div class="kpis" id="pref-kpis"><div class="loading">Carregando dados da Prefeitura</div></div>
+
+  <!-- Sub-tabs -->
+  <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin:10px 0 14px">
+    <div class="pref-stab active" data-stab="gestoes" onclick="showPrefSub('gestoes',this)" style="padding:8px 16px;font-size:11px;font-weight:600;color:#64748b;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px">📋 Gestões/Contratos</div>
+    <div class="pref-stab" data-stab="pgtos" onclick="showPrefSub('pgtos',this)" style="padding:8px 16px;font-size:11px;font-weight:600;color:#64748b;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px">💵 Pagamentos</div>
+    <div class="pref-stab" data-stab="nfs" onclick="showPrefSub('nfs',this)" style="padding:8px 16px;font-size:11px;font-weight:600;color:#64748b;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px">🧾 Notas Fiscais</div>
+    <div class="pref-stab" data-stab="conc" onclick="showPrefSub('conc',this)" style="padding:8px 16px;font-size:11px;font-weight:600;color:#64748b;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px">🔗 Conciliação</div>
+    <div class="pref-stab" data-stab="webiss" onclick="showPrefSub('webiss',this)" style="padding:8px 16px;font-size:11px;font-weight:600;color:#64748b;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px">🌐 WebISS</div>
+    <div class="pref-stab" data-stab="transp" onclick="showPrefSub('transp',this)" style="padding:8px 16px;font-size:11px;font-weight:600;color:#0369a1;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px">🏛️ Portal Transparência</div>
+  </div>
+
+  <!-- Sub: Gestões -->
+  <div id="pref-sub-gestoes" class="pref-sub active" style="display:block">
+    <div class="tw"><table id="tbl-pref-gestoes"><thead id="pref-gestoes-head"></thead><tbody id="pref-gestoes-body"></tbody></table></div>
+  </div>
+
+  <!-- Sub: Pagamentos -->
+  <div id="pref-sub-pgtos" class="pref-sub" style="display:none">
+    <div class="fbar" id="pref-pgtos-filters"></div>
+    <div class="counter" id="pref-pgtos-counter"></div>
+    <div class="tw" style="max-height:600px;overflow-y:auto"><table id="tbl-pref-pgtos"><thead id="pref-pgtos-head"></thead><tbody id="pref-pgtos-body"></tbody></table></div>
+    <div class="pag" id="pref-pgtos-pag"></div>
+  </div>
+
+  <!-- Sub: NFs -->
+  <div id="pref-sub-nfs" class="pref-sub" style="display:none">
+    <div class="counter" id="pref-nfs-counter"></div>
+    <div class="tw"><table id="tbl-pref-nfs"><thead id="pref-nfs-head"></thead><tbody id="pref-nfs-body"></tbody></table></div>
+  </div>
+
+  <!-- Sub: Conciliação -->
+  <div id="pref-sub-conc" class="pref-sub" style="display:none">
+    <div class="fbar" id="pref-conc-filters"></div>
+    <div id="pref-conc-content"></div>
+  </div>
+
+  <!-- Sub: WebISS -->
+  <div id="pref-sub-webiss" class="pref-sub" style="display:none">
+    <!-- Status + filtros -->
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:11px;font-weight:600;color:#475569">Servidor WebISS:</span>
+        <span id="webiss-status-badge" style="font-size:10px;padding:2px 8px;border-radius:12px;background:#e2e8f0;color:#64748b">—</span>
+        <button onclick="checkWebissStatus()" style="font-size:10px;padding:3px 10px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;cursor:pointer;color:#475569">Testar</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+        <label style="font-size:11px;color:#64748b">De</label>
+        <input type="date" id="webiss-dt-ini" style="font-size:11px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px">
+        <label style="font-size:11px;color:#64748b">Até</label>
+        <input type="date" id="webiss-dt-fim" style="font-size:11px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px">
+        <button onclick="consultarWebiss()" style="font-size:11px;padding:5px 14px;border-radius:6px;border:none;background:#7c3aed;color:#fff;cursor:pointer;font-weight:600">🔍 Consultar</button>
+        <button onclick="importarWebiss()" style="font-size:11px;padding:5px 14px;border-radius:6px;border:none;background:#15803d;color:#fff;cursor:pointer;font-weight:600">📥 Importar</button>
+      </div>
+    </div>
+    <!-- Resultado da consulta -->
+    <div class="counter" id="webiss-counter" style="display:none"></div>
+    <div id="webiss-msg" style="font-size:12px;color:#64748b;padding:8px 0"></div>
+    <div class="tw" id="webiss-table-wrap" style="display:none">
+      <table id="tbl-webiss">
+        <thead id="webiss-head"></thead>
+        <tbody id="webiss-body"></tbody>
+      </table>
+    </div>
+    <!-- Modal Emitir NFS-e -->
+    <div style="margin-top:16px;padding:12px 14px;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#92400e">⚡ Emissão de NFS-e</div>
+          <div style="font-size:10px;color:#b45309;margin-top:2px">Requer certificado A1 e <code>WEBISS_CERT_SENHA_*</code> no .env</div>
+        </div>
+        <button onclick="abrirModalEmitirNfse()" style="font-size:11px;padding:6px 16px;border-radius:6px;border:none;background:#d97706;color:#fff;cursor:pointer;font-weight:600">✏️ Emitir NFS-e</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sub: Portal Transparência -->
+  <div id="pref-sub-transp" class="pref-sub" style="display:none">
+
+    <!-- Barra de ações -->
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:11px;font-weight:700;color:#1e40af">🏛️ Portal Transparência — Prefeitura de Palmas</span>
+        <span id="transp-status-badge" style="font-size:10px;padding:2px 8px;border-radius:12px;background:#e2e8f0;color:#64748b">—</span>
+        <button onclick="transpDescobrir()" style="font-size:10px;padding:3px 10px;border-radius:6px;border:1px solid #93c5fd;background:#fff;cursor:pointer;color:#1d4ed8">🔍 Auto-Detectar API</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+        <label style="font-size:11px;color:#64748b">De</label>
+        <input type="date" id="transp-dt-ini" style="font-size:11px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px">
+        <label style="font-size:11px;color:#64748b">Até</label>
+        <input type="date" id="transp-dt-fim" style="font-size:11px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px">
+        <button onclick="transpConsultar()" style="font-size:11px;padding:5px 14px;border-radius:6px;border:none;background:#1d4ed8;color:#fff;cursor:pointer;font-weight:600">📋 Consultar</button>
+        <button onclick="transpImportar()" style="font-size:11px;padding:5px 14px;border-radius:6px;border:none;background:#15803d;color:#fff;cursor:pointer;font-weight:600">📥 Importar</button>
+        <button onclick="transpConciliar()" style="font-size:11px;padding:5px 14px;border-radius:6px;border:none;background:#7c3aed;color:#fff;cursor:pointer;font-weight:600">🔗 Conciliar</button>
+      </div>
+    </div>
+
+    <!-- Aviso de configuração manual -->
+    <div id="transp-aviso-config" style="display:none;background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:11px">
+      <strong style="color:#713f12">⚠ API não detectada automaticamente.</strong>
+      Para configurar manualmente:<br>
+      1. Abra o portal em outra aba e faça uma pesquisa<br>
+      2. Abra DevTools (F12) → Aba Network → filtre por "pesquisar" ou "pagamento"<br>
+      3. Copie a URL da requisição e cole abaixo:<br>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <input id="transp-url-manual" type="text" placeholder="https://prodata.palmas.to.gov.br/sig/rest/..." style="flex:1;font-size:11px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px">
+        <button onclick="transpConfigurarManual()" style="font-size:11px;padding:5px 12px;border-radius:6px;border:none;background:#d97706;color:#fff;cursor:pointer;font-weight:600">Usar esta URL</button>
+      </div>
+    </div>
+
+    <!-- KPIs -->
+    <div id="transp-kpis" style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap"></div>
+
+    <!-- Mensagem / loading -->
+    <div id="transp-msg" style="font-size:12px;color:#64748b;padding:4px 0"></div>
+
+    <!-- Tabela de pagamentos -->
+    <div class="tw" id="transp-table-wrap" style="display:none;max-height:520px;overflow-y:auto">
+      <table id="tbl-transp" style="width:100%;border-collapse:collapse;font-size:11px">
+        <thead id="transp-head"></thead>
+        <tbody id="transp-body"></tbody>
+      </table>
+    </div>
+    <div class="pag" id="transp-pag"></div>
+  </div>
+
+  <!-- Modal: Emitir NFS-e -->
+  <div id="modal-emitir-nfse" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;overflow-y:auto">
+    <div style="background:#fff;border-radius:12px;max-width:620px;margin:40px auto;padding:28px 24px;position:relative">
+      <button onclick="document.getElementById('modal-emitir-nfse').style.display='none'" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:18px;cursor:pointer;color:#64748b">✕</button>
+      <h3 style="font-size:15px;font-weight:800;color:#0f172a;margin-bottom:18px">✏️ Emitir NFS-e — WebISS Palmas</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:12px">
+        <div><label style="font-weight:600;color:#475569">Número RPS</label><br><input id="em-rps-num" type="text" placeholder="1" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;margin-top:3px"></div>
+        <div><label style="font-weight:600;color:#475569">Série</label><br><input id="em-rps-serie" type="text" value="A" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;margin-top:3px"></div>
+        <div><label style="font-weight:600;color:#475569">Competência</label><br><input id="em-competencia" type="date" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;margin-top:3px"></div>
+        <div><label style="font-weight:600;color:#475569">Data Emissão</label><br><input id="em-data-emissao" type="date" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;margin-top:3px"></div>
+        <div style="grid-column:1/-1"><label style="font-weight:600;color:#475569">CNPJ Tomador</label><br><input id="em-tom-cnpj" type="text" placeholder="00.000.000/0001-00" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;margin-top:3px"></div>
+        <div style="grid-column:1/-1"><label style="font-weight:600;color:#475569">Razão Social Tomador</label><br><input id="em-tom-razao" type="text" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;margin-top:3px"></div>
+        <div><label style="font-weight:600;color:#475569">Valor dos Serviços (R$)</label><br><input id="em-vlr-servicos" type="number" step="0.01" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;margin-top:3px"></div>
+        <div><label style="font-weight:600;color:#475569">ISS Retido?</label><br><select id="em-iss-retido" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;margin-top:3px"><option value="1">Sim (retido)</option><option value="0">Não</option></select></div>
+        <div><label style="font-weight:600;color:#475569">Item da Lista</label><br><input id="em-item-lista" type="text" value="07.10" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;margin-top:3px"></div>
+        <div><label style="font-weight:600;color:#475569">Alíquota ISS (%)</label><br><input id="em-aliquota" type="number" step="0.01" value="0" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;margin-top:3px"></div>
+        <div style="grid-column:1/-1"><label style="font-weight:600;color:#475569">Discriminação dos Serviços</label><br><textarea id="em-discriminacao" rows="3" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;margin-top:3px;resize:vertical;font-size:11px"></textarea></div>
+      </div>
+      <div id="modal-emitir-msg" style="margin-top:10px;font-size:12px;min-height:18px"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button onclick="document.getElementById('modal-emitir-nfse').style.display='none'" style="font-size:12px;padding:7px 18px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;cursor:pointer">Cancelar</button>
+        <button onclick="enviarEmissaoNfse()" style="font-size:12px;padding:7px 18px;border-radius:6px;border:none;background:#d97706;color:#fff;cursor:pointer;font-weight:700">Emitir NFS-e</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Importar -->
+<div id="pg-import" class="pg">
+  <h2 style="font-size:18px;font-weight:800;color:#0f172a;margin-bottom:16px">📥 Importar Dados</h2>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
+    <div class="import-zone" onclick="document.getElementById('imp-ext').click()">
+      <h3>🏦 Extrato Bancário</h3>
+      <p>CSV com colunas: ID, Mês, Data, Histórico, Débito, Crédito...</p>
+      <input type="file" id="imp-ext" accept=".csv,.xls,.xlsx" style="display:none" onchange="importFile('extratos',this)">
+    </div>
+    <div class="import-zone" onclick="document.getElementById('imp-pg').click()">
+      <h3>💵 Pagamentos</h3>
+      <p>CSV da Prefeitura/Órgãos com OB, Gestão, Valor Pago...</p>
+      <input type="file" id="imp-pg" accept=".csv,.xls,.xlsx" style="display:none" onchange="importFile('pagamentos',this)">
+    </div>
+    <div class="import-zone" onclick="document.getElementById('imp-liq').click()">
+      <h3>🏛️ Liquidações</h3>
+      <p>CSV de liquidações com Empenho, Gestão, Valor Liquidado...</p>
+      <input type="file" id="imp-liq" accept=".csv,.xls,.xlsx" style="display:none" onchange="importFile('liquidacoes',this)">
+    </div>
+    <div class="import-zone" onclick="document.getElementById('imp-desp').click()">
+      <h3>💸 Despesas / Contas a Pagar</h3>
+      <p>CSV: Data;Categoria;Fornecedor;CNPJ;NF;Descrição;Valor Bruto;Competência</p>
+      <input type="file" id="imp-desp" accept=".csv,.xls,.xlsx" style="display:none" onchange="importFile('despesas',this)">
+    </div>
+  </div>
+  <h3 style="font-size:14px;font-weight:700;color:#475569;margin:20px 0 10px">Histórico de Importações</h3>
+  <div class="tw"><table><thead><tr><th>Tipo</th><th>Arquivo</th><th>Registros</th><th>Data</th><th>Status</th></tr></thead><tbody id="import-hist"></tbody></table>    <div class="import-zone" onclick="document.getElementById('imp-ofx').click()">
+      <h3>📂 OFX / Extrato Bancário</h3>
+      <p>Arquivo OFX do banco (Open Financial Exchange) — versões 1.x SGML e 2.x XML</p>
+      <input type="file" id="imp-ofx" accept=".ofx,.ofc,.OFX" style="display:none" onchange="importOFX(this)">
+    </div>
+  </div>
+</div>
+
+<!-- Relatórios -->
+<div id="pg-relat" class="pg">
+  <!-- Header -->
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+    <div>
+      <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">Relatórios e Exportações</h2>
+      <p style="font-size:11px;color:#94a3b8">Exporte dados filtrados por período em CSV ou Excel</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:8px">
+        <label style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">De</label>
+        <input type="date" id="rel-from" style="padding:4px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+        <label style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Até</label>
+        <input type="date" id="rel-to" style="padding:4px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+        <button onclick="document.getElementById('rel-from').value='';document.getElementById('rel-to').value=''" style="padding:4px 10px;font-size:9px;border:1px solid #e2e8f0;border-radius:5px;background:#fff;color:#64748b;cursor:pointer;font-weight:600">Limpar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Report Cards Grid -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">
+
+    <!-- Conciliação -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:10px;border-left:4px solid #1d4ed8">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:40px;height:40px;border-radius:10px;background:#dbeafe;display:flex;align-items:center;justify-content:center;font-size:20px">🏦</div>
+        <div><div style="font-size:14px;font-weight:700;color:#0f172a">Conciliação Bancária</div>
+          <div style="font-size:10px;color:#94a3b8">Extratos com status, contratos vinculados</div></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:auto">
+        <button onclick="exportRelCSV('conciliacao')" class="qbtn" style="background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;flex:1">📥 CSV</button>
+        <button onclick="exportRelExcel('conciliacao')" class="qbtn" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;flex:1">📗 Excel</button>
+      </div>
+    </div>
+
+    <!-- Pagamentos -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:10px;border-left:4px solid #15803d">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:40px;height:40px;border-radius:10px;background:#dcfce7;display:flex;align-items:center;justify-content:center;font-size:20px">💵</div>
+        <div><div style="font-size:14px;font-weight:700;color:#0f172a">Pagamentos Recebidos</div>
+          <div style="font-size:10px;color:#94a3b8">OBs, gestão, favorecido, valores pagos</div></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:auto">
+        <button onclick="exportRelExcel('pagamentos')" class="qbtn" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;flex:1">📗 Excel</button>
+      </div>
+    </div>
+
+    <!-- Contratos -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:10px;border-left:4px solid #7c3aed">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:40px;height:40px;border-radius:10px;background:#ede9fe;display:flex;align-items:center;justify-content:center;font-size:20px">📋</div>
+        <div><div style="font-size:14px;font-weight:700;color:#0f172a">Contratos e Parcelas</div>
+          <div style="font-size:10px;color:#94a3b8">Contratos ativos, pago vs aberto, parcelas</div></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:auto">
+        <button onclick="exportRelExcel('contratos')" class="qbtn" style="background:#ede9fe;color:#7c3aed;border:1px solid #c4b5fd;flex:1">📗 Excel</button>
+      </div>
+    </div>
+
+    <!-- Despesas -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:10px;border-left:4px solid #dc2626">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:40px;height:40px;border-radius:10px;background:#fee2e2;display:flex;align-items:center;justify-content:center;font-size:20px">💸</div>
+        <div><div style="font-size:14px;font-weight:700;color:#0f172a">Despesas e Retenções</div>
+          <div style="font-size:10px;color:#94a3b8">Fornecedores, folha, impostos, retenções</div></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:auto">
+        <button onclick="exportRelExcel('despesas')" class="qbtn" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;flex:1">📗 Excel</button>
+      </div>
+    </div>
+
+    <!-- Notas Fiscais -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:10px;border-left:4px solid #d97706">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:40px;height:40px;border-radius:10px;background:#fef3c7;display:flex;align-items:center;justify-content:center;font-size:20px">🧾</div>
+        <div><div style="font-size:14px;font-weight:700;color:#0f172a">Notas Fiscais Emitidas</div>
+          <div style="font-size:10px;color:#94a3b8">NFs com impostos, retenções, valores</div></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:auto">
+        <button onclick="exportRelExcel('nfs')" class="qbtn" style="background:#fef3c7;color:#d97706;border:1px solid #fcd34d;flex:1">📗 Excel</button>
+      </div>
+    </div>
+
+    <!-- Apuração PIS/COFINS -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:10px;border-left:4px solid #1d4ed8">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:40px;height:40px;border-radius:10px;background:#dbeafe;display:flex;align-items:center;justify-content:center;font-size:20px">📑</div>
+        <div><div style="font-size:14px;font-weight:700;color:#0f172a">Apuração PIS/COFINS</div>
+          <div style="font-size:10px;color:#94a3b8">Regime de caixa, retenções, vencimentos</div></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:auto">
+        <button onclick="exportRelExcel('apuracao')" class="qbtn" style="background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;flex:1">📗 Excel</button>
+      </div>
+    </div>
+
+    <!-- Lucro por Contrato -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:10px;border-left:4px solid #059669">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:40px;height:40px;border-radius:10px;background:#d1fae5;display:flex;align-items:center;justify-content:center;font-size:20px">📈</div>
+        <div><div style="font-size:14px;font-weight:700;color:#0f172a">Lucro por Contrato</div>
+          <div style="font-size:10px;color:#94a3b8">Receita - Despesas NF por contrato</div></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:auto">
+        <button onclick="showLucroContrato()" class="qbtn" style="background:#d1fae5;color:#059669;border:1px solid #6ee7b7;flex:1">📊 Visualizar</button>
+      </div>
+    </div>
+
+    <!-- A Receber por Contrato -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:10px;border-left:4px solid #dc2626">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:40px;height:40px;border-radius:10px;background:#fee2e2;display:flex;align-items:center;justify-content:center;font-size:20px">⏳</div>
+        <div><div style="font-size:14px;font-weight:700;color:#0f172a">A Receber por Contrato</div>
+          <div style="font-size:10px;color:#94a3b8">Parcelas pendentes, em atraso e NFs a emitir</div></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:auto">
+        <button onclick="showAReceberContrato()" class="qbtn" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;flex:1">📊 Visualizar</button>
+        <button onclick="exportRelExcel('a-receber')" class="qbtn" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;flex:1">📗 Excel</button>
+      </div>
+    </div>
+
+    <!-- Completo -->
+    <div style="background:linear-gradient(135deg,#1e293b,#334155);border:1px solid #475569;border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:20px">📊</div>
+        <div><div style="font-size:14px;font-weight:700;color:#f1f5f9">Relatório Completo</div>
+          <div style="font-size:10px;color:#94a3b8">Todas as abas em um único Excel</div></div>
+      </div>
+      <div style="font-size:9px;color:#94a3b8;margin-top:4px">Inclui: Conciliação, Pagamentos, Contratos, Parcelas, Despesas, NFs, Apuração PIS/COFINS e A Receber</div>
+      <div style="display:flex;gap:8px;margin-top:auto">
+        <button onclick="exportRelExcel('completo')" class="qbtn" style="background:#60a5fa;color:#fff;border:1px solid #93c5fd;flex:1;font-size:12px;padding:8px 16px">📗 Exportar Excel Completo</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+
+<!-- Fluxo de Caixa Projetado -->
+<div id="pg-fluxo" class="pg">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div>
+      <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">📈 Fluxo de Caixa Projetado</h2>
+      <p style="font-size:11px;color:#94a3b8">Projeção baseada em contratos ativos + média de despesas dos últimos 3 meses</p>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:8px">
+        <label style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Meses</label>
+        <select id="fluxo-meses" onchange="loadFluxoProjetado()" style="padding:4px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px;background:#fff">
+          <option value="3">3 meses</option>
+          <option value="6" selected>6 meses</option>
+          <option value="12">12 meses</option>
+          <option value="24">24 meses</option>
+        </select>
+      </div>
+      <div class="fluxo-cenarios">
+        <button id="cenario-otimista"  class="cenario-btn ot" onclick="setFluxoCenario('otimista')">📈 Otimista</button>
+        <button id="cenario-realista"  class="cenario-btn re active" onclick="setFluxoCenario('realista')">📊 Realista</button>
+        <button id="cenario-pessimista" class="cenario-btn pe" onclick="setFluxoCenario('pessimista')">📉 Pessimista</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="kpis" id="fluxo-kpis"><div class="loading">Carregando projeção</div></div>
+
+  <div class="fluxo-chart-wrap">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:12px;font-weight:700;color:#334155">Receita vs Despesa Projetada</div>
+      <div style="display:flex;gap:12px;font-size:9px;font-weight:600;color:#64748b">
+        <span>■ <span id="fluxo-leg-rec" style="color:#3b82f6">Receita</span></span>
+        <span style="color:#ea580c">■ Despesa</span>
+      </div>
+    </div>
+    <div class="fluxo-bars" id="fluxo-bars"></div>
+    <div class="fluxo-labels" id="fluxo-bar-labels"></div>
+  </div>
+
+  <div class="tw" id="fluxo-table"></div>
+
+  <div style="margin-top:10px;font-size:9px;color:#94a3b8;padding:0 4px">
+    * Otimista: +10% receita, despesas crescem 2%/mês · Realista: receita e despesa constantes · Pessimista: aplica inadimplência histórica + despesas crescem 5%/mês
+  </div>
+
+  <!-- Previsão por Parcelas Reais -->
+  <div style="margin-top:20px;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">
+    <div style="background:#f8fafc;padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:8px">
+      <span style="font-size:14px">📅</span>
+      <span style="font-weight:700;font-size:12px;color:#1e293b">Previsão por Parcelas Reais — Próximos 3 meses</span>
+      <span style="font-size:9px;color:#94a3b8;margin-left:4px">baseado nas parcelas cadastradas (não estimativa)</span>
+    </div>
+    <div id="fluxo-parcelas-body" style="padding:14px">
+      <div class="loading">Carregando parcelas…</div>
+    </div>
+  </div>
+
+  <!-- Inadimplência por Contrato -->
+  <div style="margin-top:20px;border:1px solid #fecaca;border-radius:10px;overflow:hidden">
+    <div style="background:#fff5f5;padding:12px 16px;border-bottom:1px solid #fecaca;display:flex;align-items:center;gap:8px">
+      <span style="font-size:14px">⚠️</span>
+      <span style="font-weight:700;font-size:12px;color:#1e293b">Inadimplência por Contrato</span>
+      <span style="font-size:9px;color:#94a3b8;margin-left:4px">valores em aberto, em atraso e aguardando emissão de NF</span>
+      <button onclick="loadInadimplencia()" style="margin-left:auto;background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:6px;padding:4px 12px;font-size:10px;font-weight:700;cursor:pointer">🔄 Atualizar</button>
+    </div>
+    <div style="padding:12px 16px;border-bottom:1px solid #fecaca">
+      <div id="inadimplencia-kpis" class="kpis" style="flex-wrap:wrap;gap:10px"><div class="loading">Carregando…</div></div>
+    </div>
+    <div class="tw" style="padding:0">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Contrato</th>
+            <th>Órgão / Tomador</th>
+            <th style="text-align:right">A Receber</th>
+            <th style="text-align:right">Em Atraso</th>
+            <th style="text-align:right">Emitir NF</th>
+            <th style="text-align:center">Último Pgto</th>
+          </tr>
+        </thead>
+        <tbody id="inadimplencia-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- CERTIDÕES                                                  -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div id="pg-certidoes" class="pg">
+  <div class="toolbar">
+    <span style="font-size:16px">📋</span>
+    <span class="toolbar-title">CERTIDÕES</span>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button onclick="abrirModalCertidao()" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:5px 14px;font-size:10px;border-radius:6px;cursor:pointer;font-weight:700">+ Nova Certidão</button>
+    </div>
+  </div>
+
+  <!-- KPIs de status -->
+  <div class="kpis" id="cert-kpis"></div>
+
+  <!-- Filtros -->
+  <div class="fbar" style="display:flex;gap:10px;padding:10px 14px;background:#f8fafc;border-bottom:1px solid #e2e8f0">
+    <select id="cert-filtro-status" onchange="loadCertidoes()" style="padding:5px 10px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+      <option value="">Todos os status</option>
+      <option value="válida">Válidas</option>
+      <option value="próxima do vencimento">Próximas do vencimento</option>
+      <option value="vencida">Vencidas</option>
+    </select>
+    <select id="cert-filtro-tipo" onchange="loadCertidoes()" style="padding:5px 10px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+      <option value="">Todos os tipos</option>
+      <option value="CND Federal">CND Federal</option>
+      <option value="FGTS">FGTS</option>
+      <option value="Trabalhista">Trabalhista</option>
+      <option value="Municipal">Municipal</option>
+      <option value="Estadual">Estadual</option>
+    </select>
+  </div>
+
+  <div class="tw"><table id="tbl-certidoes">
+    <thead id="cert-head"></thead>
+    <tbody id="cert-body"></tbody>
+  </table></div>
+</div>
+
+<!-- Modal Nova/Editar Certidão -->
+<div id="modal-certidao" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;padding:24px;width:480px;max-width:95vw;max-height:90vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 style="font-size:16px;font-weight:700;color:#0f172a" id="modal-cert-titulo">Nova Certidão</h3>
+      <button onclick="fecharModalCertidao()" style="background:none;border:none;font-size:18px;cursor:pointer;color:#64748b">✕</button>
+    </div>
+    <input type="hidden" id="cert-id">
+    <div style="display:grid;gap:12px">
+      <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Tipo *</label>
+        <select id="cert-tipo" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px">
+          <option value="CND Federal">CND Federal (Receita Federal)</option>
+          <option value="FGTS">FGTS (Caixa Econômica)</option>
+          <option value="Trabalhista">Trabalhista (TST)</option>
+          <option value="Municipal">Municipal (Prefeitura)</option>
+          <option value="Estadual">Estadual (SEFAZ)</option>
+          <option value="Outro">Outro</option>
+        </select>
+      </div>
+      <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Número</label>
+        <input id="cert-numero" type="text" placeholder="Número da certidão" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Data de Emissão</label>
+          <input id="cert-emissao" type="date" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+        </div>
+        <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Data de Validade *</label>
+          <input id="cert-validade" type="date" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+        </div>
+      </div>
+      <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">PDF da Certidão</label>
+        <input id="cert-arquivo" type="file" accept=".pdf" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;margin-top:4px;box-sizing:border-box">
+      </div>
+      <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Observações</label>
+        <textarea id="cert-obs" rows="2" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box;resize:vertical"></textarea>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+      <button onclick="fecharModalCertidao()" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;cursor:pointer">Cancelar</button>
+      <button onclick="salvarCertidao()" style="padding:8px 16px;background:#059669;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">💾 Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- LICITAÇÕES                                                  -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div id="pg-licitacoes" class="pg">
+  <div class="kpis" id="lic-kpis"></div>
+
+  <!-- Pipeline visual -->
+  <div id="lic-pipeline" style="display:flex;gap:8px;margin-bottom:14px;overflow-x:auto;padding-bottom:4px"></div>
+
+  <div class="toolbar" style="margin-bottom:0">
+    <span style="font-size:16px">🏛️</span>
+    <span class="toolbar-title">ACOMPANHAMENTO DE LICITAÇÕES</span>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <select id="lic-filtro-status" onchange="loadLicitacoes()" style="padding:5px 10px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+        <option value="">Todos os status</option>
+        <option value="em análise">Em análise</option>
+        <option value="proposta enviada">Proposta enviada</option>
+        <option value="recurso">Recurso</option>
+        <option value="ganhou">Ganhou</option>
+        <option value="perdeu">Perdeu</option>
+        <option value="desistiu">Desistiu</option>
+      </select>
+      <button onclick="abrirModalLicitacao()" style="background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;padding:5px 14px;font-size:10px;border-radius:6px;cursor:pointer;font-weight:700">+ Nova Licitação</button>
+    </div>
+  </div>
+
+  <div class="tw"><table id="tbl-licitacoes">
+    <thead id="lic-head"></thead>
+    <tbody id="lic-body"></tbody>
+  </table></div>
+</div>
+
+<!-- Modal Nova/Editar Licitação -->
+<div id="modal-licitacao" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;padding:24px;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 style="font-size:16px;font-weight:700;color:#0f172a" id="modal-lic-titulo">Nova Licitação</h3>
+      <button onclick="fecharModalLicitacao()" style="background:none;border:none;font-size:18px;cursor:pointer;color:#64748b">✕</button>
+    </div>
+    <input type="hidden" id="lic-id">
+    <div style="display:grid;gap:10px">
+      <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Órgão *</label>
+        <input id="lic-orgao" type="text" placeholder="Nome do órgão licitante" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Número do Edital</label>
+          <input id="lic-edital" type="text" placeholder="Ex: PE 001/2026" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+        </div>
+        <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Modalidade</label>
+          <select id="lic-modalidade" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px">
+            <option value="pregão">Pregão Eletrônico</option>
+            <option value="concorrência">Concorrência</option>
+            <option value="tomada de preços">Tomada de Preços</option>
+            <option value="dispensa">Dispensa de Licitação</option>
+            <option value="inexigibilidade">Inexigibilidade</option>
+          </select>
+        </div>
+      </div>
+      <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Objeto</label>
+        <textarea id="lic-objeto" rows="2" placeholder="Descrição do objeto da licitação" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box;resize:vertical"></textarea>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Data de Abertura</label>
+          <input id="lic-abertura" type="date" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+        </div>
+        <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Data de Encerramento</label>
+          <input id="lic-encerramento" type="date" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Valor Estimado (R$)</label>
+          <input id="lic-val-est" type="number" step="0.01" min="0" placeholder="0,00" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+        </div>
+        <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Valor da Proposta (R$)</label>
+          <input id="lic-val-prop" type="number" step="0.01" min="0" placeholder="0,00" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Status</label>
+          <select id="lic-status" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px">
+            <option value="em análise">Em análise</option>
+            <option value="proposta enviada">Proposta enviada</option>
+            <option value="recurso">Recurso</option>
+            <option value="ganhou">Ganhou</option>
+            <option value="perdeu">Perdeu</option>
+            <option value="desistiu">Desistiu</option>
+          </select>
+        </div>
+        <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Resultado</label>
+          <input id="lic-resultado" type="text" placeholder="Ex: 1° lugar, desclassificado..." style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+        </div>
+      </div>
+      <div><label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Observações</label>
+        <textarea id="lic-obs" rows="2" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box;resize:vertical"></textarea>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+      <button onclick="fecharModalLicitacao()" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;cursor:pointer">Cancelar</button>
+      <button onclick="salvarLicitacao()" style="padding:8px 16px;background:#0369a1;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">💾 Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- CALCULADORA DE POSTO                                        -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div id="pg-calculadora" class="pg">
+  <div style="display:grid;grid-template-columns:1fr 380px;gap:16px;align-items:start">
+
+    <!-- Formulário -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px">
+      <h2 style="font-size:16px;font-weight:800;color:#0f172a;margin-bottom:16px">🧮 Calculadora de Preço de Posto</h2>
+
+      <div style="margin-bottom:12px">
+        <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Nome do orçamento</label>
+        <input id="calc-nome" type="text" placeholder="Ex: Vigilante 12x36 Diurno — DETRAN" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+      </div>
+      <div style="margin-bottom:16px">
+        <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Tipo de Posto</label>
+        <select id="calc-tipo" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px" onchange="preencherSalarioPadrao()">
+          <option value="vigilante_12x36_diurno">Vigilante 12x36 Diurno</option>
+          <option value="vigilante_12x36_noturno">Vigilante 12x36 Noturno</option>
+          <option value="vigilante_44h">Vigilante 44h Semanais</option>
+          <option value="supervisor">Supervisor de Vigilância</option>
+          <option value="vigilante_armado">Vigilante Armado</option>
+          <option value="personalizado">Personalizado</option>
+        </select>
+      </div>
+
+      <!-- Salário -->
+      <div style="background:#eff6ff;border-radius:8px;padding:14px;margin-bottom:12px">
+        <div style="font-size:11px;font-weight:700;color:#1d4ed8;margin-bottom:10px">SALÁRIO</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><label style="font-size:9px;font-weight:600;color:#64748b;text-transform:uppercase">Salário Base (CCT)</label>
+            <input id="calc-salario" type="number" step="0.01" min="0" value="1950.00" oninput="calcularPosto()" style="width:100%;padding:7px;border:1px solid #bfdbfe;border-radius:5px;font-size:12px;margin-top:3px;box-sizing:border-box">
+          </div>
+          <div><label style="font-size:9px;font-weight:600;color:#64748b;text-transform:uppercase">Adic. Periculosidade (R$)</label>
+            <input id="calc-peric" type="number" step="0.01" min="0" value="585.00" oninput="calcularPosto()" style="width:100%;padding:7px;border:1px solid #bfdbfe;border-radius:5px;font-size:12px;margin-top:3px;box-sizing:border-box">
+          </div>
+        </div>
+      </div>
+
+      <!-- Encargos -->
+      <div style="background:#f0fdf4;border-radius:8px;padding:14px;margin-bottom:12px">
+        <div style="font-size:11px;font-weight:700;color:#15803d;margin-bottom:10px">ENCARGOS SOCIAIS (%)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><label style="font-size:9px;font-weight:600;color:#64748b">Férias + 1/3 (%)</label>
+            <input id="calc-ferias" type="number" step="0.01" value="11.11" oninput="calcularPosto()" style="width:100%;padding:7px;border:1px solid #bbf7d0;border-radius:5px;font-size:12px;margin-top:3px;box-sizing:border-box">
+          </div>
+          <div><label style="font-size:9px;font-weight:600;color:#64748b">13° Salário (%)</label>
+            <input id="calc-13" type="number" step="0.01" value="8.33" oninput="calcularPosto()" style="width:100%;padding:7px;border:1px solid #bbf7d0;border-radius:5px;font-size:12px;margin-top:3px;box-sizing:border-box">
+          </div>
+          <div><label style="font-size:9px;font-weight:600;color:#64748b">FGTS (%)</label>
+            <input id="calc-fgts" type="number" step="0.01" value="8.00" oninput="calcularPosto()" style="width:100%;padding:7px;border:1px solid #bbf7d0;border-radius:5px;font-size:12px;margin-top:3px;box-sizing:border-box">
+          </div>
+          <div><label style="font-size:9px;font-weight:600;color:#64748b">INSS Patronal (%)</label>
+            <input id="calc-inss" type="number" step="0.01" value="28.80" oninput="calcularPosto()" style="width:100%;padding:7px;border:1px solid #bbf7d0;border-radius:5px;font-size:12px;margin-top:3px;box-sizing:border-box">
+          </div>
+        </div>
+      </div>
+
+      <!-- Insumos -->
+      <div style="background:#fefce8;border-radius:8px;padding:14px;margin-bottom:12px">
+        <div style="font-size:11px;font-weight:700;color:#a16207;margin-bottom:10px">INSUMOS (R$/mês por posto)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><label style="font-size:9px;font-weight:600;color:#64748b">Vale Transporte</label>
+            <input id="calc-vt" type="number" step="0.01" min="0" value="220.00" oninput="calcularPosto()" style="width:100%;padding:7px;border:1px solid #fde68a;border-radius:5px;font-size:12px;margin-top:3px;box-sizing:border-box">
+          </div>
+          <div><label style="font-size:9px;font-weight:600;color:#64748b">Vale Alimentação</label>
+            <input id="calc-va" type="number" step="0.01" min="0" value="450.00" oninput="calcularPosto()" style="width:100%;padding:7px;border:1px solid #fde68a;border-radius:5px;font-size:12px;margin-top:3px;box-sizing:border-box">
+          </div>
+          <div><label style="font-size:9px;font-weight:600;color:#64748b">Plano de Saúde</label>
+            <input id="calc-saude" type="number" step="0.01" min="0" value="0" oninput="calcularPosto()" style="width:100%;padding:7px;border:1px solid #fde68a;border-radius:5px;font-size:12px;margin-top:3px;box-sizing:border-box">
+          </div>
+          <div><label style="font-size:9px;font-weight:600;color:#64748b">Uniforme</label>
+            <input id="calc-unif" type="number" step="0.01" min="0" value="80.00" oninput="calcularPosto()" style="width:100%;padding:7px;border:1px solid #fde68a;border-radius:5px;font-size:12px;margin-top:3px;box-sizing:border-box">
+          </div>
+          <div><label style="font-size:9px;font-weight:600;color:#64748b">Equipamento/EPI</label>
+            <input id="calc-equip" type="number" step="0.01" min="0" value="50.00" oninput="calcularPosto()" style="width:100%;padding:7px;border:1px solid #fde68a;border-radius:5px;font-size:12px;margin-top:3px;box-sizing:border-box">
+          </div>
+          <div><label style="font-size:9px;font-weight:600;color:#64748b">Seguro de Vida</label>
+            <input id="calc-seguro" type="number" step="0.01" min="0" value="30.00" oninput="calcularPosto()" style="width:100%;padding:7px;border:1px solid #fde68a;border-radius:5px;font-size:12px;margin-top:3px;box-sizing:border-box">
+          </div>
+        </div>
+      </div>
+
+      <!-- BDI -->
+      <div style="background:#faf5ff;border-radius:8px;padding:14px;margin-bottom:16px">
+        <div style="font-size:11px;font-weight:700;color:#7c3aed;margin-bottom:10px">CUSTOS INDIRETOS, TRIBUTOS E LUCRO (%)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div><label style="font-size:9px;font-weight:600;color:#64748b">Custos Indiretos (%)</label>
+            <input id="calc-ci" type="number" step="0.01" value="10.00" oninput="calcularPosto()" style="width:100%;padding:7px;border:1px solid #ddd6fe;border-radius:5px;font-size:12px;margin-top:3px;box-sizing:border-box">
+          </div>
+          <div><label style="font-size:9px;font-weight:600;color:#64748b">Tributos (%)</label>
+            <input id="calc-trib" type="number" step="0.01" value="8.65" oninput="calcularPosto()" style="width:100%;padding:7px;border:1px solid #ddd6fe;border-radius:5px;font-size:12px;margin-top:3px;box-sizing:border-box">
+          </div>
+          <div><label style="font-size:9px;font-weight:600;color:#64748b">Lucro (%)</label>
+            <input id="calc-lucro" type="number" step="0.01" value="8.00" oninput="calcularPosto()" style="width:100%;padding:7px;border:1px solid #ddd6fe;border-radius:5px;font-size:12px;margin-top:3px;box-sizing:border-box">
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px">
+        <button onclick="salvarOrcamento()" style="flex:1;padding:10px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">💾 Salvar Orçamento</button>
+        <button onclick="loadOrcamentos()" style="padding:10px 14px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-size:11px;cursor:pointer">📂 Salvos</button>
+      </div>
+    </div>
+
+    <!-- Painel de resultado -->
+    <div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;margin-bottom:14px" id="calc-resultado">
+        <div style="font-size:13px;font-weight:700;color:#475569;margin-bottom:16px">RESULTADO DO CÁLCULO</div>
+        <div id="calc-resultado-inner"><div style="color:#94a3b8;font-size:12px;text-align:center;padding:20px">Preencha os campos ao lado para calcular automaticamente</div></div>
+      </div>
+      <!-- Orçamentos salvos -->
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;display:none" id="calc-orcamentos-panel">
+        <div style="font-size:13px;font-weight:700;color:#475569;margin-bottom:12px">ORÇAMENTOS SALVOS</div>
+        <div id="calc-orcamentos-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- DRE                                                         -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div id="pg-dre" class="pg">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div>
+      <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">📊 DRE — Demonstração do Resultado do Exercício</h2>
+      <p style="font-size:11px;color:#94a3b8">Gerado automaticamente a partir de extratos, notas fiscais e despesas</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="dre-ano" onchange="loadDRE()" style="padding:6px 10px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px">
+        <option value="2026">2026</option><option value="2025">2025</option><option value="2024">2024</option>
+      </select>
+      <select id="dre-mes" onchange="loadDRE()" style="padding:6px 10px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px">
+        <option value="">Ano inteiro</option>
+        <option value="01">Janeiro</option><option value="02">Fevereiro</option><option value="03">Março</option>
+        <option value="04">Abril</option><option value="05">Maio</option><option value="06">Junho</option>
+        <option value="07">Julho</option><option value="08">Agosto</option><option value="09">Setembro</option>
+        <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
+      </select>
+      <button onclick="exportDREExcel()" style="padding:6px 14px;background:#dcfce7;color:#15803d;border:1px solid #86efac;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">📗 Exportar Excel</button>
+      <button onclick="exportDREPdf()" style="padding:6px 14px;background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">📄 Exportar PDF</button>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start">
+    <!-- DRE Table -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
+      <div id="dre-content"><div class="loading">Carregando DRE...</div></div>
+    </div>
+    <!-- Gráfico mensal -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px">
+      <div style="font-size:12px;font-weight:700;color:#334155;margin-bottom:12px">Receita vs Saídas por Mês</div>
+      <div id="dre-chart" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- MARGEM POR CONTRATO                                         -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div id="pg-margem" class="pg">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div>
+      <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">💰 Margem e Lucro por Contrato</h2>
+      <p style="font-size:11px;color:#94a3b8">Receita vinculada - Despesas alocadas ao contrato</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input type="date" id="margem-from" onchange="loadMargem()" style="padding:5px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+      <span style="font-size:10px;color:#64748b">até</span>
+      <input type="date" id="margem-to" onchange="loadMargem()" style="padding:5px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+      <button onclick="exportarExcel('margem')" style="padding:5px 14px;background:#dcfce7;color:#15803d;border:1px solid #86efac;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">📗 Excel</button>
+    </div>
+  </div>
+
+  <div class="kpis" id="margem-kpis"></div>
+
+  <!-- Gráfico evolução mensal -->
+  <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:14px" id="margem-evolucao-wrap">
+    <div style="font-size:12px;font-weight:700;color:#334155;margin-bottom:10px">📈 Evolução da Margem Mensal</div>
+    <div id="margem-evolucao" style="display:flex;align-items:flex-end;gap:6px;height:160px;padding-top:8px;overflow-x:auto"></div>
+    <div id="margem-evolucao-labels" style="display:flex;gap:6px;margin-top:4px"></div>
+  </div>
+
+  <!-- Gráfico de barras -->
+  <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:14px">
+    <div style="font-size:12px;font-weight:700;color:#334155;margin-bottom:10px">Ranking de Margem por Contrato</div>
+    <div id="margem-chart" style="display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto"></div>
+  </div>
+
+  <div class="tw"><table id="tbl-margem">
+    <thead id="margem-head"></thead>
+    <tbody id="margem-body"></tbody>
+  </table></div>
+</div>
+
+<!-- Reajuste Contratual -->
+<div id="pg-reajuste" class="pg">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div>
+      <h2 style="margin:0;font-size:16px;font-weight:800;color:#1e293b">📈 Gestão de Reajuste Contratual</h2>
+      <div style="font-size:10px;color:#94a3b8;margin-top:2px">Alertas de vencimento e reajuste por contrato</div>
+    </div>
+    <button onclick="loadReajustes()" style="padding:6px 14px;font-size:11px;border:1px solid #7c3aed;border-radius:6px;background:#f5f3ff;color:#7c3aed;cursor:pointer;font-weight:700">↺ Atualizar</button>
+  </div>
+  <div class="kpis" id="reaj-kpis"></div>
+  <div id="reaj-body" style="margin-top:14px"></div>
+
+  <!-- Modal editar reajuste -->
+  <div id="modal-reajuste" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;padding:24px;width:480px;max-width:95vw;max-height:90vh;overflow-y:auto">
+      <div style="font-weight:800;font-size:14px;margin-bottom:16px;color:#1e293b">📈 Registrar Reajuste — <span id="reaj-modal-num"></span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase">Data Último Reajuste</label>
+          <input type="date" id="reaj-data-ultimo" style="width:100%;margin-top:3px;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+        </div>
+        <div>
+          <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase">Data Próximo Reajuste</label>
+          <input type="date" id="reaj-data-proximo" style="width:100%;margin-top:3px;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+        </div>
+        <div>
+          <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase">Índice de Reajuste</label>
+          <select id="reaj-indice" style="width:100%;margin-top:3px;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+            <option value="INPC">INPC</option>
+            <option value="IPCA">IPCA</option>
+            <option value="IGPM">IGP-M</option>
+            <option value="INCC">INCC</option>
+            <option value="Acordo">Acordo (definido em contrato)</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase">% do Último Reajuste</label>
+          <input type="number" id="reaj-pct" step="0.01" min="0" max="100" placeholder="Ex: 4.62" style="width:100%;margin-top:3px;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+        </div>
+        <div style="grid-column:1/-1">
+          <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase">Observações</label>
+          <textarea id="reaj-obs" rows="2" placeholder="Ex: 2° TA aplicando INPC acumulado jan-dez/2024" style="width:100%;margin-top:3px;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;resize:vertical"></textarea>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button onclick="fecharModalReajuste()" style="padding:7px 16px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;cursor:pointer">Cancelar</button>
+        <button onclick="salvarReajuste()" style="padding:7px 16px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">💾 Salvar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Retenções -->
+<div id="pg-retencoes" class="pg">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div>
+      <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">🏛️ Análise de Retenções Tributárias</h2>
+      <p style="font-size:11px;color:#94a3b8">Comparação NF a NF: retenção real vs. expectativa legal (INSS, IR, ISS, CSLL, PIS, COFINS)</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <select id="ret-esfera" onchange="loadRetencoes()" style="padding:5px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+        <option value="">Todas as esferas</option>
+        <option value="Federal">Federal</option>
+        <option value="Estadual">Estadual</option>
+        <option value="Municipal">Municipal</option>
+      </select>
+      <select id="ret-status" onchange="loadRetencoes()" style="padding:5px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+        <option value="">Todos os status</option>
+        <option value="OK">OK</option>
+        <option value="ALERTA">Alerta</option>
+        <option value="DIVERGENTE">Divergente</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- KPIs resumo -->
+  <div class="kpis" id="ret-kpis"><div class="loading">Carregando análise de retenções</div></div>
+
+  <!-- Gráficos lado a lado -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+    <div class="dash-panel">
+      <div class="dash-panel-title">📊 Real vs. Esperado por Tributo</div>
+      <div id="ret-chart-tributos"></div>
+    </div>
+    <div class="dash-panel">
+      <div class="dash-panel-title">🏛️ Retenção por Esfera</div>
+      <div id="ret-chart-esfera"></div>
+    </div>
+  </div>
+
+  <!-- Regras aplicadas -->
+  <div class="dash-panel" style="margin-bottom:14px">
+    <div class="dash-panel-title" style="cursor:pointer" onclick="document.getElementById('ret-regras-content').style.display=document.getElementById('ret-regras-content').style.display==='none'?'block':'none'">
+      📜 Legislação Aplicada (clique para expandir)
+    </div>
+    <div id="ret-regras-content" style="display:none"></div>
+  </div>
+
+  <!-- Tabela NF a NF -->
+  <div class="dash-panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div class="dash-panel-title" style="margin-bottom:0">🧾 Análise NF a NF</div>
+      <div id="ret-counter" style="font-size:11px;color:#64748b"></div>
+    </div>
+    <div class="tw" style="max-height:500px;overflow-y:auto">
+      <table><thead id="ret-head"></thead><tbody id="ret-body"></tbody></table>
+    </div>
+  </div>
+
+  <!-- Relatório de Diferença de Retenção (NF vs Extrato) -->
+  <div class="dash-panel" style="margin-top:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="dash-panel-title" style="margin-bottom:0">🔍 Diferença de Retenção: NF vs Extrato Bancário</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="date" id="ret-from" style="padding:4px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+        <span style="font-size:10px;color:#64748b">até</span>
+        <input type="date" id="ret-to" style="padding:4px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+        <button onclick="loadRelatorioRetencao()" style="padding:5px 14px;font-size:11px;font-weight:700;border:1px solid #1d4ed8;border-radius:6px;background:#eff6ff;color:#1d4ed8;cursor:pointer">🔍 Analisar</button>
+      </div>
+    </div>
+    <div id="ret-diff-totais" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px"></div>
+    <div class="tw" style="max-height:400px;overflow-y:auto">
+      <table><thead><tr>
+        <th>NF</th><th>Emissão</th><th>Tomador</th><th class="r">V. Bruto</th>
+        <th class="r">Ret. NF</th><th class="r">Ret. Extrato</th><th class="r">Diferença</th>
+      </tr></thead><tbody id="ret-diff-body"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- Conta Vinculada -->
+<div id="pg-conta-vinculada" class="pg">
+  <div style="margin-bottom:14px">
+    <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">🏦 Conta Vinculada — Provisões Trabalhistas</h2>
+    <p style="font-size:11px;color:#94a3b8">Estimativa de retenção em conta vinculada para contratos federais (IN SEGES/MP 05/2017, Anexo XII-A)</p>
+  </div>
+
+  <!-- KPIs -->
+  <div class="kpis" id="cv-kpis"><div class="loading">Carregando estimativa...</div></div>
+
+  <!-- Corpo principal -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px" id="cv-main">
+    <!-- Painel de Provisões -->
+    <div class="dash-panel" id="cv-provisoes-panel">
+      <div class="dash-panel-title">📋 Provisões Mensais Estimadas</div>
+      <div id="cv-provisoes"></div>
+    </div>
+    <!-- Painel de Base Legal -->
+    <div class="dash-panel" id="cv-legal-panel">
+      <div class="dash-panel-title">⚖️ Fundamentação Legal</div>
+      <div id="cv-legal"></div>
+    </div>
+  </div>
+
+  <!-- Projeção mensal -->
+  <div class="dash-panel" style="margin-top:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div class="dash-panel-title">📊 Projeção Mensal — Saldo Conta Vinculada</div>
+      <div id="cv-proj-legenda" style="font-size:10px;color:#64748b"></div>
+    </div>
+    <div id="cv-chart" style="margin:10px 0"></div>
+  </div>
+
+  <!-- Eventos de Liberação -->
+  <div class="dash-panel" style="margin-top:14px">
+    <div class="dash-panel-title">📅 Eventos de Liberação Previstos</div>
+    <div id="cv-eventos"></div>
+  </div>
+
+  <!-- Tabela de detalhe por mês -->
+  <div class="dash-panel" style="margin-top:14px">
+    <div class="dash-panel-title">🧾 Detalhamento Mensal</div>
+    <div class="tw" style="max-height:400px;overflow-y:auto">
+      <table><thead id="cv-thead"></thead><tbody id="cv-tbody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- RH / DEPARTAMENTO PESSOAL                                      -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="pg-rh" class="pg">
+  <!-- Toolbar principal -->
+  <div class="toolbar" style="flex-wrap:wrap;gap:8px">
+    <span style="font-size:16px">👥</span>
+    <span class="toolbar-title">RH / DEPARTAMENTO PESSOAL</span>
+    <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+      <button onclick="abrirModalNovoFunc()" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:5px 13px;font-size:10px;border-radius:6px;cursor:pointer;font-weight:700">+ Funcionário</button>
+      <button onclick="abrirModalNovaFolha()" style="background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;padding:5px 13px;font-size:10px;border-radius:6px;cursor:pointer;font-weight:700">+ Folha Mensal</button>
+      <button onclick="loadRH()" style="background:#f1f5f9;border:1px solid #e2e8f0;padding:5px 12px;font-size:10px;border-radius:6px;cursor:pointer">↺ Atualizar</button>
+    </div>
+  </div>
+
+  <!-- KPIs -->
+  <div class="kpis" id="rh-kpis" style="margin-bottom:14px"></div>
+
+  <!-- Abas internas -->
+  <div style="display:flex;gap:4px;margin-bottom:12px;border-bottom:2px solid #e2e8f0;padding-bottom:0">
+    <button id="rh-tab-func" onclick="rhSubTab('func')" style="padding:7px 16px;font-size:11px;font-weight:700;border:none;border-bottom:2px solid #0891b2;background:none;color:#0891b2;cursor:pointer;margin-bottom:-2px">👤 Funcionários</button>
+    <button id="rh-tab-folha" onclick="rhSubTab('folha')" style="padding:7px 16px;font-size:11px;font-weight:600;border:none;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;margin-bottom:-2px">📋 Folhas de Pagamento</button>
+    <button id="rh-tab-calc" onclick="rhSubTab('calc')" style="padding:7px 16px;font-size:11px;font-weight:600;border:none;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;margin-bottom:-2px">🧮 Calculadora Tributos</button>
+  </div>
+
+  <!-- Painel: Funcionários -->
+  <div id="rh-panel-func">
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <input id="rh-busca" type="text" placeholder="Buscar funcionário…" oninput="filtrarFuncionarios()" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;width:220px">
+      <select id="rh-filtro-status" onchange="filtrarFuncionarios()" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+        <option value="">Todos</option>
+        <option value="ATIVO">Ativos</option>
+        <option value="DEMITIDO">Demitidos</option>
+      </select>
+      <select id="rh-filtro-contrato" onchange="filtrarFuncionarios()" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+        <option value="">Todos os contratos</option>
+      </select>
+    </div>
+    <div class="tw">
+      <table>
+        <thead id="rh-func-head"></thead>
+        <tbody id="rh-func-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Painel: Folhas -->
+  <div id="rh-panel-folha" style="display:none">
+    <div class="tw">
+      <table>
+        <thead><tr>
+          <th>Competência</th><th>Data Pgto</th><th>Funcionários</th>
+          <th style="text-align:right">Total Bruto</th>
+          <th style="text-align:right">INSS</th>
+          <th style="text-align:right">IRRF</th>
+          <th style="text-align:right">Total Líquido</th>
+          <th style="text-align:center">Ações</th>
+        </tr></thead>
+        <tbody id="rh-folha-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Painel: Calculadora -->
+  <div id="rh-panel-calc" style="display:none">
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:20px;max-width:500px">
+      <div style="font-weight:700;font-size:13px;color:#1e293b;margin-bottom:14px">🧮 Calculadora INSS / IRRF 2026</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:4px">Salário Bruto (R$)</label>
+          <input id="calc-salario" type="number" placeholder="5000" min="0" step="0.01"
+            style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:4px">Dependentes</label>
+          <input id="calc-dep" type="number" placeholder="0" min="0" value="0"
+            style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box">
+        </div>
+      </div>
+      <button onclick="calcularTributos()" style="padding:8px 20px;background:#0891b2;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;width:100%">Calcular</button>
+      <div id="calc-result" style="margin-top:14px"></div>
+    </div>
+  </div>
+
+  <!-- Modal: Novo Funcionário -->
+  <div id="modal-novo-func" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;padding:24px;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto">
+      <div style="font-weight:800;font-size:14px;margin-bottom:16px;color:#1e293b">👤 Novo Funcionário</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Nome *</label><input id="nf-nome" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box" placeholder="Nome completo"></div>
+        <div><label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">CPF</label><input id="nf-cpf" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box" placeholder="000.000.000-00"></div>
+        <div><label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Data Admissão *</label><input id="nf-admissao" type="date" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box"></div>
+        <div><label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Salário Base (R$) *</label><input id="nf-salario" type="number" step="0.01" min="0" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box" placeholder="1518.00"></div>
+        <div><label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Contrato Ref.</label><input id="nf-contrato" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box" placeholder="Ex: UFT 16/2025"></div>
+        <div><label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Lotação / Posto</label><input id="nf-lotacao" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box" placeholder="Ex: UFT - Campus Palmas"></div>
+        <div><label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">E-mail</label><input id="nf-email" type="email" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box"></div>
+        <div><label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Telefone</label><input id="nf-telefone" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box" placeholder="(63) 9xxxx-xxxx"></div>
+        <div><label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">PIS/PASEP</label><input id="nf-pis" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box"></div>
+        <div><label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Banco / Ag / Conta</label><input id="nf-banco" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box" placeholder="BB / 0001-7 / 12345-6"></div>
+        <div style="grid-column:1/-1"><label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Observações</label><textarea id="nf-obs" rows="2" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;resize:vertical;box-sizing:border-box"></textarea></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+        <button onclick="fecharModalNovoFunc()" style="padding:7px 16px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;background:#f8fafc;cursor:pointer">Cancelar</button>
+        <button onclick="salvarNovoFunc()" style="padding:7px 16px;background:#0891b2;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">💾 Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Nova Folha -->
+  <div id="modal-nova-folha" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;padding:24px;width:400px;max-width:95vw">
+      <div style="font-weight:800;font-size:14px;margin-bottom:16px;color:#1e293b">📋 Nova Folha de Pagamento</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div><label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Competência (AAAA-MM) *</label><input id="folha-comp" type="month" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box"></div>
+        <div><label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Data de Pagamento</label><input id="folha-pgto" type="date" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box"></div>
+        <div><label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Observações</label><textarea id="folha-obs" rows="2" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;resize:vertical;box-sizing:border-box"></textarea></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+        <button onclick="fecharModalNovaFolha()" style="padding:7px 16px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;background:#f8fafc;cursor:pointer">Cancelar</button>
+        <button onclick="salvarNovaFolha()" style="padding:7px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">💾 Criar e Calcular</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- BOLETINS DE MEDIÇÃO -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- Usuários (admin only) -->
+<div id="pg-usuarios" class="pg">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <div>
+      <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">👥 Gerenciamento de Usuários</h2>
+      <p style="font-size:11px;color:#94a3b8">Crie e gerencie acessos por nível. Apenas administradores têm acesso a esta tela.</p>
+    </div>
+    <button onclick="abrirModalNovoUsuario()" style="background:#1d4ed8;color:#fff;border:none;border-radius:8px;padding:8px 18px;font-weight:600;cursor:pointer;font-size:13px">+ Novo Usuário</button>
+  </div>
+  <div id="usuarios-kpis" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px"></div>
+  <table class="table" style="width:100%">
+    <thead><tr id="usuarios-head"></tr></thead>
+    <tbody id="usuarios-body"></tbody>
+  </table>
+
+  <!-- Log de erros do sistema -->
+  <div id="logs-section" style="margin-top:28px;display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h3 style="font-size:15px;font-weight:700;color:#0f172a;margin:0">📋 Log de Erros do Sistema</h3>
+      <div style="display:flex;gap:8px">
+        <select id="logs-n" style="padding:5px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px">
+          <option value="50">Últimos 50</option>
+          <option value="100" selected>Últimos 100</option>
+          <option value="200">Últimos 200</option>
+          <option value="500">Últimos 500</option>
+        </select>
+        <button onclick="loadLogs()" style="background:#0f172a;color:#fff;border:none;border-radius:7px;padding:5px 14px;font-size:12px;cursor:pointer;font-weight:600">🔄 Atualizar</button>
+      </div>
+    </div>
+    <div id="logs-total" style="font-size:11px;color:#94a3b8;margin-bottom:8px"></div>
+    <div id="logs-lista" style="background:#0f172a;border-radius:10px;padding:14px;max-height:320px;overflow-y:auto;font-family:monospace;font-size:11px;color:#94a3b8;white-space:pre-wrap;line-height:1.6">
+      <span style="color:#475569">Clique em "Atualizar" para carregar os logs.</span>
+    </div>
+  </div>
+
+  <!-- Modal novo/editar usuário -->
+  <div id="modal-usuario" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:none;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:14px;padding:28px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <h3 style="margin:0 0 18px;font-size:17px;font-weight:800" id="modal-usuario-titulo">Novo Usuário</h3>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div><label style="font-size:11px;font-weight:600;color:#64748b">Login *</label>
+          <input id="usu-login" placeholder="ex: joao.silva" style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box;margin-top:3px"></div>
+        <div><label style="font-size:11px;font-weight:600;color:#64748b">Nome completo *</label>
+          <input id="usu-nome" placeholder="ex: João Silva" style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box;margin-top:3px"></div>
+        <div><label style="font-size:11px;font-weight:600;color:#64748b">E-mail</label>
+          <input id="usu-email" type="email" placeholder="ex: joao@montana.com.br" style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box;margin-top:3px"></div>
+        <div><label style="font-size:11px;font-weight:600;color:#64748b">Senha * <span id="usu-senha-hint" style="color:#94a3b8">(mín. 6 caracteres)</span></label>
+          <input id="usu-senha" type="password" placeholder="Deixe vazio para não alterar (edição)" style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box;margin-top:3px"></div>
+        <div><label style="font-size:11px;font-weight:600;color:#64748b">Nível de acesso *</label>
+          <select id="usu-role" style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box;margin-top:3px">
+            <option value="admin">🔴 Admin — acesso total</option>
+            <option value="financeiro" selected>🟡 Financeiro — leitura + lançamentos</option>
+            <option value="operacional">🟢 Operacional — extratos e NFs</option>
+            <option value="visualizador">⚪ Visualizador — somente leitura</option>
+          </select></div>
+        <div id="usu-ativo-wrap" style="display:none"><label style="font-size:11px;font-weight:600;color:#64748b">Status</label>
+          <select id="usu-ativo" style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box;margin-top:3px">
+            <option value="1">Ativo</option><option value="0">Inativo</option>
+          </select></div>
+      </div>
+      <div id="usu-erro" style="color:#dc2626;font-size:12px;margin-top:10px;display:none"></div>
+      <div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end">
+        <button onclick="fecharModalUsuario()" style="background:#f1f5f9;color:#475569;border:none;border-radius:7px;padding:8px 18px;font-weight:600;cursor:pointer">Cancelar</button>
+        <button onclick="salvarUsuario()" style="background:#1d4ed8;color:#fff;border:none;border-radius:7px;padding:8px 18px;font-weight:600;cursor:pointer">💾 Salvar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="pg-boletins" class="pg">
+  <div style="margin-bottom:14px">
+    <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">📄 Boletins de Medição</h2>
+    <p style="font-size:11px;color:#94a3b8">Gestão de contratos de vigilância e geração automática de boletins mensais em PDF</p>
+  </div>
+  <div id="bol-content"><div class="loading">Carregando...</div></div>
+</div>
+
+<!-- Modal: A Receber por Contrato -->
+<div id="modal-a-receber" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;overflow-y:auto;padding:24px 16px">
+  <div style="background:#fff;border-radius:16px;max-width:900px;margin:0 auto;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <div>
+        <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin:0">⏳ A Receber por Contrato</h2>
+        <p style="font-size:11px;color:#94a3b8;margin:4px 0 0" id="ar-subtitle">Carregando...</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button onclick="exportRelExcel('a-receber')" style="background:#15803d;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:12px;cursor:pointer;font-weight:600">📗 Exportar Excel</button>
+        <button onclick="document.getElementById('modal-a-receber').style.display='none'" style="background:#f1f5f9;border:none;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;color:#64748b;font-weight:600">✕ Fechar</button>
+      </div>
+    </div>
+    <!-- KPIs -->
+    <div id="ar-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px"></div>
+    <!-- Tabela -->
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px" id="ar-table">
+        <thead>
+          <tr style="background:#0f172a;color:#fff">
+            <th style="padding:10px 12px;text-align:left;border-radius:6px 0 0 0">Contrato</th>
+            <th style="padding:10px 12px;text-align:left">Órgão</th>
+            <th style="padding:10px 12px;text-align:right">Mensal Líq.</th>
+            <th style="padding:10px 12px;text-align:right">Total Pago</th>
+            <th style="padding:10px 12px;text-align:right;color:#fbbf24">⚠️ Emitir NF</th>
+            <th style="padding:10px 12px;text-align:right;color:#f87171">🔴 Em Atraso</th>
+            <th style="padding:10px 12px;text-align:right;color:#34d399;border-radius:0 6px 0 0">⏳ A Receber</th>
+          </tr>
+        </thead>
+        <tbody id="ar-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- F-1: Conciliação 3 Vias -->
+<div id="pg-conciliacao3v" class="pg">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+    <div>
+      <h2 style="font-size:16px;font-weight:800;color:#0f172a">🔗 Conciliação 3 Vias</h2>
+      <p style="font-size:11px;color:#64748b">Notas Fiscais Emitidas ↔ Extratos Recebidos ↔ Pagamentos do Governo</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="c3v-filtro-contrato" style="padding:5px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;background:#fff">
+        <option value="">Todos os contratos</option>
+      </select>
+      <button onclick="loadConciliacao3Vias()" style="padding:6px 16px;font-size:11px;font-weight:700;background:#059669;color:#fff;border:none;border-radius:6px;cursor:pointer">🔄 Atualizar</button>
+    </div>
+  </div>
+  <div class="kpis" id="c3v-kpis" style="grid-template-columns:repeat(4,1fr)"></div>
+  <div id="c3v-resumo" style="margin-top:12px"><div class="muted" style="text-align:center;padding:40px">Clique em Atualizar para carregar a conciliação</div></div>
+
+  <!-- Créditos Pendentes / Não Identificados -->
+  <div style="margin-top:20px;border-top:2px solid #e2e8f0;padding-top:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div>
+        <h3 style="font-size:13px;font-weight:800;color:#0f172a;margin:0">💰 Créditos Bancários Pendentes</h3>
+        <p style="font-size:10px;color:#64748b;margin:2px 0 0 0">Créditos nos extratos ainda sem origem identificada, agrupados por categoria</p>
+      </div>
+      <button onclick="loadCreditosPendentes()" style="padding:5px 14px;font-size:10px;font-weight:700;background:#7c3aed;color:#fff;border:none;border-radius:6px;cursor:pointer">🔍 Analisar Créditos</button>
+    </div>
+    <div id="creditos-pendentes-panel"><div class="muted" style="text-align:center;padding:20px;font-size:11px">Clique em "Analisar Créditos" para carregar</div></div>
+  </div>
+</div>
+
+<!-- A-2: Keywords de Auto-Vinculação -->
+<div id="pg-keywords" class="pg">
+  <div style="max-width:700px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div>
+        <h2 style="font-size:16px;font-weight:800;color:#0f172a">⚙️ Keywords de Auto-Vinculação</h2>
+        <p style="font-size:11px;color:#64748b">Palavras-chave usadas na auto-vinculação de extratos bancários a contratos</p>
+      </div>
+    </div>
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;color:#334155;margin-bottom:10px">
+        Palavra-chave (buscada no histórico do extrato) → Contrato (deixe vazio para match automático)
+      </div>
+      <div id="keywords-lista"></div>
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button onclick="adicionarKeyword()" style="padding:6px 14px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;color:#475569;cursor:pointer">+ Adicionar Keyword</button>
+        <button onclick="salvarKeywords()" style="padding:6px 16px;font-size:11px;font-weight:700;background:#1d4ed8;color:#fff;border:none;border-radius:6px;cursor:pointer">💾 Salvar Keywords</button>
+      </div>
+    </div>
+    <div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:12px;font-size:11px;color:#854d0e">
+      <strong>Como funciona:</strong> Ao clicar em "Auto-Vincular" na aba Extratos, o sistema busca cada palavra-chave no histórico e posto de cada extrato bancário PENDENTE. Se encontrar, vincula ao contrato correspondente. Se "Contrato" estiver vazio, o sistema tenta encontrar automaticamente pelo nome do contrato que contém a palavra.
+    </div>
+  </div>
+</div>
+
+<!-- F-4: Modal Dashboard por Contrato -->
+<div id="modal-contrato-detalhe" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:1000;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto">
+  <div style="background:#fff;border-radius:12px;width:100%;max-width:900px;box-shadow:0 20px 60px rgba(0,0,0,.3);margin:auto">
+    <div style="background:#1e293b;color:#fff;padding:16px 20px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;align-items:center">
+      <div id="mcd-title" style="font-size:15px;font-weight:800">Detalhe do Contrato</div>
+      <button onclick="fecharDetalheContrato()" style="background:rgba(255,255,255,.15);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 10px;line-height:1.4">×</button>
+    </div>
+    <div id="mcd-body" style="padding:20px"></div>
+  </div>
+</div>
+
+<!-- 🏛️ Consolidado Multi-Empresa -->
+<div id="pg-consolidado" class="pg">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <div>
+      <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">🏛️ Visão Consolidada — Todas as Empresas</h2>
+      <p style="font-size:11px;color:#94a3b8">Comparativo de KPIs entre as 4 empresas do grupo Montana no ano atual</p>
+    </div>
+    <button onclick="loadConsolidado()" style="background:#ede9fe;color:#7c3aed;border:1px solid #c4b5fd;border-radius:8px;padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer">🔄 Atualizar</button>
+  </div>
+  <div id="consolidado-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:16px"><div class="loading">Carregando...</div></div>
+  <div id="consolidado-table-wrap"></div>
+</div>
+
+<!-- 🔍 Auditoria -->
+<div id="pg-auditoria" class="pg">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div>
+      <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">🔍 Log de Auditoria</h2>
+      <p style="font-size:11px;color:#94a3b8">Histórico de todas as ações realizadas no sistema</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="audit-tabela" onchange="loadAuditoria()" style="padding:5px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+        <option value="">Todas as tabelas</option>
+        <option value="notas_fiscais">Notas Fiscais</option>
+        <option value="extratos">Extratos</option>
+        <option value="despesas">Despesas</option>
+        <option value="vinculacoes">Vinculações</option>
+        <option value="contratos">Contratos</option>
+      </select>
+      <select id="audit-usuario" onchange="loadAuditoria()" style="padding:5px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+        <option value="">Todos os usuários</option>
+        <option value="admin">admin</option>
+        <option value="financeiro">financeiro</option>
+      </select>
+      <input type="date" id="audit-from" onchange="loadAuditoria()" style="padding:5px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px" title="Data início">
+      <input type="date" id="audit-to"   onchange="loadAuditoria()" style="padding:5px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px" title="Data fim">
+      <button onclick="loadAuditoria()" style="padding:5px 12px;border:1px solid #e2e8f0;border-radius:5px;font-size:11px;cursor:pointer;background:#f8fafc">↺ Atualizar</button>
+      <button onclick="exportarExcel('audit')" style="padding:5px 12px;background:#dcfce7;color:#15803d;border:1px solid #86efac;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">📗 Excel</button>
+    </div>
+  </div>
+  <div id="audit-kpis" class="kpis" style="margin-bottom:14px"></div>
+  <div class="tw">
+    <table>
+      <thead id="audit-head"></thead>
+      <tbody id="audit-body"></tbody>
+    </table>
+  </div>
+  <div class="pag" id="audit-pag"></div>
+</div>
+
+<!-- 📦 Estoque -->
+<div id="pg-estoque" class="pg">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+    <h2 style="margin:0;font-size:1.2rem;color:#0f766e">📦 Estoque</h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button onclick="estoqueShowView('dashboard')" id="est-btn-dash" class="btn-est-nav active-est">📊 Painel</button>
+      <button onclick="estoqueShowView('itens')" id="est-btn-itens" class="btn-est-nav">📋 Itens</button>
+      <button onclick="estoqueShowView('mov')" id="est-btn-mov" class="btn-est-nav">🔄 Movimentar</button>
+      <button onclick="estoqueShowView('rel')" id="est-btn-rel" class="btn-est-nav">📄 Relatório</button>
+      <button onclick="estoqueShowView('novo')" id="est-btn-novo" class="btn-est-nav" style="background:#0f766e;color:#fff">+ Novo Item</button>
+    </div>
+  </div>
+
+  <!-- PAINEL / DASHBOARD -->
+  <div id="est-view-dashboard">
+    <div id="est-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;flex-wrap:wrap">
+      <div>
+        <h3 style="font-size:.95rem;color:#dc2626;margin-bottom:8px">⚠️ Estoque Abaixo do Mínimo</h3>
+        <div id="est-alertas" style="font-size:.85rem"></div>
+      </div>
+      <div>
+        <h3 style="font-size:.95rem;color:#374151;margin-bottom:8px">🕐 Últimos Movimentos</h3>
+        <div id="est-ultimos" style="font-size:.85rem"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LISTA DE ITENS -->
+  <div id="est-view-itens" style="display:none">
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <input id="est-busca" placeholder="🔍 Buscar nome/código..." style="flex:1;min-width:160px;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem" oninput="estoqueCarregarItens()">
+      <select id="est-filtro-cat" onchange="estoqueCarregarItens()" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem">
+        <option value="">Todas categorias</option>
+        <option value="EQUIPAMENTO">🔧 Equipamento</option>
+        <option value="MAQUINARIO">⚙️ Maquinário</option>
+        <option value="EPI">🦺 EPI</option>
+        <option value="CONSUMIVEL">📦 Consumível</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:4px;font-size:.82rem;cursor:pointer">
+        <input type="checkbox" id="est-filtro-baixo" onchange="estoqueCarregarItens()"> Só abaixo do mínimo
+      </label>
+    </div>
+    <div id="est-itens-table" class="tw"></div>
+  </div>
+
+  <!-- MOVIMENTAR -->
+  <div id="est-view-mov" style="display:none">
+    <div style="max-width:560px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:20px">
+      <h3 style="margin:0 0 14px;font-size:1rem">Registrar Movimentação</h3>
+      <div style="display:grid;gap:10px">
+        <div>
+          <label style="font-size:.82rem;color:#6b7280">Item *</label>
+          <select id="est-mov-item" style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem" onchange="estoquePreencherItem()">
+            <option value="">Selecione o item...</option>
+          </select>
+          <div id="est-mov-item-info" style="font-size:.78rem;color:#6b7280;margin-top:3px"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:.82rem;color:#6b7280">Tipo *</label>
+            <select id="est-mov-tipo" style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem">
+              <option value="ENTRADA">📥 Entrada</option>
+              <option value="SAIDA">📤 Saída</option>
+              <option value="AJUSTE">🔧 Ajuste de Saldo</option>
+              <option value="TRANSFERENCIA">↔️ Transferência</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:.82rem;color:#6b7280">Quantidade *</label>
+            <input id="est-mov-qtd" type="number" min="0.01" step="0.01" placeholder="0" style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem;box-sizing:border-box">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:.82rem;color:#6b7280">Data *</label>
+            <input id="est-mov-data" type="date" style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:.82rem;color:#6b7280">Valor Unitário (R$)</label>
+            <input id="est-mov-vunit" type="number" min="0" step="0.01" placeholder="0,00" style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem;box-sizing:border-box">
+          </div>
+        </div>
+        <div>
+          <label style="font-size:.82rem;color:#6b7280">Motivo / Descrição</label>
+          <input id="est-mov-motivo" placeholder="Ex: Compra mensal, Distribuição posto X..." style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem;box-sizing:border-box">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:.82rem;color:#6b7280">Fornecedor</label>
+            <input id="est-mov-forn" placeholder="Nome do fornecedor" style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:.82rem;color:#6b7280">Nota Fiscal</label>
+            <input id="est-mov-nf" placeholder="NF / Pedido" style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem;box-sizing:border-box">
+          </div>
+        </div>
+        <div>
+          <label style="font-size:.82rem;color:#6b7280">Responsável</label>
+          <input id="est-mov-resp" placeholder="Nome do responsável" style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem;box-sizing:border-box">
+        </div>
+        <button onclick="estoqueRegistrarMovimento()" style="background:#0f766e;color:#fff;border:none;padding:10px;border-radius:8px;font-size:.95rem;cursor:pointer;font-weight:600">💾 Registrar Movimentação</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RELATÓRIO -->
+  <div id="est-view-rel" style="display:none">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:flex-end">
+      <div><label style="font-size:.8rem;color:#6b7280">De</label><br><input id="est-rel-ini" type="date" style="padding:6px;border:1px solid #d1d5db;border-radius:6px;font-size:.83rem"></div>
+      <div><label style="font-size:.8rem;color:#6b7280">Até</label><br><input id="est-rel-fim" type="date" style="padding:6px;border:1px solid #d1d5db;border-radius:6px;font-size:.83rem"></div>
+      <div><label style="font-size:.8rem;color:#6b7280">Tipo</label><br>
+        <select id="est-rel-tipo" style="padding:7px;border:1px solid #d1d5db;border-radius:6px;font-size:.83rem">
+          <option value="">Todos</option>
+          <option value="ENTRADA">Entrada</option>
+          <option value="SAIDA">Saída</option>
+          <option value="AJUSTE">Ajuste</option>
+        </select>
+      </div>
+      <div><label style="font-size:.8rem;color:#6b7280">Categoria</label><br>
+        <select id="est-rel-cat" style="padding:7px;border:1px solid #d1d5db;border-radius:6px;font-size:.83rem">
+          <option value="">Todas</option>
+          <option value="EQUIPAMENTO">Equipamento</option>
+          <option value="MAQUINARIO">Maquinário</option>
+          <option value="EPI">EPI</option>
+          <option value="CONSUMIVEL">Consumível</option>
+        </select>
+      </div>
+      <button onclick="estoqueCarregarRelatorio()" style="background:#0369a1;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:.85rem;cursor:pointer">🔍 Filtrar</button>
+    </div>
+    <div id="est-rel-table" class="tw"></div>
+  </div>
+
+  <!-- NOVO ITEM / EDITAR -->
+  <div id="est-view-novo" style="display:none">
+    <div style="max-width:560px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:20px">
+      <h3 style="margin:0 0 14px;font-size:1rem" id="est-form-titulo">Cadastrar Novo Item</h3>
+      <input type="hidden" id="est-form-id">
+      <div style="display:grid;gap:10px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:.82rem;color:#6b7280">Código (opcional)</label>
+            <input id="est-form-codigo" placeholder="EX: EPI-001" style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:.82rem;color:#6b7280">Categoria *</label>
+            <select id="est-form-cat" style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem">
+              <option value="EPI">🦺 EPI</option>
+              <option value="CONSUMIVEL">📦 Consumível</option>
+              <option value="EQUIPAMENTO">🔧 Equipamento</option>
+              <option value="MAQUINARIO">⚙️ Maquinário</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label style="font-size:.82rem;color:#6b7280">Nome *</label>
+          <input id="est-form-nome" placeholder="Ex: Capacete de segurança, Rádio comunicador..." style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:.82rem;color:#6b7280">Descrição</label>
+          <input id="est-form-desc" placeholder="Especificações, marca, modelo..." style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem;box-sizing:border-box">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:.82rem;color:#6b7280">Unidade</label>
+            <select id="est-form-un" style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem">
+              <option value="UN">UN (unidade)</option>
+              <option value="PAR">PAR</option>
+              <option value="CX">CX (caixa)</option>
+              <option value="KG">KG</option>
+              <option value="L">L (litro)</option>
+              <option value="MT">MT (metro)</option>
+              <option value="RL">RL (rolo)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:.82rem;color:#6b7280">Estoque Mínimo</label>
+            <input id="est-form-min" type="number" min="0" step="1" placeholder="0" style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:.82rem;color:#6b7280">Valor Unit. (R$)</label>
+            <input id="est-form-vunit" type="number" min="0" step="0.01" placeholder="0,00" style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem;box-sizing:border-box">
+          </div>
+        </div>
+        <div>
+          <label style="font-size:.82rem;color:#6b7280">Localização / Depósito</label>
+          <input id="est-form-local" placeholder="Ex: Almoxarifado Central, Posto UFT..." style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.85rem;box-sizing:border-box">
+        </div>
+        <button onclick="estoqueSalvarItem()" style="background:#0f766e;color:#fff;border:none;padding:10px;border-radius:8px;font-size:.95rem;cursor:pointer;font-weight:600">💾 Salvar Item</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ⚙️ Configurações -->
+<div id="pg-config" class="pg">
+  <div style="max-width:820px;margin:0 auto">
+    <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:4px">⚙️ Configurações do Sistema</h2>
+    <p style="font-size:11px;color:#94a3b8;margin-bottom:20px">Preferências de período, dados da empresa e notificações por e-mail.</p>
+
+    <!-- Seção 1: Preferências de Período -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:20px;margin-bottom:14px">
+      <h3 style="font-size:13px;font-weight:700;color:#334155;margin-bottom:14px;display:flex;align-items:center;gap:6px">📅 Preferências de Período Padrão</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div>
+          <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Filtro Padrão ao Abrir</label>
+          <select id="cfg-periodo-padrao" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;color:#0f172a">
+            <option value="mes">Mês Atual</option>
+            <option value="trim">Trimestre Atual</option>
+            <option value="ano" selected>Ano Atual</option>
+            <option value="todos">Todos os períodos</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Paginação padrão (linhas)</label>
+          <select id="cfg-paginacao" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;color:#0f172a">
+            <option value="25">25</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Seção 2: Dados Cadastrais -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:20px;margin-bottom:14px">
+      <h3 style="font-size:13px;font-weight:700;color:#334155;margin-bottom:14px;display:flex;align-items:center;gap:6px">🏢 Dados Cadastrais da Empresa Ativa</h3>
+      <div id="cfg-empresa-info" style="background:#f8fafc;border-radius:8px;padding:14px;font-size:12px;color:#334155;line-height:1.8"></div>
+    </div>
+
+    <!-- Seção 3: SMTP / E-mail -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:20px;margin-bottom:14px">
+      <h3 style="font-size:13px;font-weight:700;color:#334155;margin-bottom:14px;display:flex;align-items:center;gap:6px">📧 Configurações de E-mail (SMTP)</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Servidor SMTP</label>
+          <input id="cfg-smtp-host" type="text" placeholder="smtp.gmail.com" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Porta</label>
+          <input id="cfg-smtp-port" type="number" placeholder="587" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Usuário (e-mail)</label>
+          <input id="cfg-smtp-user" type="email" placeholder="sistema@empresa.com.br" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Senha / App Password</label>
+          <input id="cfg-smtp-pass" type="password" placeholder="••••••••" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+        </div>
+        <div style="grid-column:1/-1">
+          <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Destinatário dos Alertas</label>
+          <input id="cfg-smtp-dest" type="email" placeholder="financeiro@empresa.com.br" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+        </div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+        <button onclick="testarSmtpConfig()" style="padding:7px 16px;font-size:11px;font-weight:700;border:1px solid #0369a1;border-radius:7px;background:#e0f2fe;color:#0369a1;cursor:pointer">🔗 Testar Conexão</button>
+        <span id="cfg-smtp-status" style="font-size:11px;color:#64748b"></span>
+      </div>
+    </div>
+
+    <!-- Seção 4: Alertas automáticos -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:20px;margin-bottom:14px">
+      <h3 style="font-size:13px;font-weight:700;color:#334155;margin-bottom:14px;display:flex;align-items:center;gap:6px">🔔 Alertas Automáticos</h3>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <label style="display:flex;align-items:center;gap:10px;font-size:12px;color:#334155;cursor:pointer">
+          <input type="checkbox" id="cfg-alerta-certidoes" style="width:15px;height:15px;cursor:pointer">
+          Alertar quando certidões expirarem em menos de 30 dias
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;font-size:12px;color:#334155;cursor:pointer">
+          <input type="checkbox" id="cfg-alerta-parcelas" style="width:15px;height:15px;cursor:pointer">
+          Alertar parcelas em aberto não conciliadas
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;font-size:12px;color:#334155;cursor:pointer">
+          <input type="checkbox" id="cfg-alerta-extratos" style="width:15px;height:15px;cursor:pointer">
+          Alertar extratos com status PENDENTE há mais de 7 dias
+        </label>
+      </div>
+    </div>
+
+    <!-- Seção 5: WebISS / Certificado A1 -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:20px;margin-bottom:14px">
+      <h3 style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px;display:flex;align-items:center;gap:6px">🔐 WebISS — Certificado A1 e Credenciais NFS-e</h3>
+      <p style="font-size:10px;color:#94a3b8;margin-bottom:14px">Configuração por empresa ativa. Salvo no arquivo .env do servidor.</p>
+      <div id="webiss-cert-status" style="margin-bottom:14px"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div style="grid-column:1/-1">
+          <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Arquivo do Certificado (.pfx)</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="file" id="cfg-cert-file" accept=".pfx" style="flex:1;padding:6px;border:1px solid #e2e8f0;border-radius:7px;font-size:11px;background:#f8fafc">
+            <input type="password" id="cfg-cert-senha" placeholder="Senha do certificado" style="flex:1;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+            <button onclick="uploadCertWebiss()" style="padding:7px 14px;font-size:11px;font-weight:700;border:none;border-radius:7px;background:#1e293b;color:#fff;cursor:pointer;white-space:nowrap">⬆ Enviar</button>
+          </div>
+        </div>
+        <div>
+          <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Login WebISS (usuário)</label>
+          <input id="cfg-webiss-login" type="text" placeholder="login no portal WebISS" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Senha WebISS</label>
+          <input id="cfg-webiss-senha" type="password" placeholder="••••••••" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+        </div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+        <button onclick="salvarConfigWebiss()" style="padding:7px 16px;font-size:11px;font-weight:700;border:1px solid #7c3aed;border-radius:7px;background:#f5f3ff;color:#7c3aed;cursor:pointer">💾 Salvar Credenciais</button>
+        <button onclick="testarWebiss()" style="padding:7px 16px;font-size:11px;font-weight:700;border:1px solid #0369a1;border-radius:7px;background:#e0f2fe;color:#0369a1;cursor:pointer">🔗 Testar Conexão</button>
+        <span id="cfg-webiss-status" style="font-size:11px;color:#64748b"></span>
+      </div>
+    </div>
+
+    <!-- Botão Salvar -->
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button onclick="loadConfig()" style="padding:9px 20px;font-size:12px;font-weight:600;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;color:#475569;cursor:pointer">↩ Restaurar</button>
+      <button onclick="saveConfig()" style="padding:9px 22px;font-size:13px;font-weight:700;border:none;border-radius:8px;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;cursor:pointer">💾 Salvar Configurações</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- CONTROLE DE PONTO E FREQUÊNCIA                                 -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="pg-ponto" class="pg">
+  <!-- Toolbar -->
+  <div class="toolbar" style="flex-wrap:wrap;gap:8px">
+    <span style="font-size:16px">🕐</span>
+    <span class="toolbar-title">CONTROLE DE PONTO E FREQUÊNCIA</span>
+    <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+      <button onclick="pontoRegistrarModal()" style="background:#ccfbf1;color:#0f766e;border:1px solid #5eead4;padding:5px 13px;font-size:10px;border-radius:6px;cursor:pointer;font-weight:700">+ Registrar Ponto</button>
+      <button onclick="pontoOcorrenciaModal()" style="background:#fef3c7;color:#d97706;border:1px solid #fcd34d;padding:5px 13px;font-size:10px;border-radius:6px;cursor:pointer;font-weight:700">+ Ocorrência</button>
+      <button onclick="document.getElementById('ponto-import-bar').style.display=document.getElementById('ponto-import-bar').style.display==='none'?'flex':'none'" style="background:#ede9fe;color:#7c3aed;border:1px solid #c4b5fd;padding:5px 13px;font-size:10px;border-radius:6px;cursor:pointer;font-weight:700">📥 Importar Excel</button>
+      <button onclick="loadPonto()" style="background:#f1f5f9;border:1px solid #e2e8f0;padding:5px 12px;font-size:10px;border-radius:6px;cursor:pointer">↺ Atualizar</button>
+    </div>
+  </div>
+
+  <!-- Barra de importação (toggled) -->
+  <div id="ponto-import-bar" style="display:none;flex-wrap:wrap;gap:10px;align-items:center;background:#f5f3ff;border:1px solid #c4b5fd;border-radius:8px;padding:12px 16px;margin-bottom:10px">
+    <span style="font-size:11px;font-weight:700;color:#7c3aed">📥 Importação em Lote — Excel</span>
+    <span style="font-size:10px;color:#64748b">Colunas esperadas: <strong>Funcionário, Data, Entrada, Saída</strong> (+ Intervalo Início, Intervalo Fim opcionais)</span>
+    <input type="file" id="ponto-import-file" accept=".xlsx" style="font-size:11px;padding:4px;border:1px solid #c4b5fd;border-radius:6px;background:#fff">
+    <button onclick="importarPontoExcel()" style="padding:6px 16px;font-size:11px;font-weight:700;background:#7c3aed;color:#fff;border:none;border-radius:6px;cursor:pointer">⬆ Importar</button>
+    <div id="ponto-import-erros" style="width:100%"></div>
+  </div>
+
+  <!-- KPIs -->
+  <div class="kpis" id="ponto-kpis" style="margin-bottom:14px"></div>
+
+  <!-- Abas internas -->
+  <div style="display:flex;gap:4px;margin-bottom:12px;border-bottom:2px solid #e2e8f0;padding-bottom:0">
+    <button id="ponto-tab-registro"   onclick="pontoSubTab('registro')"   style="padding:7px 16px;font-size:11px;font-weight:700;border:none;border-bottom:2px solid #0f766e;background:none;color:#0f766e;cursor:pointer;margin-bottom:-2px">📋 Registro do Dia</button>
+    <button id="ponto-tab-espelho"    onclick="pontoSubTab('espelho')"    style="padding:7px 16px;font-size:11px;font-weight:600;border:none;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;margin-bottom:-2px">🗓️ Espelho Mensal</button>
+    <button id="ponto-tab-frequencia" onclick="pontoSubTab('frequencia')" style="padding:7px 16px;font-size:11px;font-weight:600;border:none;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;margin-bottom:-2px">📊 Frequência</button>
+    <button id="ponto-tab-ocorrencias" onclick="pontoSubTab('ocorrencias')" style="padding:7px 16px;font-size:11px;font-weight:600;border:none;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;margin-bottom:-2px">⚠️ Ocorrências</button>
+    <button id="ponto-tab-jornadas"    onclick="pontoSubTab('jornadas')"    style="padding:7px 16px;font-size:11px;font-weight:600;border:none;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;margin-bottom:-2px">⚙️ Jornadas</button>
+  </div>
+
+  <!-- Painel: Registro do Dia -->
+  <div id="ponto-panel-registro">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Data</label>
+        <input type="date" id="ponto-data-filtro" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px" onchange="loadPontoRegistros()">
+      </div>
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Funcionário</label>
+        <select id="ponto-func-filtro" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;min-width:200px" onchange="loadPontoRegistros()">
+          <option value="">Todos</option>
+        </select>
+      </div>
+    </div>
+    <div class="tw">
+      <table>
+        <thead id="ponto-reg-head"></thead>
+        <tbody id="ponto-reg-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Painel: Espelho Mensal -->
+  <div id="ponto-panel-espelho" style="display:none">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:flex-end">
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Funcionário *</label>
+        <select id="espelho-func-sel" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;min-width:220px">
+          <option value="">Selecione…</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Mês/Ano</label>
+        <input type="month" id="espelho-mes" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+      </div>
+      <button onclick="loadEspelho()" style="padding:7px 16px;font-size:11px;font-weight:700;background:#0f766e;color:#fff;border:none;border-radius:6px;cursor:pointer">🔍 Gerar Espelho</button>
+      <button onclick="baixarEspelhoPDF()" style="padding:7px 16px;font-size:11px;font-weight:700;background:#dc2626;color:#fff;border:none;border-radius:6px;cursor:pointer">📄 PDF</button>
+    </div>
+    <!-- Resumo do espelho -->
+    <div id="espelho-resumo" style="display:none;background:#f0fdfa;border:1px solid #99f6e4;border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-weight:700;font-size:12px;color:#134e4a;margin-bottom:8px" id="espelho-resumo-titulo"></div>
+      <div class="kpis" id="espelho-kpis"></div>
+    </div>
+    <!-- Calendário/tabela do espelho -->
+    <div class="tw">
+      <table>
+        <thead id="espelho-head"></thead>
+        <tbody id="espelho-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Painel: Frequência Mensal -->
+  <div id="ponto-panel-frequencia" style="display:none">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:flex-end">
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Mês/Ano</label>
+        <input type="month" id="freq-mes" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+      </div>
+      <button onclick="loadFrequencia()" style="padding:7px 16px;font-size:11px;font-weight:700;background:#0f766e;color:#fff;border:none;border-radius:6px;cursor:pointer">📊 Gerar Relatório</button>
+      <button onclick="exportarPontoExcel()" style="padding:7px 16px;font-size:11px;font-weight:700;background:#16a34a;color:#fff;border:none;border-radius:6px;cursor:pointer">⬇ Exportar Excel</button>
+      <div style="width:1px;background:#e2e8f0;height:28px;margin:0 4px"></div>
+      <span style="font-size:9px;color:#64748b;font-weight:600;align-self:center">EXPORTAR PARA:</span>
+      <button onclick="exportarFolhaFormato('alterdata')" style="padding:7px 14px;font-size:11px;font-weight:700;background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;border-radius:6px;cursor:pointer" title="Gera TXT compatível com Alterdata">📤 Alterdata</button>
+      <button onclick="exportarFolhaFormato('dominio')" style="padding:7px 14px;font-size:11px;font-weight:700;background:#ede9fe;color:#7c3aed;border:1px solid #c4b5fd;border-radius:6px;cursor:pointer" title="Gera TXT com layout de eventos Domínio Sistemas">📤 Domínio</button>
+      <div style="width:1px;background:#e2e8f0;height:28px;margin:0 4px"></div>
+      <button onclick="integrarComFolha()" style="padding:7px 14px;font-size:11px;font-weight:700;background:#fef3c7;color:#d97706;border:1px solid #fcd34d;border-radius:6px;cursor:pointer" title="Cria/atualiza itens de folha de pagamento com base nos registros de ponto">💼 Integrar com Folha</button>
+    </div>
+    <div class="tw">
+      <table>
+        <thead id="freq-head"></thead>
+        <tbody id="freq-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Painel: Ocorrências -->
+  <div id="ponto-panel-ocorrencias" style="display:none">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:flex-end">
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Funcionário</label>
+        <select id="oc-func-filtro" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;min-width:200px" onchange="loadOcorrencias()">
+          <option value="">Todos</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">De</label>
+        <input type="date" id="oc-from" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px" onchange="loadOcorrencias()">
+      </div>
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Até</label>
+        <input type="date" id="oc-to" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px" onchange="loadOcorrencias()">
+      </div>
+    </div>
+    <div class="tw">
+      <table>
+        <thead id="oc-head"></thead>
+        <tbody id="oc-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Painel: Jornadas -->
+  <div id="ponto-panel-jornadas" style="display:none">
+    <div id="jorn-padrao-info" style="background:#f0fdfa;border:1px solid #99f6e4;border-radius:8px;padding:10px 14px;margin-bottom:12px"></div>
+    <!-- Formulário nova jornada -->
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:14px">
+      <div style="font-weight:700;font-size:12px;color:#1e293b;margin-bottom:12px">⚙️ Nova Jornada Personalizada</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:10px">
+        <div>
+          <label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Tipo *</label>
+          <select id="jorn-tipo" onchange="toggleJornaTipo()" style="width:100%;padding:6px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+            <option value="funcionario">Por Funcionário</option>
+            <option value="cargo">Por Cargo</option>
+          </select>
+        </div>
+        <div id="jorn-func-wrap">
+          <label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Funcionário *</label>
+          <select id="jorn-func-sel" style="width:100%;padding:6px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box"></select>
+        </div>
+        <div id="jorn-cargo-wrap" style="display:none">
+          <label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Cargo *</label>
+          <select id="jorn-cargo-sel" style="width:100%;padding:6px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box"></select>
+        </div>
+        <div>
+          <label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Entrada</label>
+          <input type="time" id="jorn-entrada" value="08:00" style="width:100%;padding:6px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Saída</label>
+          <input type="time" id="jorn-saida" value="17:00" style="width:100%;padding:6px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Intervalo (min)</label>
+          <input type="number" id="jorn-intervalo" value="60" min="0" max="120" style="width:100%;padding:6px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Horas/Dia</label>
+          <input type="number" id="jorn-horas-dia" value="8" min="1" max="12" step="0.5" style="width:100%;padding:6px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Horas/Semana</label>
+          <input type="number" id="jorn-horas-sem" value="44" min="20" max="60" style="width:100%;padding:6px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:6px">Dias da Semana</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <label style="font-size:10px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="jorn-dia-check" value="seg" checked> Seg</label>
+          <label style="font-size:10px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="jorn-dia-check" value="ter" checked> Ter</label>
+          <label style="font-size:10px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="jorn-dia-check" value="qua" checked> Qua</label>
+          <label style="font-size:10px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="jorn-dia-check" value="qui" checked> Qui</label>
+          <label style="font-size:10px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="jorn-dia-check" value="sex" checked> Sex</label>
+          <label style="font-size:10px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="jorn-dia-check" value="sab"> Sáb</label>
+          <label style="font-size:10px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="jorn-dia-check" value="dom"> Dom</label>
+        </div>
+      </div>
+      <button onclick="salvarJornada()" style="padding:7px 20px;font-size:11px;font-weight:700;background:#0f766e;color:#fff;border:none;border-radius:6px;cursor:pointer">✔ Salvar Jornada</button>
+    </div>
+    <!-- Tabela de jornadas existentes -->
+    <div class="tw">
+      <table>
+        <thead id="jorn-head"></thead>
+        <tbody id="jorn-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Modal: Editar Registro de Ponto -->
+  <div id="modal-editar-registro" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;padding:24px;width:420px;max-width:95vw">
+      <div style="font-weight:800;font-size:14px;margin-bottom:16px;color:#1d4ed8">✏️ Editar Registro de Ponto</div>
+      <div style="display:grid;gap:10px">
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Tipo</label>
+          <select id="edit-reg-tipo" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box">
+            <option value="entrada">Entrada</option>
+            <option value="saida">Saída</option>
+            <option value="intervalo_inicio">Início Intervalo</option>
+            <option value="intervalo_fim">Fim Intervalo</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Data e Hora</label>
+          <input id="edit-reg-data-hora" type="datetime-local" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Observação</label>
+          <input id="edit-reg-obs" type="text" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
+        <button onclick="document.getElementById('modal-editar-registro').style.display='none'" style="padding:8px 18px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:pointer">Cancelar</button>
+        <button onclick="salvarEdicaoRegistro()" style="padding:8px 20px;font-size:11px;font-weight:700;background:#1d4ed8;color:#fff;border:none;border-radius:6px;cursor:pointer">✔ Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Registrar Ponto -->
+  <div id="modal-ponto-registrar" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;padding:24px;width:420px;max-width:95vw">
+      <div style="font-weight:800;font-size:14px;margin-bottom:16px;color:#0f766e">🕐 Registrar Batida de Ponto</div>
+      <div style="display:grid;gap:10px">
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Funcionário *</label>
+          <select id="reg-func-id" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box"></select>
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Tipo *</label>
+          <select id="reg-tipo" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box">
+            <option value="entrada">Entrada</option>
+            <option value="saida">Saída</option>
+            <option value="intervalo_inicio">Início Intervalo</option>
+            <option value="intervalo_fim">Fim Intervalo</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Data e Hora *</label>
+          <input id="reg-data-hora" type="datetime-local" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Observação</label>
+          <input id="reg-obs" type="text" placeholder="Opcional…" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
+        <button onclick="document.getElementById('modal-ponto-registrar').style.display='none'" style="padding:8px 18px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:pointer">Cancelar</button>
+        <button onclick="salvarRegistroPonto()" style="padding:8px 20px;font-size:11px;font-weight:700;background:#0f766e;color:#fff;border:none;border-radius:6px;cursor:pointer">✔ Registrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Nova Ocorrência -->
+  <div id="modal-ponto-ocorrencia" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;padding:24px;width:480px;max-width:95vw">
+      <div style="font-weight:800;font-size:14px;margin-bottom:16px;color:#d97706">⚠️ Nova Ocorrência</div>
+      <div style="display:grid;gap:10px">
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Funcionário *</label>
+          <select id="oc-func-id" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box"></select>
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Tipo *</label>
+          <select id="oc-tipo" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box">
+            <option value="falta_justificada">Falta Justificada</option>
+            <option value="falta_injustificada">Falta Injustificada</option>
+            <option value="atraso">Atraso</option>
+            <option value="licenca_medica">Licença Médica</option>
+            <option value="ferias">Férias</option>
+            <option value="afastamento_inss">Afastamento INSS</option>
+            <option value="licenca_maternidade">Licença Maternidade</option>
+            <option value="folga_compensatoria">Folga Compensatória</option>
+            <option value="declaracao">Declaração / Atestado</option>
+          </select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Data Início *</label>
+            <input id="oc-inicio" type="date" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Data Fim</label>
+            <input id="oc-fim" type="date" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box">
+          </div>
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Observação / Motivo</label>
+          <textarea id="oc-obs" rows="2" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;resize:vertical;box-sizing:border-box" placeholder="Descreva o motivo da ocorrência…"></textarea>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
+        <button onclick="document.getElementById('modal-ponto-ocorrencia').style.display='none'" style="padding:8px 18px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:pointer">Cancelar</button>
+        <button onclick="salvarOcorrencia()" style="padding:8px 20px;font-size:11px;font-weight:700;background:#d97706;color:#fff;border:none;border-radius:6px;cursor:pointer">✔ Salvar Ocorrência</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<!-- ══ ASSISTENTE IA — botão flutuante + sidebar ══════════════════ -->
+<button id="ia-fab" onclick="iaToggle()" title="Assistente IA Montana"
+  style="position:fixed;bottom:24px;right:24px;width:52px;height:52px;border-radius:50%;
+         background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;font-size:22px;
+         border:none;cursor:pointer;box-shadow:0 4px 16px rgba(99,102,241,.45);z-index:9998;
+         display:flex;align-items:center;justify-content:center">🤖</button>
+
+<div id="ia-sidebar"
+  style="position:fixed;bottom:90px;right:24px;width:360px;max-height:520px;
+         background:#fff;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,.18);
+         display:none;flex-direction:column;z-index:9997;overflow:hidden;
+         border:1px solid #e2e8f0">
+  <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:12px 16px;
+              display:flex;align-items:center;justify-content:space-between">
+    <div style="color:#fff;font-weight:700;font-size:13px">🤖 Assistente Montana IA</div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button onclick="iaDrivePanel()" title="Google Drive"
+        style="background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:6px;
+               padding:3px 8px;font-size:11px;cursor:pointer">☁ Drive</button>
+      <button onclick="iaToggle()"
+        style="background:none;border:none;color:#fff;font-size:16px;cursor:pointer">✕</button>
+    </div>
+  </div>
+  <div id="ia-msgs"
+    style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;
+           gap:8px;min-height:200px;max-height:320px"></div>
+  <div id="ia-chips" style="padding:0 12px 8px;display:flex;flex-wrap:wrap;gap:4px">
+    <button class="ia-chip" onclick="iaEnviar('Como está o fluxo de caixa deste mês?')">💰 Caixa</button>
+    <button class="ia-chip" onclick="iaEnviar('Tem extratos sem conciliação?')">🔍 Pendentes</button>
+    <button class="ia-chip" onclick="iaEnviar('Qual contrato gera mais receita?')">📋 Contratos</button>
+    <button class="ia-chip" onclick="iaEnviar('Tem despesas acima do normal?')">⚠ Despesas</button>
+  </div>
+  <div style="padding:10px 12px;border-top:1px solid #f1f5f9;display:flex;gap:8px">
+    <input id="ia-input" type="text" placeholder="Pergunte sobre finanças…"
+      onkeydown="if(event.key==='Enter')iaEnviar()"
+      style="flex:1;padding:8px 12px;border:1px solid #e2e8f0;border-radius:20px;
+             font-size:12px;outline:none">
+    <button onclick="iaEnviar()"
+      style="background:#6366f1;color:#fff;border:none;border-radius:50%;width:34px;height:34px;
+             cursor:pointer;font-size:14px">➤</button>
+  </div>
+</div>
+
+<!-- ══ PAINEL GOOGLE DRIVE ══════════════════════════════════════════ -->
+<div id="ia-drive-panel"
+  style="position:fixed;bottom:90px;right:24px;width:380px;max-height:560px;
+         background:#fff;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,.18);
+         display:none;flex-direction:column;z-index:9997;overflow:hidden;border:1px solid #e2e8f0">
+  <div style="background:linear-gradient(135deg,#0ea5e9,#6366f1);padding:12px 16px;
+              display:flex;align-items:center;justify-content:space-between">
+    <div style="color:#fff;font-weight:700;font-size:13px">☁ Google Drive + IA</div>
+    <button onclick="document.getElementById('ia-drive-panel').style.display='none'"
+      style="background:none;border:none;color:#fff;font-size:16px;cursor:pointer">✕</button>
+  </div>
+  <div id="ia-drive-status-bar"
+    style="padding:8px 14px;font-size:11px;background:#f8fafc;border-bottom:1px solid #e2e8f0;color:#64748b">
+    Verificando…</div>
+  <div style="padding:10px 12px;display:flex;gap:6px">
+    <input id="drive-busca" type="text" placeholder="Buscar arquivos no Drive…"
+      onkeydown="if(event.key==='Enter')driveBuscar()"
+      style="flex:1;padding:7px 12px;border:1px solid #e2e8f0;border-radius:20px;font-size:12px;outline:none">
+    <button onclick="driveBuscar()"
+      style="background:#0ea5e9;color:#fff;border:none;border-radius:20px;
+             padding:7px 14px;font-size:12px;cursor:pointer">Buscar</button>
+  </div>
+  <div id="ia-drive-results"
+    style="flex:1;overflow-y:auto;padding:0 12px 12px;min-height:80px;max-height:320px"></div>
+  <div style="padding:10px 12px;border-top:1px solid #f1f5f9;display:flex;gap:6px">
+    <button onclick="driveSugestoes()"
+      style="flex:1;background:#6366f1;color:#fff;border:none;border-radius:8px;
+             padding:8px;font-size:12px;font-weight:600;cursor:pointer">✨ Sugestões IA</button>
+    <button id="drive-connect-btn" onclick="driveConectar()"
+      style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:8px;
+             padding:8px 12px;font-size:12px;cursor:pointer">Conectar Drive</button>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+<script src="/app-extras.js"></script>
+<script src="/app-boletins.js"></script>
+<script src="/app-ponto.js"></script>
+<script src="/app-ia.js"></script>
+<script src="/app-estoque.js"></script>
+</body>
+</html>

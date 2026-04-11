@@ -1,0 +1,179 @@
+/**
+ * Montana — Módulo de Notificações por E-mail
+ * Alertas automáticos: certidões, contratos, pagamentos, licitações.
+ */
+const express = require('express');
+const companyMw = require('../companyMiddleware');
+
+const router = express.Router();
+router.use(companyMw);
+
+// ─── Config SMTP ─────────────────────────────────────────────────
+function getSmtp(db) {
+  const rows = db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'smtp_%'`).all();
+  const smtp = {};
+  rows.forEach(r => { smtp[r.chave.replace('smtp_', '')] = r.valor; });
+  return smtp;
+}
+
+// GET /api/notificacoes/smtp
+router.get('/smtp', (req, res) => {
+  const smtp = getSmtp(req.db);
+  // Não retornar a senha em texto puro — mascarar
+  if (smtp.pass) smtp.pass = '••••••••';
+  res.json(smtp);
+});
+
+// PUT /api/notificacoes/smtp
+router.put('/smtp', (req, res) => {
+  const { host, port, user, pass, from, to } = req.body;
+  const upsert = req.db.prepare(`INSERT OR REPLACE INTO configuracoes (chave,valor,updated_at) VALUES (@chave,@valor,datetime('now'))`);
+  const trans = req.db.transaction(() => {
+    if (host !== undefined) upsert.run({ chave:'smtp_host',  valor: host       || '' });
+    if (port !== undefined) upsert.run({ chave:'smtp_port',  valor: String(port|| 587) });
+    if (user !== undefined) upsert.run({ chave:'smtp_user',  valor: user        || '' });
+    if (pass !== undefined && pass !== '••••••••') upsert.run({ chave:'smtp_pass', valor: pass || '' });
+    if (from !== undefined) upsert.run({ chave:'smtp_from',  valor: from        || '' });
+    if (to   !== undefined) upsert.run({ chave:'smtp_to',    valor: to          || '' });
+  });
+  trans();
+  res.json({ ok: true });
+});
+
+// GET /api/notificacoes/log
+router.get('/log', (req, res) => {
+  const rows = req.db.prepare(`SELECT * FROM notificacoes_log ORDER BY created_at DESC LIMIT 100`).all();
+  res.json({ data: rows, total: rows.length });
+});
+
+// GET /api/notificacoes/preview — lista alertas pendentes sem enviar
+router.get('/preview', (req, res) => {
+  const hoje = new Date().toISOString().split('T')[0];
+  const em15 = new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0];
+  const em30 = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+  const em5  = new Date(Date.now() +  5 * 86400000).toISOString().split('T')[0];
+  const ha30 = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+
+  const certidoes  = req.db.prepare(`SELECT tipo,numero,data_validade FROM certidoes WHERE data_validade<=@em15 AND data_validade>=@hoje ORDER BY data_validade`).all({ em15, hoje });
+  const contratos  = req.db.prepare(`SELECT numContrato,contrato,vigencia_fim FROM contratos WHERE vigencia_fim<=@em30 AND vigencia_fim>=@hoje ORDER BY vigencia_fim`).all({ em30, hoje });
+  const pagAtras   = req.db.prepare(`SELECT COUNT(*) n FROM despesas WHERE status='PENDENTE' AND data_iso<=@ha30`).get({ ha30 });
+  const licitacoes = req.db.prepare(`SELECT orgao,numero_edital,data_abertura FROM licitacoes WHERE data_abertura>=@hoje AND data_abertura<=@em5 AND status IN ('em análise','proposta enviada') ORDER BY data_abertura`).all({ hoje, em5 });
+
+  res.json({
+    certidoes,
+    contratos,
+    pagamentos_atrasados: pagAtras.n,
+    licitacoes,
+    tem_alertas: certidoes.length + contratos.length + pagAtras.n + licitacoes.length > 0
+  });
+});
+
+// POST /api/notificacoes/enviar
+router.post('/enviar', async (req, res) => {
+  const smtp = getSmtp(req.db);
+
+  if (!smtp.host || !smtp.user) {
+    return res.status(400).json({ error: 'Configure as credenciais SMTP antes de enviar.' });
+  }
+
+  // Verificar nodemailer
+  let nodemailer;
+  try { nodemailer = require('nodemailer'); }
+  catch(e) { return res.status(500).json({ error: 'nodemailer não instalado. Execute: npm install nodemailer no diretório do app.' }); }
+
+  const hoje = new Date().toISOString().split('T')[0];
+  const em15 = new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0];
+  const em30 = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+  const em5  = new Date(Date.now() +  5 * 86400000).toISOString().split('T')[0];
+  const ha30 = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+
+  const certidoes  = req.db.prepare(`SELECT tipo,numero,data_validade FROM certidoes WHERE data_validade<=@em15 AND data_validade>=@hoje`).all({ em15, hoje });
+  const contratos  = req.db.prepare(`SELECT numContrato,contrato,vigencia_fim FROM contratos WHERE vigencia_fim<=@em30 AND vigencia_fim>=@hoje`).all({ em30, hoje });
+  const pagAtras   = req.db.prepare(`SELECT COUNT(*) n FROM despesas WHERE status='PENDENTE' AND data_iso<=@ha30`).get({ ha30 });
+  const licitacoes = req.db.prepare(`SELECT orgao,numero_edital,data_abertura FROM licitacoes WHERE data_abertura>=@hoje AND data_abertura<=@em5 AND status IN ('em análise','proposta enviada')`).all({ hoje, em5 });
+
+  const totalAlertas = certidoes.length + contratos.length + pagAtras.n + licitacoes.length;
+  if (totalAlertas === 0) {
+    return res.json({ ok: true, enviado: false, message: 'Nenhum alerta encontrado. Nenhum e-mail enviado.' });
+  }
+
+  // Montar corpo HTML
+  let corpo = `
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+    <div style="background:#1e293b;color:#fff;padding:20px;border-radius:8px 8px 0 0">
+      <h2 style="margin:0">🔔 Alertas — ${req.company.nome}</h2>
+      <p style="margin:4px 0 0;opacity:.7;font-size:13px">${new Date().toLocaleDateString('pt-BR',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
+    </div>
+    <div style="border:1px solid #e2e8f0;border-top:none;padding:20px;border-radius:0 0 8px 8px">
+  `;
+
+  if (certidoes.length > 0) {
+    corpo += `<h3 style="color:#dc2626">📋 Certidões Vencendo nos Próximos 15 Dias (${certidoes.length})</h3><ul>`;
+    certidoes.forEach(c => {
+      corpo += `<li><strong>${c.tipo}</strong> — N° ${c.numero} — Vence: <strong>${c.data_validade}</strong></li>`;
+    });
+    corpo += '</ul>';
+  }
+
+  if (contratos.length > 0) {
+    corpo += `<h3 style="color:#d97706">📄 Contratos Vencendo nos Próximos 30 Dias (${contratos.length})</h3><ul>`;
+    contratos.forEach(c => {
+      corpo += `<li><strong>${c.numContrato}</strong> — ${c.contrato} — Vence: <strong>${c.vigencia_fim}</strong></li>`;
+    });
+    corpo += '</ul>';
+  }
+
+  if (pagAtras.n > 0) {
+    corpo += `<h3 style="color:#7c3aed">💸 Pagamentos Pendentes há mais de 30 dias</h3>
+      <p><strong>${pagAtras.n} despesas</strong> com status PENDENTE há mais de 30 dias aguardam pagamento.</p>`;
+  }
+
+  if (licitacoes.length > 0) {
+    corpo += `<h3 style="color:#0369a1">🏛️ Licitações com Abertura nos Próximos 5 Dias (${licitacoes.length})</h3><ul>`;
+    licitacoes.forEach(l => {
+      corpo += `<li><strong>${l.orgao}</strong> — Ed. ${l.numero_edital} — Abertura: <strong>${l.data_abertura}</strong></li>`;
+    });
+    corpo += '</ul>';
+  }
+
+  corpo += `</div></div>`;
+
+  const assunto = `🔔 ${totalAlertas} Alerta(s) Montana — ${req.company.nomeAbrev} — ${new Date().toLocaleDateString('pt-BR')}`;
+
+  try {
+    const transporter = nodemailer.createTransport({
+      host:   smtp.host,
+      port:   parseInt(smtp.port) || 587,
+      secure: parseInt(smtp.port) === 465,
+      auth:   { user: smtp.user, pass: smtp.pass }
+    });
+
+    await transporter.sendMail({
+      from:    smtp.from || smtp.user,
+      to:      smtp.to   || smtp.user,
+      subject: assunto,
+      html:    corpo
+    });
+
+    // Log sucesso
+    req.db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('email',@to,@assunto,@corpo,'enviado')`).run({
+      to: smtp.to || smtp.user, assunto, corpo
+    });
+
+    res.json({
+      ok: true, enviado: true,
+      message: `E-mail enviado para ${smtp.to || smtp.user}`,
+      alertas: { certidoes: certidoes.length, contratos: contratos.length, pagamentos: pagAtras.n, licitacoes: licitacoes.length }
+    });
+  } catch (err) {
+    // Log erro
+    try {
+      req.db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status,erro) VALUES ('email',@to,@assunto,'','erro',@erro)`).run({
+        to: smtp.to || smtp.user, assunto, erro: err.message
+      });
+    } catch(e2) {}
+    res.status(500).json({ error: 'Falha ao enviar e-mail: ' + err.message });
+  }
+});
+
+module.exports = router;

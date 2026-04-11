@@ -1,0 +1,42 @@
+name: Deploy Montana App
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'package.json'
+      - 'ecosystem.config.js'
+
+jobs:
+  deploy:
+    name: Deploy para GCP
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar chave SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_montana
+          chmod 600 ~/.ssh/id_montana
+          ssh-keyscan -H 104.196.22.170 >> ~/.ssh/known_hosts
+
+      - name: Enviar código para o servidor
+        run: |
+          scp -i ~/.ssh/id_montana -r src/     diretoria@104.196.22.170:/opt/montana/app_unificado/
+          scp -i ~/.ssh/id_montana -r public/  diretoria@104.196.22.170:/opt/montana/app_unificado/
+          scp -i ~/.ssh/id_montana    package.json diretoria@104.196.22.170:/opt/montana/app_unificado/
+          scp -i ~/.ssh/id_montana    ecosystem.config.js diretoria@104.196.22.170:/opt/montana/app_unificado/
+
+      - name: Instalar dependências e reiniciar
+        run: |
+          ssh -i ~/.ssh/id_montana diretoria@104.196.22.170 \
+            "cd /opt/montana/app_unificado && npm install --production 2>&1 | tail -3 && pm2 restart montana-app"
+
+      - name: Verificar status
+        run: |
+          ssh -i ~/.ssh/id_montana diretoria@104.196.22.170 "pm2 status"

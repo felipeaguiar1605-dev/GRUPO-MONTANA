@@ -1,0 +1,298 @@
+/**
+ * Montana Multi-Empresa — Servidor Unificado (porta 3002)
+ */
+// Carrega .env da raiz do projeto (funciona independente do cwd do processo)
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+
+const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
+
+// ── Log de erros em arquivo ───────────────────────────────────
+const LOG_DIR  = path.join(__dirname, '..', 'logs');
+const LOG_FILE = path.join(LOG_DIR, 'erros.log');
+if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+const { getDb, COMPANIES } = require('./db');
+const apiRouter = require('./api');
+const { authMiddleware, loginHandler } = require('./auth');
+
+const app = express();
+const PORT = process.env.PORT || 3002;
+
+// ── Compressão gzip/brotli em todas as respostas ──────────────
+app.use(compression());
+
+// ── Rate limit nas rotas de importação (máx 10 uploads/min) ──
+const importLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { error: 'Muitas importações em pouco tempo. Aguarde 1 minuto.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/import', importLimiter);
+
+// Pre-carrega todos os bancos no startup
+for (const key of Object.keys(COMPANIES)) {
+  try { getDb(key); } catch (e) { console.error(`  ⚠ DB [${key}]:`, e.message); }
+}
+
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// CORS — restrito a localhost (app local, sem acesso externo)
+app.use((req, res, next) => {
+  const origin = req.headers.origin || '';
+  if (!origin || /^https?:\/\/localhost(:\d+)?$/.test(origin) || /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin) || /^https?:\/\/104\.196\.22\.170(:\d+)?$/.test(origin)) {
+    res.header('Access-Control-Allow-Origin', origin || '*');
+  }
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type,X-Company,Authorization');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
+// Auth: login endpoint (antes do middleware)
+app.post('/api/auth/login', loginHandler);
+
+// Auth middleware protege POST/PUT/PATCH/DELETE
+app.use('/api', authMiddleware);
+app.use('/api', apiRouter);
+
+// ─── Módulos extras (melhorias 1-6) ──────────────────────────────
+app.use('/api/certidoes',    require('./routes/certidoes'));
+app.use('/api/licitacoes',   require('./routes/licitacoes'));
+app.use('/api/calculadora',  require('./routes/calculadora'));
+app.use('/api/dre',          require('./routes/dre'));
+app.use('/api/notificacoes', require('./routes/notificacoes'));
+
+// ─── Módulo Boletins de Medição ─────────────────────────────────
+app.use('/api/boletins',     require('./routes/boletins'));
+
+// ─── Módulo RH / Departamento Pessoal ───────────────────────────
+app.use('/api/rh',           require('./routes/rh'));
+
+
+// ─── Módulo WebISS (NFS-e Palmas-TO) ────────────────────────────
+app.use('/api/webiss',       require('./routes/webiss'));
+
+// ─── Módulo Transparência Palmas (conciliação com portal) ────────
+app.use('/api/transparencia', require('./routes/transparencia'));
+
+// ─── Módulo Assistente IA (Claude) ──────────────────────────────
+app.use('/api/ia',           require('./routes/ia'));
+
+// ─── Módulo Google Drive + IA ────────────────────────────────────
+app.use('/api/drive',        require('./routes/drive'));
+
+// ─── Módulo Estoque (equipamentos, EPIs, consumíveis) ───────────
+app.use('/api/estoque',      require('./routes/estoque'));
+
+// ─── Módulo Usuários (gestão de acesso) ─────────────────────────
+app.use('/api/usuarios',     require('./routes/usuarios').router);
+
+// ─── Consolidado multi-empresa (visão geral das 4 empresas) ────
+app.get('/api/consolidado', require('./auth').authMiddleware, (req, res) => {
+  try {
+    const resultado = {};
+    const ano = new Date().getFullYear();
+    for (const [key, company] of Object.entries(COMPANIES)) {
+      try {
+        const db = getDb(key);
+        const from = `${ano}-01-01`, to = `${ano}-12-31`;
+        const extratos = db.prepare(`SELECT COUNT(*) cnt, COALESCE(SUM(credito),0) entradas, COALESCE(SUM(debito),0) saidas FROM extratos WHERE data_iso>=? AND data_iso<=?`).get(from, to);
+        const nfs      = db.prepare(`SELECT COUNT(*) cnt, COALESCE(SUM(valor_bruto),0) bruto FROM notas_fiscais WHERE (data_emissao>=? AND data_emissao<=?) OR (data_emissao='' AND created_at>=? AND created_at<=?)`).get(from, to, from, to);
+        const desp     = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) total FROM despesas WHERE data_iso>=? AND data_iso<=?`).get(from, to);
+        const pend     = db.prepare(`SELECT COUNT(*) cnt FROM extratos WHERE status_conciliacao='PENDENTE'`).get();
+        const funcs    = db.prepare(`SELECT COUNT(*) cnt FROM rh_funcionarios WHERE status='ATIVO'`).get();
+        resultado[key] = {
+          nome: company.nome, nomeAbrev: company.nomeAbrev, cnpj: company.cnpj,
+          cor: company.cor, icone: company.icone,
+          extratos_total: extratos.cnt,
+          entradas: +extratos.entradas.toFixed(2),
+          saidas: +extratos.saidas.toFixed(2),
+          nfs_total: nfs.cnt, faturamento: +nfs.bruto.toFixed(2),
+          despesas: +desp.total.toFixed(2),
+          pendentes: pend.cnt,
+          funcionarios: funcs.cnt,
+        };
+      } catch(e) {
+        resultado[key] = { nome: company.nome, erro: e.message };
+      }
+    }
+    res.json({ ok: true, ano, empresas: resultado });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
+
+// Health check — usado por Docker, Railway, Render
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, uptime: process.uptime(), env: process.env.NODE_ENV || 'development' });
+});
+
+// ── Log viewer — apenas admin (últimas N linhas) ─────────────
+app.get('/api/logs', (req, res) => {
+  // Verifica JWT manualmente (authMiddleware ignora GET)
+  const { JWT_SECRET } = require('./auth');
+  const jwt = require('jsonwebtoken');
+  try {
+    const header = req.headers['authorization'] || '';
+    if (!header.startsWith('Bearer ')) return res.status(401).json({ error: 'Token necessário' });
+    const decoded = jwt.verify(header.slice(7), JWT_SECRET);
+    if (decoded.role !== 'admin') return res.status(403).json({ error: 'Acesso negado' });
+  } catch (_) { return res.status(401).json({ error: 'Token inválido' }); }
+
+  try {
+    const n = Math.min(parseInt(req.query.n) || 100, 500);
+    if (!fs.existsSync(LOG_FILE)) return res.json({ linhas: [], total: 0 });
+    const conteudo = fs.readFileSync(LOG_FILE, 'utf8');
+    const linhas   = conteudo.trim().split('\n').filter(Boolean);
+    const ultimas  = linhas.slice(-n).reverse(); // mais recentes primeiro
+    res.json({ linhas: ultimas, total: linhas.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Error handler global — não expõe detalhes internos
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  const ts    = new Date().toISOString();
+  const linha = `[${ts}] [SERVER] ${req.method} ${req.originalUrl} — ${err.message}\n`;
+  console.error('[ERROR]', linha.trim());
+  try { fs.appendFileSync(LOG_FILE, linha); } catch (_) {}
+  res.status(err.status || 500).json({ error: 'Erro interno do servidor' });
+});
+
+// ─── CRON: Alertas automáticos diários às 07:00 ──────────────────
+try {
+  const cron = require('node-cron');
+
+  async function dispararAlertasDiarios() {
+    const nodemailer = require('nodemailer');
+    for (const key of Object.keys(COMPANIES)) {
+      try {
+        const db = getDb(key);
+        const rows = db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'smtp_%'`).all();
+        const smtp = {};
+        rows.forEach(r => { smtp[r.chave.replace('smtp_', '')] = r.valor; });
+        if (!smtp.host || !smtp.user || !smtp.to) continue; // SMTP não configurado
+
+        const hoje  = new Date().toISOString().split('T')[0];
+        const em15  = new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0];
+        const em30  = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+        const em5   = new Date(Date.now() +  5 * 86400000).toISOString().split('T')[0];
+        const ha30  = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+
+        const certidoes  = db.prepare(`SELECT tipo,numero,data_validade FROM certidoes WHERE data_validade<=? AND data_validade>=?`).all(em15, hoje);
+        const contratos  = db.prepare(`SELECT numContrato,contrato,vigencia_fim FROM contratos WHERE vigencia_fim<=? AND vigencia_fim>=?`).all(em30, hoje);
+        const pagAtras   = db.prepare(`SELECT COUNT(*) n FROM despesas WHERE status='PENDENTE' AND data_iso<=?`).get(ha30);
+        const licitacoes = db.prepare(`SELECT orgao,numero_edital,data_abertura FROM licitacoes WHERE data_abertura>=? AND data_abertura<=? AND status IN ('em análise','proposta enviada')`).all(hoje, em5);
+
+        const total = certidoes.length + contratos.length + pagAtras.n + licitacoes.length;
+        if (total === 0) continue;
+
+        let corpo = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+          <div style="background:#1e293b;color:#fff;padding:20px;border-radius:8px 8px 0 0">
+            <h2 style="margin:0">🔔 Alertas — ${COMPANIES[key].nome}</h2>
+            <p style="margin:4px 0 0;opacity:.7;font-size:13px">${new Date().toLocaleDateString('pt-BR',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
+          </div>
+          <div style="border:1px solid #e2e8f0;border-top:none;padding:20px;border-radius:0 0 8px 8px">`;
+
+        if (certidoes.length) {
+          corpo += `<h3 style="color:#dc2626">📋 Certidões Vencendo em 15 dias (${certidoes.length})</h3><ul>`;
+          certidoes.forEach(c => { corpo += `<li><strong>${c.tipo}</strong> — N° ${c.numero} — Vence: <strong>${c.data_validade}</strong></li>`; });
+          corpo += '</ul>';
+        }
+        if (contratos.length) {
+          corpo += `<h3 style="color:#d97706">📄 Contratos Vencendo em 30 dias (${contratos.length})</h3><ul>`;
+          contratos.forEach(c => { corpo += `<li><strong>${c.numContrato}</strong> — ${c.contrato} — Vence: <strong>${c.vigencia_fim}</strong></li>`; });
+          corpo += '</ul>';
+        }
+        if (pagAtras.n > 0) corpo += `<h3 style="color:#7c3aed">💸 Despesas Pendentes há +30 dias: ${pagAtras.n}</h3>`;
+        if (licitacoes.length) {
+          corpo += `<h3 style="color:#0369a1">🏛️ Licitações abrindo em 5 dias (${licitacoes.length})</h3><ul>`;
+          licitacoes.forEach(l => { corpo += `<li><strong>${l.orgao}</strong> — Ed. ${l.numero_edital} — ${l.data_abertura}</li>`; });
+          corpo += '</ul>';
+        }
+        corpo += `</div></div>`;
+
+        const transporter = nodemailer.createTransport({
+          host: smtp.host, port: parseInt(smtp.port) || 587,
+          secure: parseInt(smtp.port) === 465, auth: { user: smtp.user, pass: smtp.pass }
+        });
+        const assunto = `🔔 ${total} Alerta(s) Montana — ${COMPANIES[key].nomeAbrev} — ${new Date().toLocaleDateString('pt-BR')}`;
+        await transporter.sendMail({ from: smtp.from || smtp.user, to: smtp.to, subject: assunto, html: corpo });
+
+        try {
+          db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('email',?,?,?,'enviado')`).run(smtp.to, assunto, corpo);
+        } catch(_e) {}
+
+        console.log(`  📧 Alertas enviados [${key}] → ${smtp.to} (${total} alertas)`);
+      } catch (e) {
+        console.error(`  ⚠ Cron alerta [${key}]:`, e.message);
+      }
+    }
+  }
+
+  // Executa todo dia às 07:00
+  cron.schedule('0 7 * * *', dispararAlertasDiarios, { timezone: 'America/Araguaina' });
+  console.log('  ⏰ Cron de alertas configurado: todo dia 07:00 (America/Araguaina)');
+
+  // ── Backup automático diário às 02:00 ──────────────────────
+  const fs = require('fs');
+  const backupDir = path.join(__dirname, '..', 'backups');
+  if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+
+  function fazerBackup() {
+    const data = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    let total = 0;
+    for (const [key, company] of Object.entries(COMPANIES)) {
+      try {
+        const src = path.join(__dirname, '..', company.dbPath);
+        if (!fs.existsSync(src)) continue;
+        const dest = path.join(backupDir, `${key}_${data}.db`);
+        fs.copyFileSync(src, dest);
+        total++;
+        // Remove backups com mais de 30 dias
+        const prefix = `${key}_`;
+        fs.readdirSync(backupDir)
+          .filter(f => f.startsWith(prefix) && f.endsWith('.db') && f !== path.basename(dest))
+          .forEach(f => {
+            const age = (Date.now() - fs.statSync(path.join(backupDir, f)).mtimeMs) / 86400000;
+            if (age > 30) fs.unlinkSync(path.join(backupDir, f));
+          });
+      } catch(e) {
+        console.error(`  ⚠ Backup [${key}]:`, e.message);
+      }
+    }
+    console.log(`  💾 Backup concluído: ${total} banco(s) → backups/${data}`);
+  }
+
+  cron.schedule('0 2 * * *', fazerBackup, { timezone: 'America/Araguaina' });
+  console.log('  💾 Cron de backup configurado: todo dia 02:00 (America/Araguaina)');
+} catch(e) {
+  console.warn('  ⚠ node-cron não disponível:', e.message);
+}
+
+app.listen(PORT, () => {
+  console.log(`
+  ╔══════════════════════════════════════════════════════════╗
+  ║  Montana Multi-Empresa — Sistema Unificado               ║
+  ║  Conciliação Financeira + Boletins de Medição            ║
+  ║  Servidor: http://localhost:${PORT}                         ║
+  ║                                                          ║
+  ║  🏢 Assessoria  (14.092.519) → data/assessoria/          ║
+  ║  🔒 Segurança   (19.200.109) → data/seguranca/           ║
+  ║  🛡️  Porto do Vau (41.034.574) → data/portodovau/        ║
+  ║  🐎 Mustang     (26.600.137) → data/mustang/             ║
+  ║  🔐 Auth JWT ativo (admin/montana2026)                   ║
+  ╚══════════════════════════════════════════════════════════╝
+  `);
+});
