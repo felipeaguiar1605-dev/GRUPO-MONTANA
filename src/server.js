@@ -60,7 +60,18 @@ app.post('/api/auth/login', loginHandler);
 
 // Auth middleware protege POST/PUT/PATCH/DELETE
 app.use('/api', authMiddleware);
+
+// ─── Middleware de auditoria (registra POST/PUT/PATCH/DELETE) ────
+const auditLog = require('./middleware/auditLog');
+app.use('/api', auditLog);
+
 app.use('/api', apiRouter);
+
+// ─── Importação OFX (extratos bancários BB/BRB/CEF) ─────────────
+app.use('/api/ofx',          require('./routes/ofx'));
+
+// ─── Importação Alterdata (funcionários/folha) ───────────────────
+app.use('/api/alterdata',    require('./routes/alterdata'));
 
 // ─── Módulos extras (melhorias 1-6) ──────────────────────────────
 app.use('/api/certidoes',    require('./routes/certidoes'));
@@ -170,80 +181,28 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({ error: 'Erro interno do servidor' });
 });
 
-// ─── CRON: Alertas automáticos diários às 07:00 ──────────────────
+// ─── CRON: Alertas automáticos diários às 08:00 ──────────────────
 try {
   const cron = require('node-cron');
+  const { enviarAlertasEmpresa } = require('./routes/notificacoes');
 
   async function dispararAlertasDiarios() {
-    const nodemailer = require('nodemailer');
     for (const key of Object.keys(COMPANIES)) {
       try {
         const db = getDb(key);
-        const rows = db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'smtp_%'`).all();
-        const smtp = {};
-        rows.forEach(r => { smtp[r.chave.replace('smtp_', '')] = r.valor; });
-        if (!smtp.host || !smtp.user || !smtp.to) continue; // SMTP não configurado
-
-        const hoje  = new Date().toISOString().split('T')[0];
-        const em15  = new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0];
-        const em30  = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
-        const em5   = new Date(Date.now() +  5 * 86400000).toISOString().split('T')[0];
-        const ha30  = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
-
-        const certidoes  = db.prepare(`SELECT tipo,numero,data_validade FROM certidoes WHERE data_validade<=? AND data_validade>=?`).all(em15, hoje);
-        const contratos  = db.prepare(`SELECT numContrato,contrato,vigencia_fim FROM contratos WHERE vigencia_fim<=? AND vigencia_fim>=?`).all(em30, hoje);
-        const pagAtras   = db.prepare(`SELECT COUNT(*) n FROM despesas WHERE status='PENDENTE' AND data_iso<=?`).get(ha30);
-        const licitacoes = db.prepare(`SELECT orgao,numero_edital,data_abertura FROM licitacoes WHERE data_abertura>=? AND data_abertura<=? AND status IN ('em análise','proposta enviada')`).all(hoje, em5);
-
-        const total = certidoes.length + contratos.length + pagAtras.n + licitacoes.length;
-        if (total === 0) continue;
-
-        let corpo = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
-          <div style="background:#1e293b;color:#fff;padding:20px;border-radius:8px 8px 0 0">
-            <h2 style="margin:0">🔔 Alertas — ${COMPANIES[key].nome}</h2>
-            <p style="margin:4px 0 0;opacity:.7;font-size:13px">${new Date().toLocaleDateString('pt-BR',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
-          </div>
-          <div style="border:1px solid #e2e8f0;border-top:none;padding:20px;border-radius:0 0 8px 8px">`;
-
-        if (certidoes.length) {
-          corpo += `<h3 style="color:#dc2626">📋 Certidões Vencendo em 15 dias (${certidoes.length})</h3><ul>`;
-          certidoes.forEach(c => { corpo += `<li><strong>${c.tipo}</strong> — N° ${c.numero} — Vence: <strong>${c.data_validade}</strong></li>`; });
-          corpo += '</ul>';
+        const resultado = await enviarAlertasEmpresa(db, COMPANIES[key]);
+        if (resultado.enviado) {
+          console.log(`  📧 Alertas enviados [${key}] (${resultado.total} alertas)`);
         }
-        if (contratos.length) {
-          corpo += `<h3 style="color:#d97706">📄 Contratos Vencendo em 30 dias (${contratos.length})</h3><ul>`;
-          contratos.forEach(c => { corpo += `<li><strong>${c.numContrato}</strong> — ${c.contrato} — Vence: <strong>${c.vigencia_fim}</strong></li>`; });
-          corpo += '</ul>';
-        }
-        if (pagAtras.n > 0) corpo += `<h3 style="color:#7c3aed">💸 Despesas Pendentes há +30 dias: ${pagAtras.n}</h3>`;
-        if (licitacoes.length) {
-          corpo += `<h3 style="color:#0369a1">🏛️ Licitações abrindo em 5 dias (${licitacoes.length})</h3><ul>`;
-          licitacoes.forEach(l => { corpo += `<li><strong>${l.orgao}</strong> — Ed. ${l.numero_edital} — ${l.data_abertura}</li>`; });
-          corpo += '</ul>';
-        }
-        corpo += `</div></div>`;
-
-        const transporter = nodemailer.createTransport({
-          host: smtp.host, port: parseInt(smtp.port) || 587,
-          secure: parseInt(smtp.port) === 465, auth: { user: smtp.user, pass: smtp.pass }
-        });
-        const assunto = `🔔 ${total} Alerta(s) Montana — ${COMPANIES[key].nomeAbrev} — ${new Date().toLocaleDateString('pt-BR')}`;
-        await transporter.sendMail({ from: smtp.from || smtp.user, to: smtp.to, subject: assunto, html: corpo });
-
-        try {
-          db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('email',?,?,?,'enviado')`).run(smtp.to, assunto, corpo);
-        } catch(_e) {}
-
-        console.log(`  📧 Alertas enviados [${key}] → ${smtp.to} (${total} alertas)`);
       } catch (e) {
         console.error(`  ⚠ Cron alerta [${key}]:`, e.message);
       }
     }
   }
 
-  // Executa todo dia às 07:00
-  cron.schedule('0 7 * * *', dispararAlertasDiarios, { timezone: 'America/Araguaina' });
-  console.log('  ⏰ Cron de alertas configurado: todo dia 07:00 (America/Araguaina)');
+  // Executa todo dia às 08:00
+  cron.schedule('0 8 * * *', dispararAlertasDiarios, { timezone: 'America/Araguaina' });
+  console.log('  ⏰ Cron de alertas configurado: todo dia 08:00 (America/Araguaina)');
 
   // ── Backup automático diário às 02:00 ──────────────────────
   const fs = require('fs');

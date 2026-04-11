@@ -176,4 +176,87 @@ router.post('/enviar', async (req, res) => {
   }
 });
 
+// ─── Função reutilizável exportada para o cron do server.js ──────
+/**
+ * enviarAlertasEmpresa(db, company) — verifica alertas e envia email se houver.
+ * @param {import('better-sqlite3').Database} db  — instância do banco da empresa
+ * @param {{ nome, nomeAbrev }} company            — objeto da empresa (de COMPANIES)
+ * @returns {Promise<{ enviado: boolean, total: number }>}
+ */
+async function enviarAlertasEmpresa(db, company) {
+  const smtp = getSmtp(db);
+  if (!smtp.host || !smtp.user || !smtp.to) {
+    return { enviado: false, total: 0, motivo: 'SMTP não configurado' };
+  }
+
+  const hoje = new Date().toISOString().split('T')[0];
+  const em15 = new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0];
+  const em30 = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+  const em5  = new Date(Date.now() +  5 * 86400000).toISOString().split('T')[0];
+  const ha30 = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+
+  const certidoes  = db.prepare(`SELECT tipo,numero,data_validade FROM certidoes WHERE data_validade<=? AND data_validade>=? ORDER BY data_validade`).all(em15, hoje);
+  const contratos  = db.prepare(`SELECT numContrato,contrato,vigencia_fim FROM contratos WHERE vigencia_fim<=? AND vigencia_fim>=? ORDER BY vigencia_fim`).all(em30, hoje);
+  const pagAtras   = db.prepare(`SELECT COUNT(*) n FROM despesas WHERE status='PENDENTE' AND data_iso<=?`).get(ha30);
+  const licitacoes = db.prepare(`SELECT orgao,numero_edital,data_abertura FROM licitacoes WHERE data_abertura>=? AND data_abertura<=? AND status IN ('em análise','proposta enviada') ORDER BY data_abertura`).all(hoje, em5);
+
+  const totalAlertas = certidoes.length + contratos.length + pagAtras.n + licitacoes.length;
+  if (totalAlertas === 0) return { enviado: false, total: 0, motivo: 'sem alertas' };
+
+  // Monta corpo HTML
+  let corpo = `
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+    <div style="background:#1e293b;color:#fff;padding:20px;border-radius:8px 8px 0 0">
+      <h2 style="margin:0">🔔 Alertas — ${company.nome}</h2>
+      <p style="margin:4px 0 0;opacity:.7;font-size:13px">${new Date().toLocaleDateString('pt-BR',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
+    </div>
+    <div style="border:1px solid #e2e8f0;border-top:none;padding:20px;border-radius:0 0 8px 8px">
+  `;
+
+  if (certidoes.length) {
+    corpo += `<h3 style="color:#dc2626">📋 Certidões Vencendo em 15 dias (${certidoes.length})</h3><ul>`;
+    certidoes.forEach(c => { corpo += `<li><strong>${c.tipo}</strong> — N° ${c.numero} — Vence: <strong>${c.data_validade}</strong></li>`; });
+    corpo += '</ul>';
+  }
+  if (contratos.length) {
+    corpo += `<h3 style="color:#d97706">📄 Contratos Vencendo em 30 dias (${contratos.length})</h3><ul>`;
+    contratos.forEach(c => { corpo += `<li><strong>${c.numContrato}</strong> — ${c.contrato} — Vence: <strong>${c.vigencia_fim}</strong></li>`; });
+    corpo += '</ul>';
+  }
+  if (pagAtras.n > 0) {
+    corpo += `<h3 style="color:#7c3aed">💸 Despesas Pendentes há +30 dias: ${pagAtras.n}</h3>`;
+  }
+  if (licitacoes.length) {
+    corpo += `<h3 style="color:#0369a1">🏛️ Licitações abrindo em 5 dias (${licitacoes.length})</h3><ul>`;
+    licitacoes.forEach(l => { corpo += `<li><strong>${l.orgao}</strong> — Ed. ${l.numero_edital} — ${l.data_abertura}</li>`; });
+    corpo += '</ul>';
+  }
+  corpo += `</div></div>`;
+
+  const assunto = `🔔 ${totalAlertas} Alerta(s) Montana — ${company.nomeAbrev} — ${new Date().toLocaleDateString('pt-BR')}`;
+
+  const nodemailer = require('nodemailer');
+  const transporter = nodemailer.createTransport({
+    host:   smtp.host,
+    port:   parseInt(smtp.port) || 587,
+    secure: parseInt(smtp.port) === 465,
+    auth:   { user: smtp.user, pass: smtp.pass }
+  });
+
+  await transporter.sendMail({
+    from:    smtp.from || smtp.user,
+    to:      smtp.to,
+    subject: assunto,
+    html:    corpo
+  });
+
+  // Log no banco
+  try {
+    db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('email',?,?,?,'enviado')`).run(smtp.to, assunto, corpo);
+  } catch (_e) {}
+
+  return { enviado: true, total: totalAlertas };
+}
+
 module.exports = router;
+module.exports.enviarAlertasEmpresa = enviarAlertasEmpresa;
