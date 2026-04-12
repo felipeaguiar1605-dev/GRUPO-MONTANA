@@ -86,6 +86,9 @@ app.use('/api/boletins',     require('./routes/boletins'));
 // ─── Módulo RH / Departamento Pessoal ───────────────────────────
 app.use('/api/rh',           require('./routes/rh'));
 
+// ─── Módulo Ponto Eletrônico ─────────────────────────────────────
+app.use('/api/ponto',        require('./routes/ponto'));
+
 
 // ─── Módulo WebISS (NFS-e Palmas-TO) ────────────────────────────
 app.use('/api/webiss',       require('./routes/webiss'));

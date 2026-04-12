@@ -20,6 +20,8 @@ let _bolView = 'lista'; // 'lista' | 'contrato' | 'gerar'
 async function loadBoletinsTab() {
   await loadBolContratos();
   if (_bolView === 'lista') renderBolLista();
+  // Margem por posto (app-extras.js)
+  if (typeof loadMargemPorPosto === 'function') loadMargemPorPosto();
 }
 
 // ─── CONTRATOS ────────────────────────────────────────────────

@@ -2755,3 +2755,107 @@ async function toggleAtivoUsuario(id, ativo) {
     else toast(r.error || 'Erro', 'error');
   } catch(e) { toast('Erro: ' + e.message, 'error'); }
 }
+
+// ─── Fluxo de Caixa Projetado ────────────────────────────
+async function loadFluxoProjetadoContratos() {
+  const kpiEl = document.getElementById('fluxo-proj-kpis');
+  const tblEl = document.getElementById('fluxo-proj-body');
+  if (!kpiEl || !tblEl) return;
+
+  kpiEl.innerHTML = '<div style="color:#94a3b8;font-size:12px">Carregando projeção...</div>';
+
+  const d = await api('/relatorios/fluxo-projetado?meses=6');
+  if (!d || !d.projecao) { kpiEl.innerHTML = '<div style="color:#dc2626">Erro ao carregar projeção</div>'; return; }
+
+  const brl = v => 'R$\u00a0' + (v||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  const hoje = new Date();
+  const prox30 = d.projecao.find(p => new Date(p.data_recebimento_prevista) <= new Date(hoje.getTime() + 30*86400000));
+
+  kpiEl.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px">
+      <div class="kpi" style="border-left:4px solid #0891b2">
+        <div class="kpi-l">Previsto Prox. 30 dias</div>
+        <div class="kpi-v" style="color:#0891b2">${brl(prox30?.receita_prevista||0)}</div>
+        <div class="kpi-s">${prox30 ? 'Recebimento em ~' + prox30.data_recebimento_prevista : 'sem previsão'}</div>
+      </div>
+      <div class="kpi" style="border-left:4px solid #059669">
+        <div class="kpi-l">Receita Mensal Prevista</div>
+        <div class="kpi-v" style="color:#059669">${brl(d.total_mensal_previsto)}</div>
+        <div class="kpi-s">${d.contratos_ativos} contratos ativos</div>
+      </div>
+      <div class="kpi" style="border-left:4px solid #d97706">
+        <div class="kpi-l">Atraso Medio</div>
+        <div class="kpi-v" style="color:#d97706">${d.media_atraso_geral} dias</div>
+        <div class="kpi-s">média histórica dos órgãos</div>
+      </div>
+    </div>`;
+
+  tblEl.innerHTML = d.projecao.map((p) => `
+    <tr style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'table-row':'none'">
+      <td><strong>${p.mes}</strong></td>
+      <td style="color:#059669;font-weight:700">${brl(p.receita_prevista)}</td>
+      <td>${p.data_recebimento_prevista}</td>
+      <td>${p.atraso_medio_dias} dias</td>
+      <td><span style="font-size:10px;color:#64748b">▼ ${p.contratos.length} contratos</span></td>
+    </tr>
+    <tr style="display:none;background:#f8fafc">
+      <td colspan="5" style="padding:8px 16px">
+        <table style="width:100%;font-size:11px">
+          <tr style="color:#64748b"><th>Contrato</th><th>Órgão</th><th>Valor</th><th>Atraso Médio</th></tr>
+          ${p.contratos.map(c => `<tr>
+            <td>${c.numContrato}</td><td>${c.orgao}</td>
+            <td style="color:#059669">${brl(c.valor)}</td>
+            <td>${c.atraso_medio_dias}d</td>
+          </tr>`).join('')}
+        </table>
+      </td>
+    </tr>`).join('');
+}
+
+// ─── Margem por Posto ────────────────────────────────────
+async function loadMargemPorPosto() {
+  const kpiEl = document.getElementById('margem-posto-kpis');
+  const tblEl = document.getElementById('margem-posto-body');
+  if (!kpiEl || !tblEl) return;
+
+  const p = window._globalPeriod || {};
+  const qs = p.from ? `?from=${p.from}&to=${p.to}` : '';
+  const d = await api('/relatorios/margem-por-posto' + qs);
+  if (!d || d.error) { kpiEl.innerHTML = '<span style="color:#dc2626">Erro: ' + (d?.error||'sem dados') + '</span>'; return; }
+  if (!d.postos?.length) { kpiEl.innerHTML = '<span style="color:#94a3b8">Nenhum posto com dados no período</span>'; return; }
+
+  const brl = v => 'R$\u00a0' + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const pct = v => (v||0).toFixed(1) + '%';
+  const corMargem = v => v >= 20 ? '#059669' : v >= 10 ? '#d97706' : '#dc2626';
+
+  kpiEl.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px">
+      <div class="kpi" style="border-left:4px solid #059669">
+        <div class="kpi-l">Posto Mais Lucrativo</div>
+        <div class="kpi-v" style="color:#059669;font-size:14px">${d.melhor_posto?.descricao||'—'}</div>
+        <div class="kpi-s">${pct(d.melhor_posto?.margem_pct)} de margem</div>
+      </div>
+      <div class="kpi" style="border-left:4px solid #dc2626">
+        <div class="kpi-l">Posto Menor Margem</div>
+        <div class="kpi-v" style="color:#dc2626;font-size:14px">${d.pior_posto?.descricao||'—'}</div>
+        <div class="kpi-s">${pct(d.pior_posto?.margem_pct)} de margem</div>
+      </div>
+      <div class="kpi" style="border-left:4px solid #3b82f6">
+        <div class="kpi-l">Receita Total Postos</div>
+        <div class="kpi-v" style="color:#3b82f6">${brl(d.total_receita)}</div>
+        <div class="kpi-s">${d.postos.length} postos analisados</div>
+      </div>
+    </div>`;
+
+  tblEl.innerHTML = d.postos.map(p => `
+    <tr>
+      <td style="font-weight:600">${p.descricao}</td>
+      <td style="color:#64748b;font-size:11px">${p.contrato_ref||'—'}</td>
+      <td style="text-align:right">${brl(p.receita_total)}</td>
+      <td style="text-align:right;color:#dc2626">${brl(p.custo_estimado)}</td>
+      <td style="text-align:right;font-weight:700;color:${corMargem(p.margem_pct)}">${brl(p.margem_valor)}</td>
+      <td style="text-align:center">
+        <span style="background:${corMargem(p.margem_pct)}20;color:${corMargem(p.margem_pct)};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">${pct(p.margem_pct)}</span>
+      </td>
+    </tr>`).join('');
+}

@@ -178,3 +178,260 @@ tr.vinculado .vinc-sel{background:#dcfce7;border-color:#86efac}
   .kpis{grid-template-columns:1fr}
   .tabs{flex-wrap:wrap}
 }
+
+/* ═══════════════════════════════════════════════════════
+   SIDEBAR NAVIGATION
+   ═══════════════════════════════════════════════════════ */
+
+/* Hamburger button — always visible in header */
+#hamburger-btn{
+  display:none;
+  background:rgba(255,255,255,.15);
+  border:1px solid rgba(255,255,255,.3);
+  color:#fff;
+  font-size:20px;
+  width:38px;height:38px;
+  border-radius:8px;
+  cursor:pointer;
+  align-items:center;justify-content:center;
+  flex-shrink:0;
+  margin-right:4px;
+}
+
+/* App layout: sidebar + main side by side */
+#app-layout{
+  display:flex;
+  min-height:calc(100vh - 160px);
+}
+
+/* Sidebar */
+#sidenav{
+  width:220px;
+  flex-shrink:0;
+  background:#1e293b;
+  display:flex;
+  flex-direction:column;
+  overflow-y:auto;
+  border-right:1px solid #334155;
+  position:sticky;
+  top:0;
+  height:100vh;
+  overflow-y:auto;
+}
+
+/* Sidebar header */
+.sidenav-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:14px 16px 12px;
+  border-bottom:1px solid #334155;
+}
+#sidenav-close{
+  display:none;
+  background:none;border:none;color:#94a3b8;font-size:16px;cursor:pointer;padding:2px 6px;border-radius:4px;
+}
+#sidenav-close:hover{background:#334155;color:#e2e8f0}
+
+/* Nav group */
+.nav-group{
+  border-bottom:1px solid #253347;
+}
+.nav-group-hdr{
+  display:flex;align-items:center;gap:8px;
+  padding:10px 14px;
+  cursor:pointer;
+  font-size:11px;font-weight:700;color:#94a3b8;
+  text-transform:uppercase;letter-spacing:.5px;
+  transition:.15s;
+  user-select:none;
+}
+.nav-group-hdr:hover{background:#253347;color:#cbd5e1}
+.nav-group.open .nav-group-hdr{color:#60a5fa}
+.ng-icon{font-size:14px}
+.ng-label{flex:1}
+.ng-chevron{font-size:9px;transition:transform .2s}
+.nav-group.open .ng-chevron{transform:rotate(0deg)}
+.nav-group:not(.open) .ng-chevron{transform:rotate(-90deg)}
+
+/* Nav items (the .tab elements inside sidebar) */
+.nav-group-items .tab{
+  display:block;
+  padding:8px 14px 8px 36px;
+  font-size:12px;font-weight:500;color:#94a3b8;
+  cursor:pointer;transition:.1s;
+  border-bottom:none;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  border-radius:0;
+  margin-bottom:0;
+}
+.nav-group-items .tab:hover{background:#253347;color:#e2e8f0}
+.nav-group-items .tab.active{
+  background:#1d3a5f;
+  color:#60a5fa;
+  border-left:3px solid #3b82f6;
+  padding-left:33px;
+  font-weight:700;
+}
+
+/* Main content area */
+#main-content{
+  flex:1;
+  min-width:0;
+  overflow-x:hidden;
+}
+
+/* Overlay for mobile */
+#sidenav-overlay{
+  display:none;
+  position:fixed;inset:0;
+  background:rgba(0,0,0,.5);
+  z-index:999;
+  backdrop-filter:blur(2px);
+}
+
+/* ── Mobile ─────────────────────────────────────── */
+@media(max-width:768px){
+  #hamburger-btn{display:flex}
+
+  #sidenav{
+    position:fixed;
+    left:-240px;
+    top:0;bottom:0;
+    width:240px;
+    z-index:1000;
+    transition:left .25s cubic-bezier(.4,0,.2,1);
+    height:100vh;
+    box-shadow:4px 0 20px rgba(0,0,0,.4);
+  }
+  #sidenav.open{left:0}
+
+  #sidenav-overlay.visible{display:block}
+
+  #sidenav-close{display:block}
+
+  #app-layout{display:block}
+
+  #main-content{padding-bottom:60px}
+
+  .hdr h1{font-size:15px}
+  .hdr p{display:none}
+  .hdr-stats{display:none !important}
+}
+
+/* ── Desktop: hide hamburger, keep sidebar ───── */
+@media(min-width:769px){
+  #hamburger-btn{display:none !important}
+  #sidenav-close{display:none !important}
+  #sidenav-overlay{display:none !important}
+}
+
+/* ═══════════════════════════════════════════════════════
+   DASHBOARD MOBILE RESPONSIVO
+   ═══════════════════════════════════════════════════════ */
+@media(max-width:768px){
+  /* Company banner — scroll horizontal em telas pequenas */
+  #company-banner span:last-child{ flex-wrap:nowrap; overflow-x:auto; gap:4px }
+  #company-banner span:last-child button{ font-size:10px; padding:2px 7px }
+
+  /* Header compacto */
+  .gbar{ padding:8px 12px; gap:8px }
+  .gbar-info{ display:none }
+  #busca-global-input{ width:160px !important }
+
+  /* KPIs — 2 colunas no mobile */
+  .kpis{ grid-template-columns:repeat(2,1fr) !important }
+
+  /* Dashboard rows — uma coluna */
+  #dash-row2,#dash-row3{ grid-template-columns:1fr !important }
+  [style*="grid-template-columns:1fr 300px"]{ display:block !important }
+  [style*="grid-template-columns:1fr 340px"]{ display:block !important }
+  [style*="grid-template-columns:320px 1fr"]{ display:block !important }
+
+  /* Tabelas — scroll horizontal */
+  .tw{ overflow-x:auto }
+  table{ min-width:500px }
+
+  /* Toolbar — wrap */
+  .toolbar{ gap:6px }
+  .toolbar button{ font-size:9px; padding:4px 10px }
+  .toolbar-title{ font-size:11px }
+
+  /* Filter bar */
+  .fbar{ gap:6px }
+  .fbar select,.fbar input{ font-size:10px }
+
+  /* Ponto sub-abas — scroll */
+  .ponto-tabs{ overflow-x:auto; flex-wrap:nowrap !important }
+
+  /* DRE grid */
+  #pg-dre [style*="grid-template-columns"]{ display:block !important }
+  #pg-dre [style*="grid-template-columns"] > *{ margin-bottom:12px }
+
+  /* Config grid */
+  #pg-config [style*="grid-template-columns:1fr 1fr"]{ grid-template-columns:1fr !important }
+  #pg-config [style*="grid-template-columns:1fr 1fr 1fr 1fr auto"]{ grid-template-columns:1fr 1fr !important }
+  #pg-config [style*="grid-template-columns:1fr 1fr 1fr auto"]{ grid-template-columns:1fr 1fr !important }
+  #pg-config button[onclick="criarUsuarioManual()"]{ grid-column:1/-1 }
+
+  /* Formulários */
+  [style*="grid-template-columns:1fr 1fr"]:not(#dash-row2):not(#dash-row3){ grid-template-columns:1fr !important }
+
+  /* Modais */
+  .login-box{ padding:24px 20px; margin:16px }
+
+  /* Buttons menores em mobile */
+  .qbtn{ padding:4px 10px; font-size:9px }
+}
+
+@media(max-width:480px){
+  .kpis{ grid-template-columns:1fr !important }
+  .hdr-stats{ display:none !important }
+  #busca-global-input{ width:120px !important }
+}
+
+/* ─── MOBILE RESPONSIVE ─────────────────────────────────── */
+@media (max-width: 768px) {
+  body { font-size: 13px; }
+
+  /* Header compacto */
+  .hdr { flex-direction: column; gap: 8px; padding: 10px 12px; }
+  .hdr-stats { flex-wrap: wrap; gap: 6px; }
+  .hdr-stat { min-width: 60px; }
+
+  /* KPIs em grid 2 colunas */
+  .kpis, .kpi-row { grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
+  .kpi { padding: 10px 12px !important; }
+  .kpi-v { font-size: 18px !important; }
+
+  /* Tabelas com scroll horizontal */
+  .tbl-wrap { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+
+  /* Filtros empilhados */
+  .filter-bar { flex-direction: column; gap: 6px; }
+  .gbar { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
+
+  /* Botões maiores para touch */
+  button, .btn { min-height: 38px !important; }
+
+  /* Company banner compacto */
+  #company-banner { flex-wrap: wrap; gap: 4px; padding: 4px 10px; }
+  #company-banner > span:last-child { margin-left: 0 !important; width: 100%; justify-content: flex-start !important; }
+
+  /* Sidebar/nav horizontal */
+  .sidebar, nav.sidebar { width: 100% !important; height: auto !important; flex-direction: row !important; flex-wrap: wrap !important; }
+
+  /* Ocultar colunas menos importantes */
+  .hide-mobile { display: none !important; }
+
+  /* Modais full-screen */
+  .modal-box, [id*="modal"] > div { width: 95vw !important; max-width: 95vw !important; max-height: 90vh; overflow-y: auto; }
+
+  /* Charts responsivos */
+  canvas { max-width: 100% !important; }
+}
+
+@media (max-width: 480px) {
+  .kpis, .kpi-row { grid-template-columns: 1fr !important; }
+  .kpi-v { font-size: 16px !important; }
+}

@@ -98,12 +98,59 @@ async function apiLoading(url,opts,msg){
   try{ return await api(url,opts); } finally{ hideLoading(); }
 }
 
+// ─── Sidebar Navigation ───────────────────────────────────────────
+function openSidebar(){
+  document.getElementById('sidenav').classList.add('open');
+  document.getElementById('sidenav-overlay').classList.add('visible');
+}
+function closeSidebar(){
+  document.getElementById('sidenav').classList.remove('open');
+  document.getElementById('sidenav-overlay').classList.remove('visible');
+}
+function toggleNavGroup(id){
+  const g=document.getElementById(id);
+  const items=g.querySelector('.nav-group-items');
+  const isOpen=g.classList.contains('open');
+  if(isOpen){
+    g.classList.remove('open');
+    items.style.display='none';
+  } else {
+    g.classList.add('open');
+    items.style.display='block';
+  }
+}
+// navGo: opens correct group, marks item active, closes sidebar on mobile
+function navGo(id,el){
+  // Close sidebar on mobile
+  if(window.innerWidth<=768) closeSidebar();
+  // Expand parent group if collapsed
+  if(el){
+    const grp=el.closest('.nav-group');
+    if(grp && !grp.classList.contains('open')){
+      grp.classList.add('open');
+      grp.querySelector('.nav-group-items').style.display='block';
+    }
+  }
+  showTab(id,el);
+}
+
 // ─── Tabs ────────────────────────────────────────────────────────
 function showTab(id,el){
   document.querySelectorAll('.pg').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.getElementById('pg-'+id).classList.add('active');
+  // Find the sidebar item if not provided
+  if(!el) el=document.querySelector(`.nav-group-items .tab[data-tab="${id}"]`);
   if(el) el.classList.add('active');
+  // Auto-expand the group containing this item
+  if(el){
+    const grp=el.closest('.nav-group');
+    if(grp && !grp.classList.contains('open')){
+      grp.classList.add('open');
+      const items=grp.querySelector('.nav-group-items');
+      if(items) items.style.display='block';
+    }
+  }
   // Load data on tab switch
   if(id==='ext') loadExtratos();
   if(id==='nfs') loadNfs();
@@ -751,6 +798,8 @@ async function loadContratos(){
             ${contStatusBadge(c.status)}
             <button onclick="event.stopPropagation();abrirDetalheContrato('${numEsc}');"
               style="padding:3px 10px;font-size:10px;border:1px solid #7c3aed;border-radius:6px;background:#f5f3ff;color:#7c3aed;cursor:pointer;font-weight:600">📊 Detalhe</button>
+            <button onclick="event.stopPropagation();verTimelineContrato(${c.id});"
+              style="padding:3px 10px;font-size:10px;border:1px solid #0891b2;border-radius:6px;background:#ecfeff;color:#0891b2;cursor:pointer;font-weight:600">📅 Timeline</button>
             <button onclick="event.stopPropagation();abrirEditarContrato('${numEsc}');"
               style="padding:3px 10px;font-size:10px;border:1px solid #0284c7;border-radius:6px;background:#f0f9ff;color:#0284c7;cursor:pointer;font-weight:600">✏️ Editar</button>
             <span style="font-size:18px;color:#94a3b8;transition:.2s" id="arrow-${id}">&#9660;</span>
@@ -2271,6 +2320,8 @@ async function loadFluxoProjetado() {
   if (typeof loadFluxoParcelas === 'function') loadFluxoParcelas();
   // Inadimplência por contrato
   if (typeof loadInadimplencia === 'function') loadInadimplencia();
+  // Fluxo projetado por contratos (app-extras.js)
+  if (typeof loadFluxoProjetadoContratos === 'function') loadFluxoProjetadoContratos();
 }
 
 
@@ -3269,6 +3320,81 @@ function fecharModalNovoFunc() {
 function fecharModalNovaFolha() {
   const el = document.getElementById('modal-nova-folha');
   if (el) el.style.display = 'none';
+}
+
+// ─── TIMELINE DE CONTRATO ────────────────────────────────────────
+async function verTimelineContrato(id) {
+  const d = await api('/contratos/' + id + '/timeline');
+  if (!d || d.error) { toast('Erro ao carregar timeline', 'error'); return; }
+  const c = d.contrato;
+  const brl = v => 'R$\u00a0' + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const cor = d.dias_para_vencer == null ? '#059669' : d.dias_para_vencer < 0 ? '#dc2626' : d.dias_para_vencer < 30 ? '#d97706' : '#059669';
+
+  const html = `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;display:flex;align-items:center;justify-content:center" id="modal-timeline">
+      <div style="background:#fff;border-radius:12px;width:700px;max-width:95vw;max-height:90vh;overflow-y:auto;padding:24px">
+        <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:16px">
+          <div>
+            <div style="font-size:18px;font-weight:800;color:#0f172a">${c.numContrato}</div>
+            <div style="font-size:13px;color:#64748b">${c.orgao||''} · ${c.contrato||''}</div>
+          </div>
+          <button onclick="document.getElementById('modal-timeline').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#64748b">✕</button>
+        </div>
+
+        <!-- KPIs -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+          <div style="background:#f0fdf4;border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:10px;color:#64748b;font-weight:700">TOTAL PAGO</div>
+            <div style="font-size:14px;font-weight:800;color:#059669">${brl(d.total_pago)}</div>
+          </div>
+          <div style="background:#eff6ff;border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:10px;color:#64748b;font-weight:700">NFs EMITIDAS</div>
+            <div style="font-size:14px;font-weight:800;color:#2563eb">${brl(d.total_nfs)}</div>
+          </div>
+          <div style="background:#fef3c7;border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:10px;color:#64748b;font-weight:700">BOLETINS</div>
+            <div style="font-size:14px;font-weight:800;color:#d97706">${d.boletins.length} competências</div>
+          </div>
+          <div style="background:${d.dias_para_vencer != null && d.dias_para_vencer < 30 ? '#fef2f2' : '#f0fdf4'};border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:10px;color:#64748b;font-weight:700">VENCIMENTO</div>
+            <div style="font-size:14px;font-weight:800;color:${cor}">${d.dias_para_vencer != null ? (d.dias_para_vencer < 0 ? 'Vencido' : d.dias_para_vencer + 'd') : '—'}</div>
+          </div>
+        </div>
+
+        <!-- Barra de progresso -->
+        <div style="margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:4px">
+            <span>Execução do contrato</span><span>${d.percentual_executado}% de ${brl(d.valor_total_estimado)}</span>
+          </div>
+          <div style="background:#e2e8f0;border-radius:4px;height:10px">
+            <div style="background:${d.percentual_executado>80?'#059669':'#3b82f6'};height:10px;border-radius:4px;width:${d.percentual_executado}%;transition:width .5s"></div>
+          </div>
+        </div>
+
+        <!-- Últimos pagamentos -->
+        ${d.pagamentos.length ? `
+        <div style="margin-bottom:16px">
+          <div style="font-size:12px;font-weight:700;color:#475569;margin-bottom:8px">Últimos Pagamentos</div>
+          <table style="width:100%;font-size:11px;border-collapse:collapse">
+            ${d.pagamentos.slice(0,6).map(p => `
+              <tr style="border-bottom:1px solid #f1f5f9">
+                <td style="padding:5px">${p.data_iso}</td>
+                <td style="padding:5px;color:#64748b">${p.competencia||'—'}</td>
+                <td style="padding:5px;text-align:right;color:#059669;font-weight:700">${brl(p.credito)}</td>
+              </tr>`).join('')}
+          </table>
+        </div>` : ''}
+
+        <!-- Aditivos -->
+        ${d.aditivos.length ? `
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#475569;margin-bottom:8px">Aditivos / Reajustes</div>
+          ${d.aditivos.map(a => `<div style="background:#f8fafc;border-radius:6px;padding:8px;margin-bottom:6px;font-size:11px"><strong>${a.tipo}</strong>${a.data ? ' · ' + a.data : ''}: ${a.descricao}</div>`).join('')}
+        </div>` : ''}
+      </div>
+    </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
 }
 
 // ─── CORREÇÃO DE NFs ──────────────────────────────────────────────

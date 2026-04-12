@@ -4273,4 +4273,216 @@ router.get('/relatorio/retencao', (req, res) => {
   } catch(e) { errRes(res, e); }
 });
 
+// GET /relatorios/fluxo-projetado?meses=6
+router.get('/relatorios/fluxo-projetado', (req, res) => {
+  const db = req.db;
+  const meses = parseInt(req.query.meses) || 6;
+
+  // Contratos ativos com valor
+  const contratos = db.prepare(`
+    SELECT id, numContrato, orgao, contrato, valor_mensal_liquido, valor_mensal_bruto,
+           vigencia_fim, status
+    FROM contratos
+    WHERE (status IS NULL OR status != 'encerrado')
+      AND (valor_mensal_liquido > 0 OR valor_mensal_bruto > 0)
+    ORDER BY valor_mensal_liquido DESC
+  `).all();
+
+  // Calcular atraso médio por contrato (últimos 6 meses)
+  const hoje = new Date();
+  const ha180 = new Date(hoje - 180 * 86400000).toISOString().split('T')[0];
+
+  const contratosComAtraso = contratos.map(c => {
+    let atraso_medio = 15; // padrão
+    try {
+      const pagamentos = db.prepare(`
+        SELECT data_iso, competencia FROM extratos
+        WHERE contrato_vinculado = ? AND data_iso >= ? AND credito > 0
+        ORDER BY data_iso DESC LIMIT 12
+      `).all(c.numContrato, ha180);
+
+      if (pagamentos.length >= 2) {
+        const atrasos = pagamentos.map(p => {
+          if (!p.competencia) return 15;
+          const [ano, mes] = p.competencia.split('-');
+          const esperado = new Date(parseInt(ano), parseInt(mes) - 1, 10);
+          const real = new Date(p.data_iso);
+          return Math.max(0, Math.round((real - esperado) / 86400000));
+        });
+        atraso_medio = Math.round(atrasos.reduce((a,b) => a+b, 0) / atrasos.length);
+      }
+    } catch(e) {}
+
+    return {
+      ...c,
+      valor: c.valor_mensal_liquido || c.valor_mensal_bruto,
+      atraso_medio_dias: atraso_medio
+    };
+  });
+
+  // Projetar próximos N meses
+  const projecao = [];
+  for (let i = 1; i <= meses; i++) {
+    const d = new Date(hoje.getFullYear(), hoje.getMonth() + i, 1);
+    const mesAno = d.toISOString().slice(0, 7);
+    const receitaPrevista = contratosComAtraso.reduce((s, c) => s + (c.valor || 0), 0);
+    const atrasoMedio = contratosComAtraso.length
+      ? Math.round(contratosComAtraso.reduce((s,c) => s + c.atraso_medio_dias, 0) / contratosComAtraso.length)
+      : 15;
+    const dataRecebimento = new Date(d.getTime() + atrasoMedio * 86400000).toISOString().split('T')[0];
+
+    projecao.push({
+      mes: mesAno,
+      receita_prevista: receitaPrevista,
+      data_recebimento_prevista: dataRecebimento,
+      atraso_medio_dias: atrasoMedio,
+      contratos: contratosComAtraso.map(c => ({
+        numContrato: c.numContrato,
+        orgao: c.orgao,
+        valor: c.valor,
+        atraso_medio_dias: c.atraso_medio_dias
+      }))
+    });
+  }
+
+  const total_mensal = contratosComAtraso.reduce((s,c) => s + (c.valor||0), 0);
+  const media_atraso = contratosComAtraso.length
+    ? Math.round(contratosComAtraso.reduce((s,c) => s + c.atraso_medio_dias, 0) / contratosComAtraso.length)
+    : 15;
+
+  res.json({ projecao, total_mensal_previsto: total_mensal, media_atraso_geral: media_atraso, contratos_ativos: contratosComAtraso.length });
+});
+
+// GET /contratos/:id/timeline
+router.get('/contratos/:id/timeline', (req, res) => {
+  const db = req.db;
+  const id = req.params.id;
+
+  const contrato = db.prepare('SELECT * FROM contratos WHERE id=?').get(id);
+  if (!contrato) return res.status(404).json({ error: 'Contrato não encontrado' });
+
+  // Pagamentos recebidos (últimos 12)
+  const pagamentos = db.prepare(`
+    SELECT data_iso, credito, historico, competencia FROM extratos
+    WHERE contrato_vinculado = ? AND credito > 0
+    ORDER BY data_iso DESC LIMIT 12
+  `).all(contrato.numContrato);
+
+  // NFs emitidas
+  const nfs = db.prepare(`
+    SELECT numero, data_emissao, valor_bruto, valor_liquido, status_conciliacao FROM notas_fiscais
+    WHERE contrato_ref = ? ORDER BY data_emissao DESC LIMIT 12
+  `).all(contrato.numContrato);
+
+  // Boletins
+  let boletins = [];
+  try {
+    boletins = db.prepare(`
+      SELECT b.competencia, b.valor_total, b.status FROM bol_boletins b
+      JOIN bol_contratos bc ON b.contrato_id = bc.id
+      WHERE bc.contrato_ref = ? ORDER BY b.competencia DESC LIMIT 6
+    `).all(contrato.numContrato);
+  } catch(e) {}
+
+  // Calcular % executado
+  const hoje = new Date();
+  const inicio = contrato.vigencia_inicio ? new Date(contrato.vigencia_inicio) : null;
+  const fim = contrato.vigencia_fim ? new Date(contrato.vigencia_fim) : null;
+  const meses_vigencia = inicio && fim ? Math.max(1, Math.round((fim - inicio) / (30 * 86400000))) : 12;
+  const valor_total_estimado = (contrato.valor_mensal_bruto || 0) * meses_vigencia;
+  const pct_executado = valor_total_estimado > 0 ? Math.min(100, Math.round((contrato.total_pago || 0) / valor_total_estimado * 100)) : 0;
+  const dias_para_vencer = fim ? Math.round((fim - hoje) / 86400000) : null;
+
+  // Aditivos (do campo obs_reajuste ou obs)
+  const aditivos = [];
+  if (contrato.obs_reajuste) aditivos.push({ tipo: 'Reajuste', descricao: contrato.obs_reajuste, data: contrato.data_ultimo_reajuste });
+  if (contrato.obs) {
+    const matches = contrato.obs.match(/\d+[°ºo]\s*[Tt][Aa]/g);
+    if (matches) matches.forEach((m, i) => aditivos.push({ tipo: 'Aditivo', descricao: m, data: null }));
+  }
+
+  res.json({
+    contrato,
+    pagamentos,
+    nfs,
+    boletins,
+    aditivos,
+    total_pago: contrato.total_pago || 0,
+    total_nfs: nfs.reduce((s, n) => s + (n.valor_bruto || 0), 0),
+    percentual_executado: pct_executado,
+    valor_total_estimado,
+    dias_para_vencer,
+    meses_vigencia
+  });
+});
+
+// GET /relatorios/margem-por-posto
+router.get('/relatorios/margem-por-posto', (req, res) => {
+  const db = req.db;
+  const { from, to, contrato } = req.query;
+  const dateFrom = from || new Date().getFullYear() + '-01-01';
+  const dateTo   = to   || new Date().getFullYear() + '-12-31';
+
+  // Verificar se tabelas de boletins existem
+  const tblExiste = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bol_postos'").get();
+  if (!tblExiste) return res.json({ postos: [], total_receita: 0, message: 'Tabela bol_postos não encontrada' });
+
+  try {
+    let query = `
+      SELECT
+        p.id, p.descricao, p.tipo_posto, p.qtd_funcionarios,
+        bc.contrato_ref, bc.orgao,
+        COALESCE(SUM(bb.valor_total), 0) as receita_total,
+        COUNT(DISTINCT bb.id) as qtd_boletins
+      FROM bol_postos p
+      JOIN bol_contratos bc ON p.contrato_id = bc.id
+      LEFT JOIN bol_boletins bb ON bb.contrato_id = bc.id
+        AND substr(bb.competencia,1,7) BETWEEN substr(@from,1,7) AND substr(@to,1,7)
+      WHERE 1=1
+    `;
+    const params = { from: dateFrom, to: dateTo };
+    if (contrato) { query += ' AND bc.contrato_ref = @contrato'; params.contrato = contrato; }
+    query += ' GROUP BY p.id ORDER BY receita_total DESC';
+
+    const postos = db.prepare(query).all(params);
+
+    // Calcular custo estimado por posto (proporcional à receita do contrato)
+    // Buscar folha do contrato no período
+    const folhaPorContrato = {};
+    const folhas = db.prepare(`
+      SELECT contrato_ref, SUM(valor_bruto) total
+      FROM despesas
+      WHERE UPPER(TRIM(categoria)) LIKE 'FOLHA%'
+        AND data_iso BETWEEN @from AND @to
+        AND contrato_ref IS NOT NULL AND contrato_ref != ''
+      GROUP BY contrato_ref
+    `).all({ from: dateFrom, to: dateTo });
+    folhas.forEach(f => { folhaPorContrato[f.contrato_ref] = f.total; });
+
+    // Postos por contrato para dividir proporcionalmente
+    const postosPorContrato = {};
+    postos.forEach(p => {
+      if (!postosPorContrato[p.contrato_ref]) postosPorContrato[p.contrato_ref] = 0;
+      postosPorContrato[p.contrato_ref]++;
+    });
+
+    const resultado = postos.map(p => {
+      const folhaContrato = folhaPorContrato[p.contrato_ref] || 0;
+      const nPostos = postosPorContrato[p.contrato_ref] || 1;
+      const custo_estimado = folhaContrato / nPostos;
+      const margem_valor = p.receita_total - custo_estimado;
+      const margem_pct = p.receita_total > 0 ? (margem_valor / p.receita_total * 100) : 0;
+      return { ...p, custo_estimado, margem_valor, margem_pct: Math.round(margem_pct * 10) / 10 };
+    }).sort((a, b) => a.margem_pct - b.margem_pct);
+
+    const total_receita = resultado.reduce((s, p) => s + p.receita_total, 0);
+    const melhor = resultado.reduce((m, p) => p.margem_pct > (m?.margem_pct||0) ? p : m, null);
+    const pior   = resultado.find(p => p.receita_total > 0) || null;
+
+    res.json({ postos: resultado, total_receita, melhor_posto: melhor, pior_posto: pior });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

@@ -41,6 +41,7 @@
 
 <!-- Header -->
 <div class="hdr">
+  <button id="hamburger-btn" onclick="openSidebar()" title="Menu">☰</button>
   <div style="font-size:28px">⚖️</div>
   <div>
     <h1 id="hdr-title">Montana Multi-Empresa — Conciliação v3</h1>
@@ -101,42 +102,101 @@
   </div>
 </div>
 
-<!-- Tabs -->
-<div class="tabs">
-  <div class="tab active" data-tab="dash" onclick="showTab('dash',this)">📊 Dashboard</div>
-  <div class="tab" data-tab="ext" onclick="showTab('ext',this)">🏦 Extratos</div>
-  <div class="tab" data-tab="nfs" onclick="showTab('nfs',this)">🧾 Notas Fiscais</div>
-  <div class="tab" data-tab="cont" onclick="showTab('cont',this)">📋 Contratos</div>
-  <div class="tab" data-tab="pag" onclick="showTab('pag',this)">💵 Pagamentos</div>
-  <div class="tab" data-tab="desp" onclick="showTab('desp',this)">💸 Despesas</div>
-  <div class="tab" data-tab="pref" onclick="showTab('pref',this)" style="color:#7c3aed;font-weight:700">🏛️ Prefeitura</div>
-  <div class="tab" data-tab="import" onclick="showTab('import',this)">📥 Importar</div>
-  <div class="tab" data-tab="fluxo" onclick="showTab('fluxo',this)">📈 Fluxo de Caixa</div>
-  <div class="tab" data-tab="relat" onclick="showTab('relat',this)">📄 Relatórios</div>
-  <div class="tab" data-tab="certidoes" onclick="showTab('certidoes',this)" style="color:#059669;font-weight:700">📋 Certidões</div>
-  <div class="tab" data-tab="licitacoes" onclick="showTab('licitacoes',this)" style="color:#0369a1;font-weight:700">🏛️ Licitações</div>
-  <div class="tab" data-tab="calculadora" onclick="showTab('calculadora',this)" style="color:#7c3aed;font-weight:700">🧮 Calculadora</div>
-  <div class="tab" data-tab="dre" onclick="showTab('dre',this)" style="color:#d97706;font-weight:700">📊 DRE</div>
-  <div class="tab" data-tab="margem" onclick="showTab('margem',this)" style="color:#dc2626;font-weight:700">💰 Margem</div>
-  <div class="tab" data-tab="reajuste" onclick="showTab('reajuste',this)" style="color:#7c3aed;font-weight:700">📈 Reajuste</div>
-  <div class="tab" data-tab="retencoes" onclick="showTab('retencoes',this)" style="color:#0e7490;font-weight:700">🏛️ Retenções</div>
-  <div class="tab" data-tab="conta-vinculada" onclick="showTab('conta-vinculada',this)" style="color:#0891b2;font-weight:700">🏦 Conta Vinculada</div>
-  <div class="tab" data-tab="rh" onclick="showTab('rh',this)" style="color:#0891b2;font-weight:700">👥 RH / DP</div>
-  <div class="tab" data-tab="ponto" onclick="showTab('ponto',this)" style="color:#0f766e;font-weight:700">🕐 Ponto</div>
-  <div class="tab" data-tab="boletins" onclick="showTab('boletins',this)" style="color:#7c2d12;font-weight:700">📄 Boletins</div>
-  <div class="tab" data-tab="conciliacao3v" onclick="showTab('conciliacao3v',this)" style="color:#059669;font-weight:700">🔗 Conciliação 3V</div>
-  <div class="tab" data-tab="keywords" onclick="showTab('keywords',this)" style="color:#64748b;font-weight:700">⚙️ Keywords</div>
-  <div class="tab" id="tab-usuarios" data-tab="usuarios" onclick="showTab('usuarios',this)" style="color:#1d4ed8;font-weight:700;display:none">👥 Usuários</div>
-  <div class="tab" data-tab="consolidado" onclick="showTab('consolidado',this)" style="color:#7c3aed;font-weight:700">🏛️ Consolidado</div>
-  <div class="tab" data-tab="auditoria" onclick="showTab('auditoria',this)" style="color:#475569;font-weight:700">🔍 Auditoria</div>
-  <div class="tab" data-tab="estoque" onclick="showTab('estoque',this)" style="color:#0f766e;font-weight:700">📦 Estoque</div>
-  <div class="tab" id="tab-config" data-tab="config" onclick="showTab('config',this)" style="color:#475569;font-weight:700">⚙️ Config</div>
-</div>
+<!-- Sidebar Navigation -->
+<div id="app-layout">
+
+<div id="sidenav-overlay" onclick="closeSidebar()"></div>
+
+<nav id="sidenav">
+  <div class="sidenav-header">
+    <span style="font-size:15px;font-weight:800;color:#e2e8f0">⚖️ Montana</span>
+    <button id="sidenav-close" onclick="closeSidebar()" title="Fechar menu">✕</button>
+  </div>
+
+  <div class="nav-group open" id="ng-inicio">
+    <div class="nav-group-hdr" onclick="toggleNavGroup('ng-inicio')">
+      <span class="ng-icon">📊</span><span class="ng-label">Início</span><span class="ng-chevron">▾</span>
+    </div>
+    <div class="nav-group-items">
+      <div class="tab active" data-tab="dash" onclick="navGo('dash',this)">📊 Dashboard</div>
+      <div class="tab" data-tab="consolidado" onclick="navGo('consolidado',this)">🏛️ Consolidado</div>
+    </div>
+  </div>
+
+  <div class="nav-group" id="ng-financeiro">
+    <div class="nav-group-hdr" onclick="toggleNavGroup('ng-financeiro')">
+      <span class="ng-icon">💼</span><span class="ng-label">Financeiro</span><span class="ng-chevron">▾</span>
+    </div>
+    <div class="nav-group-items" style="display:none">
+      <div class="tab" data-tab="ext" onclick="navGo('ext',this)">🏦 Extratos</div>
+      <div class="tab" data-tab="nfs" onclick="navGo('nfs',this)">🧾 Notas Fiscais</div>
+      <div class="tab" data-tab="cont" onclick="navGo('cont',this)">📋 Contratos</div>
+      <div class="tab" data-tab="pag" onclick="navGo('pag',this)">💵 Pagamentos</div>
+      <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
+      <div class="tab" data-tab="fluxo" onclick="navGo('fluxo',this)">📈 Fluxo de Caixa</div>
+      <div class="tab" data-tab="conta-vinculada" onclick="navGo('conta-vinculada',this)">🏦 Conta Vinculada</div>
+      <div class="tab" data-tab="conciliacao3v" onclick="navGo('conciliacao3v',this)">🔗 Conciliação 3V</div>
+      <div class="tab" data-tab="import" onclick="navGo('import',this)">📥 Importar</div>
+    </div>
+  </div>
+
+  <div class="nav-group" id="ng-fiscal">
+    <div class="nav-group-hdr" onclick="toggleNavGroup('ng-fiscal')">
+      <span class="ng-icon">📑</span><span class="ng-label">Fiscal / Legal</span><span class="ng-chevron">▾</span>
+    </div>
+    <div class="nav-group-items" style="display:none">
+      <div class="tab" data-tab="pref" onclick="navGo('pref',this)">🏛️ Prefeitura / NFS-e</div>
+      <div class="tab" data-tab="certidoes" onclick="navGo('certidoes',this)">📋 Certidões</div>
+      <div class="tab" data-tab="licitacoes" onclick="navGo('licitacoes',this)">🏛️ Licitações</div>
+      <div class="tab" data-tab="retencoes" onclick="navGo('retencoes',this)">🏛️ Retenções</div>
+      <div class="tab" data-tab="reajuste" onclick="navGo('reajuste',this)">📈 Reajuste</div>
+      <div class="tab" data-tab="boletins" onclick="navGo('boletins',this)">📄 Boletins</div>
+    </div>
+  </div>
+
+  <div class="nav-group" id="ng-pessoas">
+    <div class="nav-group-hdr" onclick="toggleNavGroup('ng-pessoas')">
+      <span class="ng-icon">👥</span><span class="ng-label">Pessoas</span><span class="ng-chevron">▾</span>
+    </div>
+    <div class="nav-group-items" style="display:none">
+      <div class="tab" data-tab="rh" onclick="navGo('rh',this)">👥 RH / DP</div>
+      <div class="tab" data-tab="ponto" onclick="navGo('ponto',this)">🕐 Ponto</div>
+      <div class="tab" id="tab-usuarios" data-tab="usuarios" onclick="navGo('usuarios',this)" style="display:none">👥 Usuários</div>
+    </div>
+  </div>
+
+  <div class="nav-group" id="ng-analise">
+    <div class="nav-group-hdr" onclick="toggleNavGroup('ng-analise')">
+      <span class="ng-icon">📈</span><span class="ng-label">Análise</span><span class="ng-chevron">▾</span>
+    </div>
+    <div class="nav-group-items" style="display:none">
+      <div class="tab" data-tab="dre" onclick="navGo('dre',this)">📊 DRE</div>
+      <div class="tab" data-tab="margem" onclick="navGo('margem',this)">💰 Margem</div>
+      <div class="tab" data-tab="relat" onclick="navGo('relat',this)">📄 Relatórios</div>
+      <div class="tab" data-tab="calculadora" onclick="navGo('calculadora',this)">🧮 Calculadora</div>
+    </div>
+  </div>
+
+  <div class="nav-group" id="ng-sistema">
+    <div class="nav-group-hdr" onclick="toggleNavGroup('ng-sistema')">
+      <span class="ng-icon">⚙️</span><span class="ng-label">Sistema</span><span class="ng-chevron">▾</span>
+    </div>
+    <div class="nav-group-items" style="display:none">
+      <div class="tab" data-tab="estoque" onclick="navGo('estoque',this)">📦 Estoque</div>
+      <div class="tab" data-tab="keywords" onclick="navGo('keywords',this)">⚙️ Keywords</div>
+      <div class="tab" data-tab="auditoria" onclick="navGo('auditoria',this)">🔍 Auditoria</div>
+      <div class="tab" id="tab-config" data-tab="config" onclick="navGo('config',this)">⚙️ Config</div>
+    </div>
+  </div>
+</nav>
+
+<div id="main-content">
+
 
 <!-- Dashboard -->
 <div id="pg-dash" class="pg active">
   <!-- Alerta: créditos sem NF correspondente -->
-  <div id="dash-alerta-sem-nf" style="display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 16px;margin-bottom:10px;display:flex;align-items:center;gap:10px;cursor:pointer" onclick="showTab('ext',document.querySelector('[data-tab=ext]'))">
+  <div id="dash-alerta-sem-nf" style="display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 16px;margin-bottom:10px;display:flex;align-items:center;gap:10px;cursor:pointer" onclick="navGo('ext',document.querySelector('[data-tab=ext]'))">
     <span style="font-size:16px">⚠️</span>
     <span id="dash-alerta-sem-nf-texto" style="font-size:12px;color:#92400e;font-weight:600"></span>
     <span style="font-size:10px;color:#b45309;margin-left:auto">Clique para ver extratos →</span>
@@ -186,7 +246,7 @@
     <div class="dash-panel">
       <div class="dash-panel-title" style="display:flex;align-items:center;justify-content:space-between">
         <span>🕐 Ponto — Hoje</span>
-        <button onclick="showTab('ponto',document.querySelector('[data-tab=ponto]'))" style="font-size:9px;padding:2px 8px;border:1px solid #e2e8f0;background:#f8fafc;border-radius:4px;cursor:pointer;color:#64748b">Ver tudo →</button>
+        <button onclick="navGo('ponto',document.querySelector('[data-tab=ponto]'))" style="font-size:9px;padding:2px 8px;border:1px solid #e2e8f0;background:#f8fafc;border-radius:4px;cursor:pointer;color:#64748b">Ver tudo →</button>
       </div>
       <div id="dash-ponto" style="display:flex;flex-direction:column;gap:6px;padding-top:4px">
         <div style="text-align:center;color:#94a3b8;font-size:11px;padding:20px">Carregando…</div>
@@ -668,6 +728,28 @@
     </div>
     <div id="fluxo-parcelas-body" style="padding:14px">
       <div class="loading">Carregando parcelas…</div>
+    </div>
+  </div>
+
+  <!-- Fluxo Projetado por Contratos -->
+  <div style="margin-top:20px;border:1px solid #bae6fd;border-radius:10px;overflow:hidden">
+    <div style="background:#f0f9ff;padding:12px 16px;border-bottom:1px solid #bae6fd;display:flex;align-items:center;gap:8px">
+      <span style="font-size:14px">📅</span>
+      <span style="font-weight:700;font-size:12px;color:#1e293b">Fluxo de Caixa Projetado — Próximos 6 Meses</span>
+      <button onclick="loadFluxoProjetadoContratos()" style="margin-left:auto;background:#e0f2fe;color:#0891b2;border:1px solid #7dd3fc;border-radius:6px;padding:4px 12px;font-size:10px;font-weight:700;cursor:pointer">🔄 Atualizar</button>
+    </div>
+    <div style="padding:12px 16px">
+      <div id="fluxo-proj-kpis"></div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:#f1f5f9;font-size:11px;color:#64748b">
+          <th style="padding:8px;text-align:left">Mês</th>
+          <th style="padding:8px;text-align:right">Receita Prevista</th>
+          <th style="padding:8px;text-align:center">Data Recebimento</th>
+          <th style="padding:8px;text-align:center">Atraso Médio</th>
+          <th style="padding:8px"></th>
+        </tr></thead>
+        <tbody id="fluxo-proj-body"></tbody>
+      </table>
     </div>
   </div>
 
@@ -1464,6 +1546,30 @@
     <p style="font-size:11px;color:#94a3b8">Gestão de contratos de vigilância e geração automática de boletins mensais em PDF</p>
   </div>
   <div id="bol-content"><div class="loading">Carregando...</div></div>
+
+  <!-- Margem por Posto -->
+  <div style="margin-top:24px;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">
+    <div style="background:#f8fafc;padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:8px">
+      <span style="font-size:14px">📊</span>
+      <span style="font-weight:700;font-size:12px;color:#1e293b">Margem Real por Posto</span>
+      <span style="font-size:9px;color:#94a3b8;margin-left:4px">custo estimado via folha de pagamento por contrato</span>
+      <button onclick="loadMargemPorPosto()" style="margin-left:auto;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;padding:4px 12px;font-size:10px;font-weight:700;cursor:pointer">🔄 Atualizar</button>
+    </div>
+    <div style="padding:12px 16px">
+      <div id="margem-posto-kpis"></div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:#f1f5f9;font-size:11px;color:#64748b">
+          <th style="padding:8px;text-align:left">Posto</th>
+          <th style="padding:8px;text-align:left">Contrato</th>
+          <th style="padding:8px;text-align:right">Receita</th>
+          <th style="padding:8px;text-align:right">Custo Est.</th>
+          <th style="padding:8px;text-align:right">Margem R$</th>
+          <th style="padding:8px;text-align:center">Margem %</th>
+        </tr></thead>
+        <tbody id="margem-posto-body"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <!-- Modal: A Receber por Contrato -->
@@ -1928,6 +2034,52 @@
       </div>
     </div>
 
+    <!-- Seção 6: Criar Usuários para Colaboradores -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:20px;margin-bottom:14px">
+      <h3 style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px;display:flex;align-items:center;gap:6px">👥 Criar Logins para Colaboradores</h3>
+      <p style="font-size:10px;color:#94a3b8;margin-bottom:14px">Cria automaticamente um login para cada funcionário ativo no RH. Senha inicial: <strong>Montana@2026</strong> — orientar colaboradores a trocar no primeiro acesso.</p>
+
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        <button onclick="criarUsuariosFuncionarios()" style="padding:8px 18px;font-size:11px;font-weight:700;border:none;border-radius:7px;background:#0f766e;color:#fff;cursor:pointer">⚡ Gerar Logins Automáticos</button>
+        <button onclick="loadUsuariosConfig()" style="padding:8px 14px;font-size:11px;font-weight:600;border:1px solid #e2e8f0;border-radius:7px;background:#f8fafc;color:#475569;cursor:pointer">🔄 Atualizar Lista</button>
+      </div>
+
+      <!-- Criar usuário manual -->
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;margin-bottom:12px">
+        <div style="font-size:11px;font-weight:700;color:#334155;margin-bottom:10px">➕ Adicionar Usuário Manualmente</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:8px;align-items:end">
+          <div>
+            <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Nome completo</label>
+            <input id="cfg-novo-nome" type="text" placeholder="João da Silva" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Login</label>
+            <input id="cfg-novo-login" type="text" placeholder="joao.silva" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Perfil</label>
+            <select id="cfg-novo-role" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+              <option value="rh">👷 RH (só Ponto)</option>
+              <option value="operacional">🔧 Operacional</option>
+              <option value="financeiro">💼 Financeiro</option>
+              <option value="visualizador">👁 Visualizador</option>
+              <option value="admin">🔑 Admin</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Lotação (setor/obra)</label>
+            <input id="cfg-novo-lotacao" type="text" placeholder="Ex: Administrativo, Posto UFT" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+          </div>
+          <button onclick="criarUsuarioManual()" style="padding:7px 14px;font-size:11px;font-weight:700;border:none;border-radius:6px;background:#1d4ed8;color:#fff;cursor:pointer;white-space:nowrap">➕ Criar</button>
+        </div>
+      </div>
+
+      <!-- Lista de usuários -->
+      <div id="cfg-usuarios-lista" style="max-height:300px;overflow-y:auto">
+        <div style="text-align:center;padding:20px;color:#94a3b8;font-size:11px">Clique em "Atualizar Lista" para ver os usuários</div>
+      </div>
+    </div>
+
     <!-- Botão Salvar -->
     <div style="display:flex;gap:10px;justify-content:flex-end">
       <button onclick="loadConfig()" style="padding:9px 20px;font-size:12px;font-weight:600;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;color:#475569;cursor:pointer">↩ Restaurar</button>
@@ -2330,6 +2482,9 @@
              padding:8px 12px;font-size:12px;cursor:pointer">Conectar Drive</button>
   </div>
 </div>
+
+</div><!-- /#main-content -->
+</div><!-- /#app-layout -->
 
 <script src="/app.js"></script>
 <script src="/app-extras.js"></script>

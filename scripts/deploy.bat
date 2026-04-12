@@ -35,10 +35,11 @@ echo        (excluindo: node_modules, data, .env, logs)
 echo.
 
 :: rsync via SSH — sincroniza apenas o código, não os dados
-scp -i "%SSH_KEY%" -r "%LOCAL_PATH%\src"     %GCP_USER%@%GCP_IP%:%GCP_PATH%/
-scp -i "%SSH_KEY%" -r "%LOCAL_PATH%\public"  %GCP_USER%@%GCP_IP%:%GCP_PATH%/
-scp -i "%SSH_KEY%"    "%LOCAL_PATH%\package.json" %GCP_USER%@%GCP_IP%:%GCP_PATH%/
-scp -i "%SSH_KEY%"    "%LOCAL_PATH%\ecosystem.config.js" %GCP_USER%@%GCP_IP%:%GCP_PATH%/
+scp -i "%SSH_KEY%" -r "%LOCAL_PATH%\src"      %GCP_USER%@%GCP_IP%:%GCP_PATH%/
+scp -i "%SSH_KEY%" -r "%LOCAL_PATH%\public"   %GCP_USER%@%GCP_IP%:%GCP_PATH%/
+scp -i "%SSH_KEY%" -r "%LOCAL_PATH%\scripts"  %GCP_USER%@%GCP_IP%:%GCP_PATH%/
+scp -i "%SSH_KEY%"    "%LOCAL_PATH%\package.json"         %GCP_USER%@%GCP_IP%:%GCP_PATH%/
+scp -i "%SSH_KEY%"    "%LOCAL_PATH%\ecosystem.config.js"  %GCP_USER%@%GCP_IP%:%GCP_PATH%/
 
 echo.
 echo  [2/3] Instalando dependências (se necessário)...

@@ -60,11 +60,16 @@ function ensureTable(db) {
       senha_hash  TEXT NOT NULL,
       role        TEXT NOT NULL DEFAULT 'visualizador',
       ativo       INTEGER NOT NULL DEFAULT 1,
+      lotacao     TEXT DEFAULT '',
       criado_por  TEXT DEFAULT '',
       created_at  TEXT DEFAULT (datetime('now')),
       updated_at  TEXT DEFAULT (datetime('now'))
     );
   `);
+  // Migration: add lotacao if missing
+  try { db.exec("ALTER TABLE usuarios ADD COLUMN lotacao TEXT DEFAULT ''"); } catch(e) {}
+  // Migration: add empresa if missing
+  try { db.exec("ALTER TABLE usuarios ADD COLUMN empresa TEXT DEFAULT ''"); } catch(e) {}
 }
 
 // ─── Seed: garante que o admin padrão existe ──────────────────────
@@ -95,7 +100,7 @@ function seedAdmin(db) {
 router.get('/', soAdmin, (req, res) => {
   ensureTable(req.db);
   const rows = req.db.prepare(`
-    SELECT id, usuario, nome, email, role, ativo, criado_por, created_at, updated_at
+    SELECT id, usuario, usuario AS login, nome, email, role, ativo, lotacao, criado_por, created_at, updated_at
     FROM usuarios ORDER BY id
   `).all();
   res.json({ data: rows, roles: Object.keys(ROLE_PERMISSIONS) });
@@ -132,7 +137,7 @@ router.post('/', soAdmin, (req, res) => {
 
 router.patch('/:id', soAdmin, (req, res) => {
   const { id } = req.params;
-  const { nome, email, senha, role, ativo } = req.body;
+  const { nome, email, senha, role, ativo, lotacao } = req.body;
 
   ensureTable(req.db);
   const user = req.db.prepare('SELECT * FROM usuarios WHERE id = ?').get(id);
@@ -160,9 +165,10 @@ router.patch('/:id', soAdmin, (req, res) => {
       senha_hash = ?,
       role       = COALESCE(?, role),
       ativo      = COALESCE(?, ativo),
+      lotacao    = COALESCE(?, lotacao),
       updated_at = datetime('now')
     WHERE id = ?
-  `).run(nome ?? null, email ?? null, senhaHash, role ?? null, ativo ?? null, id);
+  `).run(nome ?? null, email ?? null, senhaHash, role ?? null, ativo ?? null, lotacao ?? null, id);
 
   res.json({ ok: true });
 });
@@ -179,6 +185,63 @@ router.delete('/:id', soAdmin, (req, res) => {
   }
   req.db.prepare('DELETE FROM usuarios WHERE id = ?').run(id);
   res.json({ ok: true });
+});
+
+// ─── POST /api/usuarios/:id/reset-senha — resetar para padrão ────
+
+router.post('/:id/reset-senha', soAdmin, (req, res) => {
+  const { id } = req.params;
+  ensureTable(req.db);
+  const user = req.db.prepare('SELECT id FROM usuarios WHERE id=?').get(id);
+  if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
+  const hash = bcrypt.hashSync('Montana@2026', 10);
+  req.db.prepare('UPDATE usuarios SET senha_hash=?, updated_at=datetime("now") WHERE id=?').run(hash, id);
+  res.json({ ok: true });
+});
+
+// ─── POST /api/usuarios/criar-funcionarios — bulk creation ────────
+
+router.post('/criar-funcionarios', soAdmin, (req, res) => {
+  ensureTable(req.db);
+  // Check if rh_funcionarios exists
+  const temFuncionarios = req.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='rh_funcionarios'").get();
+  if (!temFuncionarios) return res.status(400).json({ error: 'Tabela rh_funcionarios não encontrada' });
+
+  const funcionarios = req.db.prepare("SELECT id, nome, cargo FROM rh_funcionarios WHERE ativo=1 ORDER BY nome").all();
+
+  function normalizar(str) {
+    return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+  function gerarLogin(nome) {
+    const partes = nome.trim().split(/\s+/).filter(Boolean);
+    if (partes.length === 1) return normalizar(partes[0]);
+    return `${normalizar(partes[0])}.${normalizar(partes[partes.length-1])}`;
+  }
+
+  const empresa = req.company;
+  const senhaHash = bcrypt.hashSync('Montana@2026', 10);
+  let criados = 0, existentes = 0;
+
+  const inserir = req.db.prepare(`
+    INSERT INTO usuarios (usuario, nome, senha_hash, role, lotacao, ativo, criado_por)
+    VALUES (?, ?, ?, 'rh', '', 1, 'sistema')
+  `);
+
+  for (const func of funcionarios) {
+    let login = gerarLogin(func.nome);
+    let sufixo = 1, loginFinal = login;
+    while (req.db.prepare('SELECT id FROM usuarios WHERE usuario=?').get(loginFinal)) {
+      loginFinal = `${login}${sufixo++}`;
+    }
+    try {
+      inserir.run(loginFinal, func.nome, senhaHash);
+      criados++;
+    } catch(e) {
+      if (e.message.includes('UNIQUE')) existentes++;
+    }
+  }
+
+  res.json({ ok: true, criados, existentes, total: funcionarios.length });
 });
 
 // ─── GET /api/usuarios/me — dados do usuário logado ──────────────

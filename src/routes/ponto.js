@@ -230,11 +230,23 @@ router.patch('/:id([0-9]+)', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Helper: decodifica JWT sem verificar (apenas lê payload) ────────────────
+const jwt = require('jsonwebtoken');
+const JWT_SECRET = process.env.JWT_SECRET || 'montana_seg_secret_2026_!xK9#';
+function getUserFromReq(req) {
+  try {
+    const h = req.headers['authorization'];
+    if (!h?.startsWith('Bearer ')) return null;
+    return jwt.verify(h.slice(7), JWT_SECRET);
+  } catch { return null; }
+}
+
 // ─── GET /api/ponto ──────────────────────────────────────────────────────────
 router.get('/', (req, res) => {
   try {
     const { funcionario_id, from, to, data } = req.query;
     const d = db(req);
+    const usuarioLogado = getUserFromReq(req);
     let sql = `
       SELECT r.*, f.nome AS funcionario_nome, f.lotacao, f.contrato_ref,
              c.nome AS cargo_nome
@@ -248,6 +260,10 @@ router.get('/', (req, res) => {
     if (data)  { sql += ' AND date(r.data_hora) = ?'; params.push(data); }
     if (from)  { sql += ' AND date(r.data_hora) >= ?'; params.push(from); }
     if (to)    { sql += ' AND date(r.data_hora) <= ?'; params.push(to); }
+    // Controle por lotação: role 'rh' com lotação definida só vê sua equipe
+    if (usuarioLogado?.role === 'rh' && usuarioLogado?.lotacao) {
+      sql += ' AND f.lotacao = ?'; params.push(usuarioLogado.lotacao);
+    }
     sql += ' ORDER BY r.data_hora DESC LIMIT 2000';
     res.json({ ok: true, data: d.prepare(sql).all(...params) });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -551,12 +567,17 @@ router.get('/relatorio-frequencia', (req, res) => {
     const hoje      = new Date().toISOString().substring(0, 10);
     const jornadaMin = JORNADA_PADRAO.horas_dia * 60;
 
-    const funcionarios = d.prepare(`
-      SELECT f.id, f.nome, f.cargo_id, f.contrato_ref, f.lotacao, f.status,
+    const usuarioLogado2 = getUserFromReq(req);
+    let sqlFunc = `SELECT f.id, f.nome, f.cargo_id, f.contrato_ref, f.lotacao, f.status,
              c.nome AS cargo_nome
       FROM rh_funcionarios f LEFT JOIN rh_cargos c ON c.id = f.cargo_id
-      WHERE f.status = 'ATIVO' ORDER BY f.nome
-    `).all();
+      WHERE f.status = 'ATIVO'`;
+    const paramsFunc = [];
+    if (usuarioLogado2?.role === 'rh' && usuarioLogado2?.lotacao) {
+      sqlFunc += ' AND f.lotacao = ?'; paramsFunc.push(usuarioLogado2.lotacao);
+    }
+    sqlFunc += ' ORDER BY f.nome';
+    const funcionarios = d.prepare(sqlFunc).all(...paramsFunc);
 
     const resultado = funcionarios.map(func => {
       const jornada = d.prepare(`SELECT * FROM ponto_jornadas WHERE funcionario_id = ? LIMIT 1`).get(func.id) || JORNADA_PADRAO;

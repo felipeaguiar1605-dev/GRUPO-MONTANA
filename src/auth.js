@@ -66,7 +66,7 @@ async function loginHandler(req, res) {
     }
 
     const token = jwt.sign(
-      { usuario: user.usuario, nome: user.nome, role: user.role },
+      { usuario: user.usuario, nome: user.nome, role: user.role, lotacao: user.lotacao || '' },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES }
     );
@@ -76,6 +76,7 @@ async function loginHandler(req, res) {
       usuario: user.usuario,
       nome: user.nome,
       role: user.role,
+      lotacao: user.lotacao || '',
       expiresIn: JWT_EXPIRES
     });
   } catch (e) {
