@@ -1471,8 +1471,14 @@ function saveConfig() {
 
 async function testarSmtpConfig() {
   const statusEl = document.getElementById('cfg-smtp-status');
-  const host = document.getElementById('cfg-smtp-host')?.value?.trim();
-  const port = document.getElementById('cfg-smtp-port')?.value;
+  // Usar valor real OU placeholder como fallback (smtp.gmail.com / 587)
+  const hostEl = document.getElementById('cfg-smtp-host');
+  const portEl = document.getElementById('cfg-smtp-port');
+  const host = (hostEl?.value?.trim()) || (hostEl?.placeholder?.trim()) || 'smtp.gmail.com';
+  const port = (portEl?.value) || (portEl?.placeholder) || '587';
+  // Se campo estava vazio (só placeholder), preencher visualmente
+  if (hostEl && !hostEl.value) hostEl.value = host;
+  if (portEl && !portEl.value) portEl.value = port;
   const user = document.getElementById('cfg-smtp-user')?.value?.trim();
   const pass = document.getElementById('cfg-smtp-pass')?.value;
   const dest = document.getElementById('cfg-smtp-dest')?.value?.trim();
