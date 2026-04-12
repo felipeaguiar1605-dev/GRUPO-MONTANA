@@ -1431,12 +1431,18 @@ function loadConfig() {
     else el.value = val;
   });
 
+  // Setar defaults Gmail antes de carregar do banco
+  const hostEl = document.getElementById('cfg-smtp-host');
+  const portEl = document.getElementById('cfg-smtp-port');
+  if (hostEl && !hostEl.value) hostEl.value = 'smtp.gmail.com';
+  if (portEl && !portEl.value) portEl.value = '587';
+
   // Carregar configurações SMTP salvas no banco
   api('/notificacoes/smtp').then(smtp => {
     if (!smtp || smtp.error) return;
     const fld = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
-    fld('cfg-smtp-host', smtp.host);
-    fld('cfg-smtp-port', smtp.port);
+    fld('cfg-smtp-host', smtp.host || 'smtp.gmail.com');
+    fld('cfg-smtp-port', smtp.port || '587');
     fld('cfg-smtp-user', smtp.user);
     fld('cfg-smtp-pass', smtp.pass && smtp.pass !== '••••••••' ? smtp.pass : '');
     fld('cfg-smtp-dest', smtp.to);
