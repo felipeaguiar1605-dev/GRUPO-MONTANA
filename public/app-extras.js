@@ -1431,6 +1431,21 @@ function loadConfig() {
     else el.value = val;
   });
 
+  // Carregar configurações SMTP salvas no banco
+  api('/notificacoes/smtp').then(smtp => {
+    if (!smtp || smtp.error) return;
+    const fld = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
+    fld('cfg-smtp-host', smtp.host);
+    fld('cfg-smtp-port', smtp.port);
+    fld('cfg-smtp-user', smtp.user);
+    fld('cfg-smtp-pass', smtp.pass && smtp.pass !== '••••••••' ? smtp.pass : '');
+    fld('cfg-smtp-dest', smtp.to);
+    if (smtp.user) {
+      const statusEl = document.getElementById('cfg-smtp-status');
+      if (statusEl && !statusEl.textContent) statusEl.textContent = '✅ SMTP configurado';
+    }
+  }).catch(() => {});
+
   // Dados cadastrais da empresa ativa
   const em = (typeof COMPANIES_META !== 'undefined' && COMPANIES_META[currentCompany]) || {};
   const infoEl = document.getElementById('cfg-empresa-info');
@@ -1456,23 +1471,48 @@ function saveConfig() {
 
 async function testarSmtpConfig() {
   const statusEl = document.getElementById('cfg-smtp-status');
-  if (statusEl) statusEl.textContent = 'Testando...';
+  const host = document.getElementById('cfg-smtp-host')?.value?.trim();
+  const port = document.getElementById('cfg-smtp-port')?.value;
+  const user = document.getElementById('cfg-smtp-user')?.value?.trim();
+  const pass = document.getElementById('cfg-smtp-pass')?.value;
+  const dest = document.getElementById('cfg-smtp-dest')?.value?.trim();
+
+  if (!host || !user || !pass) {
+    if (statusEl) statusEl.textContent = '❌ Preencha servidor, usuário e senha';
+    toast('Preencha todos os campos SMTP antes de testar', 'error');
+    return;
+  }
+
+  if (statusEl) statusEl.textContent = '⏳ Salvando e testando...';
+
+  // 1. Salvar primeiro no banco via PUT /notificacoes/smtp
+  const saved = await api('/notificacoes/smtp', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ host, port, user, pass, from: user, to: dest || user })
+  });
+  if (!saved.ok) {
+    if (statusEl) statusEl.textContent = '❌ Erro ao salvar: ' + (saved.error || 'falha');
+    return;
+  }
+
+  // 2. Enviar email de teste via POST /notificacoes/enviar
   try {
-    const r = await api('/config/smtp-test', {
-      method: 'POST',
-      body: JSON.stringify({
-        host: document.getElementById('cfg-smtp-host')?.value,
-        port: document.getElementById('cfg-smtp-port')?.value,
-        user: document.getElementById('cfg-smtp-user')?.value,
-        pass: document.getElementById('cfg-smtp-pass')?.value,
-        dest: document.getElementById('cfg-smtp-dest')?.value,
-      })
-    });
-    if (statusEl) statusEl.textContent = r.ok ? '✅ Conexão OK' : '❌ ' + (r.error || 'Falha');
-    if (r.ok) toast('SMTP: conexão testada com sucesso');
-    else toast(r.error || 'Falha ao testar SMTP', 'error');
-  } catch {
+    const r = await api('/notificacoes/enviar', { method: 'POST' });
+    if (r.ok) {
+      if (statusEl) statusEl.textContent = '✅ Configuração salva! E-mail enviado para ' + (dest || user);
+      toast('SMTP configurado! E-mail de teste enviado com sucesso.');
+    } else if (r.enviado === false && r.message) {
+      // Sem alertas pendentes mas conexão OK
+      if (statusEl) statusEl.textContent = '✅ Conexão OK — ' + r.message;
+      toast('SMTP configurado com sucesso!');
+    } else {
+      if (statusEl) statusEl.textContent = '❌ ' + (r.error || 'Falha no envio');
+      toast(r.error || 'Falha ao enviar e-mail de teste', 'error');
+    }
+  } catch(e) {
     if (statusEl) statusEl.textContent = '❌ Erro de rede';
+    toast('Erro de rede ao testar SMTP', 'error');
   }
 }
 
@@ -2605,3 +2645,101 @@ window.showPrefSub = function(stab, el) {
   if (el)  { el.classList.add('active'); el.style.borderBottomColor='#1e293b'; el.style.color='#1e293b'; }
   if (stab === 'transp') { initTranspDatas(); carregarTranspResumo(); }
 };
+
+// ─── Gestão de Usuários (Config) ─────────────────────────────────
+async function criarUsuariosFuncionarios() {
+  if (!confirm('Criar logins automáticos para todos os funcionários ativos?\nSenha inicial: Montana@2026')) return;
+  showLoading('Gerando logins…');
+  try {
+    const r = await api('/usuarios/criar-funcionarios', { method: 'POST' });
+    if (r.criados !== undefined) {
+      toast(`✅ ${r.criados} criados · ${r.existentes} já existiam`, 'success');
+      loadUsuariosConfig();
+    } else {
+      toast(r.error || 'Erro ao criar', 'error');
+    }
+  } catch(e) {
+    toast('Erro: ' + e.message, 'error');
+  } finally { hideLoading(); }
+}
+
+async function criarUsuarioManual() {
+  const nome    = document.getElementById('cfg-novo-nome')?.value?.trim();
+  const login   = document.getElementById('cfg-novo-login')?.value?.trim();
+  const role    = document.getElementById('cfg-novo-role')?.value;
+  const lotacao = document.getElementById('cfg-novo-lotacao')?.value?.trim() || '';
+  if (!nome || !login) return toast('Preencha nome e login', 'error');
+  showLoading('Criando usuário…');
+  try {
+    const r = await api('/usuarios', {
+      method: 'POST',
+      body: JSON.stringify({ usuario: login, nome, senha: 'Montana@2026', role, lotacao })
+    });
+    if (r.id || r.ok) {
+      toast(`✅ Usuário "${login}" criado — senha: Montana@2026`, 'success');
+      document.getElementById('cfg-novo-nome').value = '';
+      document.getElementById('cfg-novo-login').value = '';
+      if(document.getElementById('cfg-novo-lotacao')) document.getElementById('cfg-novo-lotacao').value = '';
+      loadUsuariosConfig();
+    } else {
+      toast(r.error || 'Erro ao criar', 'error');
+    }
+  } catch(e) { toast('Erro: ' + e.message, 'error'); }
+  finally { hideLoading(); }
+}
+
+async function loadUsuariosConfig() {
+  const el = document.getElementById('cfg-usuarios-lista');
+  if (!el) return;
+  el.innerHTML = '<div style="text-align:center;padding:10px;color:#94a3b8;font-size:11px">Carregando…</div>';
+  try {
+    const dados = await api('/usuarios');
+    const lista = Array.isArray(dados) ? dados : (dados.usuarios || []);
+    if (!lista.length) { el.innerHTML = '<div style="padding:12px;color:#94a3b8;font-size:11px;text-align:center">Nenhum usuário cadastrado</div>'; return; }
+    const ROLE_BADGE = {
+      admin:       '<span style="background:#fee2e2;color:#dc2626;padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700">Admin</span>',
+      financeiro:  '<span style="background:#dbeafe;color:#1d4ed8;padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700">Financeiro</span>',
+      operacional: '<span style="background:#f0fdf4;color:#15803d;padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700">Operacional</span>',
+      visualizador:'<span style="background:#f1f5f9;color:#475569;padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700">Visualizador</span>',
+      rh:          '<span style="background:#f0fdf4;color:#0f766e;padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700">RH/Ponto</span>',
+    };
+    el.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <thead><tr style="background:#f8fafc">
+          <th style="padding:7px 10px;text-align:left;color:#64748b;font-size:9px;text-transform:uppercase;border-bottom:1px solid #e2e8f0">Nome</th>
+          <th style="padding:7px 10px;text-align:left;color:#64748b;font-size:9px;text-transform:uppercase;border-bottom:1px solid #e2e8f0">Login</th>
+          <th style="padding:7px 10px;text-align:center;color:#64748b;font-size:9px;text-transform:uppercase;border-bottom:1px solid #e2e8f0">Perfil</th>
+          <th style="padding:7px 10px;text-align:center;color:#64748b;font-size:9px;text-transform:uppercase;border-bottom:1px solid #e2e8f0">Status</th>
+          <th style="padding:7px 10px;text-align:center;color:#64748b;font-size:9px;text-transform:uppercase;border-bottom:1px solid #e2e8f0">Ações</th>
+        </tr></thead>
+        <tbody>${lista.map(u => `
+          <tr style="border-bottom:1px solid #f1f5f9">
+            <td style="padding:6px 10px">${u.nome}</td>
+            <td style="padding:6px 10px;font-family:monospace;font-size:10px;color:#1d4ed8">${u.login}</td>
+            <td style="padding:6px 10px;text-align:center">${ROLE_BADGE[u.role] || u.role}</td>
+            <td style="padding:6px 10px;text-align:center">${u.ativo ? '<span style="color:#15803d;font-weight:700">●</span> Ativo' : '<span style="color:#94a3b8">○</span> Inativo'}</td>
+            <td style="padding:6px 10px;text-align:center;display:flex;gap:6px;justify-content:center">
+              <button onclick="resetarSenhaUsuario(${u.id},'${u.login}')" style="padding:2px 8px;font-size:9px;border:1px solid #e2e8f0;border-radius:5px;background:#f8fafc;color:#64748b;cursor:pointer" title="Resetar senha">🔑 Senha</button>
+              <button onclick="toggleAtivoUsuario(${u.id},${u.ativo?1:0})" style="padding:2px 8px;font-size:9px;border:1px solid #e2e8f0;border-radius:5px;background:#f8fafc;color:#64748b;cursor:pointer">${u.ativo ? '🔒 Bloquear' : '🔓 Ativar'}</button>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+  } catch(e) { el.innerHTML = '<div style="padding:12px;color:#dc2626;font-size:11px">Erro ao carregar usuários</div>'; }
+}
+
+async function resetarSenhaUsuario(id, login) {
+  if (!confirm(`Resetar senha de "${login}" para Montana@2026?`)) return;
+  try {
+    const r = await api(`/usuarios/${id}/reset-senha`, { method: 'POST' });
+    toast(r.ok ? `✅ Senha resetada — nova senha: Montana@2026` : (r.error || 'Erro'), r.ok ? 'success' : 'error');
+  } catch(e) { toast('Erro: ' + e.message, 'error'); }
+}
+
+async function toggleAtivoUsuario(id, ativo) {
+  try {
+    const r = await api(`/usuarios/${id}`, { method: 'PATCH', body: JSON.stringify({ ativo: ativo ? 0 : 1 }) });
+    if (r.ok) { toast('Usuário atualizado', 'success'); loadUsuariosConfig(); }
+    else toast(r.error || 'Erro', 'error');
+  } catch(e) { toast('Erro: ' + e.message, 'error'); }
+}
