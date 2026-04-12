@@ -1541,9 +1541,12 @@
 </div>
 
 <div id="pg-boletins" class="pg">
-  <div style="margin-bottom:14px">
-    <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">📄 Boletins de Medição</h2>
-    <p style="font-size:11px;color:#94a3b8">Gestão de contratos de vigilância e geração automática de boletins mensais em PDF</p>
+  <div style="margin-bottom:14px;display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px">
+    <div>
+      <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">📄 Boletins de Medição</h2>
+      <p style="font-size:11px;color:#94a3b8">Gestão de contratos de vigilância e geração automática de boletins mensais em PDF</p>
+    </div>
+    <button onclick="abrirGerarBoletim()" style="padding:8px 18px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0">📄 Novo Boletim / Emitir NF</button>
   </div>
   <div id="bol-content"><div class="loading">Carregando...</div></div>
 

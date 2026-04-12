@@ -11,6 +11,43 @@ const companyMw = require('../companyMiddleware');
 const router = express.Router();
 router.use(companyMw);
 
+// ─── INIT: Adicionar colunas extras nas tabelas de boletins ────
+
+router.use((req, res, next) => {
+  const db = req.db;
+  if (!db) return next();
+
+  // Colunas NFS-e na tabela bol_boletins
+  const bolCols = [
+    ['valor_base',        'REAL DEFAULT 0'],
+    ['glosas',            'REAL DEFAULT 0'],
+    ['acrescimos',        'REAL DEFAULT 0'],
+    ['discriminacao',     'TEXT'],
+    ['nfse_numero',       'TEXT'],
+    ['nfse_data_emissao', 'TEXT'],
+    ['nfse_status',       "TEXT DEFAULT 'PENDENTE'"],
+    ['nfse_xml',          'TEXT'],
+    ['nfse_erro',         'TEXT'],
+    ['obs',               'TEXT'],
+    ['updated_at',        "TEXT DEFAULT (datetime('now'))"],
+  ];
+  for (const [col, def] of bolCols) {
+    try { db.prepare(`ALTER TABLE bol_boletins ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
+  }
+
+  // Colunas adicionais na tabela bol_contratos (necessárias para vinculação contrato financeiro + NFS-e)
+  const contrCols = [
+    ['contrato_ref',    "TEXT DEFAULT ''"],  // numContrato da tabela contratos
+    ['orgao',           "TEXT DEFAULT ''"],  // razão social do tomador para NFS-e
+    ['insc_municipal',  "TEXT DEFAULT ''"],  // CNPJ do tomador (campo nomenclatura WebISS)
+  ];
+  for (const [col, def] of contrCols) {
+    try { db.prepare(`ALTER TABLE bol_contratos ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
+  }
+
+  next();
+});
+
 // ─── HELPERS ──────────────────────────────────────────────────
 
 function formatMoeda(v) {
@@ -246,6 +283,223 @@ router.post('/gerar', (req, res) => {
   } catch (err) {
     console.error('Erro ao gerar boletins:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GERAR BOLETIM (Novo endpoint — cria registro no banco) ───
+
+const MESES_NOME_COMPLETO = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+  'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+router.post('/gerar-boletim', (req, res) => {
+  try {
+    const { contrato_id, competencia } = req.body; // competencia = "2026-03"
+    if (!contrato_id || !competencia) {
+      return res.status(400).json({ error: 'contrato_id e competencia são obrigatórios' });
+    }
+    const db = req.db;
+
+    // Verificar se já existe
+    const existente = db.prepare('SELECT * FROM bol_boletins WHERE contrato_id=? AND competencia=?').get(contrato_id, competencia);
+    if (existente) return res.json({ data: existente, novo: false });
+
+    // Buscar contrato de boletim para calcular valor base
+    const bc = db.prepare('SELECT * FROM bol_contratos WHERE id=?').get(contrato_id);
+    const ct = bc ? db.prepare('SELECT * FROM contratos WHERE numContrato=?').get(bc.contrato_ref) : null;
+    const valor_mensal = ct?.valor_mensal_bruto || 0;
+    const valor_base = Math.round(valor_mensal * 100) / 100;
+
+    // Gerar discriminação automática
+    const [ano, mes] = competencia.split('-');
+    const mesNome = MESES_NOME_COMPLETO[parseInt(mes)] || mes;
+    const tipoServico = bc?.descricao_servico || ct?.contrato || 'SERVIÇOS';
+    const numContrato = bc?.contrato_ref || bc?.numero_contrato || '';
+    const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServico.toUpperCase()} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. VALOR MENSAL CONFORME BOLETIM DE MEDIÇÃO APROVADO.`;
+
+    const stmt = db.prepare(`INSERT INTO bol_boletins
+      (contrato_id, competencia, data_emissao, valor_base, valor_total, glosas, acrescimos, discriminacao, status, nfse_status)
+      VALUES (?, ?, date('now'), ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')`);
+    const info = stmt.run(contrato_id, competencia, valor_base, valor_base, discriminacao);
+    const novo = db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(info.lastInsertRowid);
+    res.json({ data: novo, novo: true });
+  } catch (err) {
+    console.error('Erro ao gerar boletim:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── AJUSTAR BOLETIM (glosas, acréscimos, discriminação) ───────
+
+router.patch('/:id/ajustar', (req, res) => {
+  try {
+    const db = req.db;
+    const { glosas, acrescimos, discriminacao, obs } = req.body;
+    const bol = db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id);
+    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+
+    const g = parseFloat(glosas ?? bol.glosas ?? 0);
+    const a = parseFloat(acrescimos ?? bol.acrescimos ?? 0);
+    const base = bol.valor_base || bol.valor_total || 0;
+    const novo_total = Math.round((base - g + a) * 100) / 100;
+
+    db.prepare(`UPDATE bol_boletins SET
+      glosas=?, acrescimos=?, valor_total=?,
+      discriminacao=COALESCE(?,discriminacao), obs=COALESCE(?,obs),
+      updated_at=datetime('now')
+      WHERE id=?`).run(g, a, novo_total, discriminacao || null, obs || null, req.params.id);
+
+    res.json({ data: db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id) });
+  } catch (err) {
+    console.error('Erro ao ajustar boletim:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── EMITIR NFS-e VIA WEBISS ───────────────────────────────────
+
+router.post('/:id/emitir-nfse', async (req, res) => {
+  const db = req.db;
+  const company = req.company;
+  const companyKey = req.companyKey;
+
+  try {
+    const bol = db.prepare(`
+      SELECT b.*, bc.contrato_ref, bc.orgao, bc.descricao_servico as bc_descricao,
+             bc.insc_municipal as insc_contratante,
+             c.numContrato, c.orgao as orgao_contrato
+      FROM bol_boletins b
+      JOIN bol_contratos bc ON b.contrato_id = bc.id
+      LEFT JOIN contratos c ON bc.contrato_ref = c.numContrato
+      WHERE b.id=?`).get(req.params.id);
+
+    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+    if (bol.nfse_status === 'EMITIDA') {
+      return res.status(400).json({ error: `NFS-e ${bol.nfse_numero} já emitida para este boletim` });
+    }
+    if (!bol.valor_total || bol.valor_total <= 0) {
+      return res.status(400).json({ error: 'Valor do boletim inválido (zero ou negativo)' });
+    }
+
+    // Verificar certificado
+    const certPath = path.join(__dirname, '..', '..', 'certificados', `${companyKey}.pfx`);
+    const certSenha = process.env[`WEBISS_CERT_SENHA_${companyKey.toUpperCase()}`];
+    if (!fs.existsSync(certPath)) {
+      return res.status(400).json({ error: `Certificado A1 não encontrado para ${companyKey}. Faça upload em Configurações → WebISS.` });
+    }
+    if (!certSenha) {
+      return res.status(400).json({ error: `Senha do certificado não configurada (WEBISS_CERT_SENHA_${companyKey.toUpperCase()} no .env)` });
+    }
+
+    // Inscrição municipal da prestadora
+    const inscPrestadora = process.env[`WEBISS_INSC_${companyKey.toUpperCase()}`] || '';
+    if (!inscPrestadora) {
+      return res.status(400).json({ error: `Inscrição Municipal não configurada (WEBISS_INSC_${companyKey.toUpperCase()} no .env)` });
+    }
+
+    // Número do RPS único baseado no id do boletim
+    const rpsNum = String(bol.id).padStart(10, '0');
+    const today  = new Date().toISOString().substring(0, 10);
+
+    // Competência no formato YYYY-MM-DD (primeiro dia do mês)
+    const competenciaData = bol.competencia.length === 7
+      ? `${bol.competencia}-01`
+      : bol.competencia;
+
+    // Alíquota ISS — 2% padrão (contratos federais isentos/suspensos; municipais 3%)
+    // O campo IssRetido=2 indica ISS NÃO retido pelo tomador
+    const aliqISS = 0.02;
+    const valorISS = Math.round(bol.valor_total * aliqISS * 100) / 100;
+
+    // Tomador: usar CNPJ do insc_contratante ou razão social do órgão
+    const tomadorCnpj = (bol.insc_contratante || '').replace(/\D/g, '');
+    const tomadorRazao = bol.orgao || bol.orgao_contrato || 'TOMADOR';
+
+    // Registrar tentativa
+    db.prepare(`UPDATE bol_boletins SET nfse_status='ENVIANDO', nfse_erro=NULL, updated_at=datetime('now') WHERE id=?`)
+      .run(bol.id);
+
+    // Fazer chamada interna ao /api/webiss/emitir
+    const port = process.env.PORT || 3002;
+    const token = req.headers.authorization || '';
+
+    const rpsBody = {
+      rps: {
+        numero:       rpsNum,
+        serie:        'A',
+        tipo:         1,
+        dataEmissao:  today,
+        competencia:  competenciaData,
+        servico: {
+          valorServicos:     bol.valor_total,
+          valorDeducoes:     0,
+          valorPis:          0,
+          valorCofins:       0,
+          valorInss:         0,
+          valorIr:           0,
+          valorCsll:         0,
+          issRetido:         false,
+          valorIss:          valorISS,
+          aliquota:          aliqISS,
+          itemLista:         '07.17',
+          codTributacao:     '070700',
+          discriminacao:     (bol.discriminacao || 'PRESTAÇÃO DE SERVIÇOS').substring(0, 2000),
+          exigibilidadeIss:  1,
+        },
+        tomador: {
+          cnpj:        tomadorCnpj || undefined,
+          razaoSocial: tomadorRazao,
+          email:       '',
+        },
+      },
+    };
+
+    const response = await fetch(`http://127.0.0.1:${port}/api/webiss/emitir`, {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': token,
+        'X-Company':     companyKey,
+      },
+      body: JSON.stringify(rpsBody),
+      signal: AbortSignal.timeout(60000),
+    });
+
+    const result = await response.json();
+
+    if (result.ok && result.nfse?.numero) {
+      const nfseNum = result.nfse.numero;
+      db.prepare(`UPDATE bol_boletins SET
+        nfse_status='EMITIDA', nfse_numero=?, nfse_data_emissao=datetime('now'),
+        nfse_xml=?, nfse_erro=NULL, status='aprovado', updated_at=datetime('now')
+        WHERE id=?`).run(nfseNum, JSON.stringify(result.nfse), bol.id);
+      return res.json({
+        ok: true,
+        numero_nfse: nfseNum,
+        message: `NFS-e ${nfseNum} emitida com sucesso!`,
+        nfse: result.nfse,
+      });
+    }
+
+    // Tratar erros retornados pelo WebISS
+    let erroMsg = 'Erro desconhecido ao emitir NFS-e';
+    if (result.erros?.length) {
+      erroMsg = result.erros.map(e => `[${e.codigo}] ${e.mensagem}${e.correcao ? ' — ' + e.correcao : ''}`).join(' | ');
+    } else if (result.error) {
+      erroMsg = result.error;
+    }
+
+    db.prepare(`UPDATE bol_boletins SET nfse_status='ERRO', nfse_erro=?, updated_at=datetime('now') WHERE id=?`)
+      .run(erroMsg, bol.id);
+    return res.status(422).json({ error: erroMsg, detalhes: result });
+
+  } catch (e) {
+    console.error('Erro ao emitir NFS-e:', e);
+    const erroMsg = e.message || String(e);
+    try {
+      db.prepare(`UPDATE bol_boletins SET nfse_status='ERRO', nfse_erro=?, updated_at=datetime('now') WHERE id=?`)
+        .run(erroMsg, req.params.id);
+    } catch (_) {}
+    res.status(500).json({ error: 'Falha na emissão: ' + erroMsg });
   }
 });
 

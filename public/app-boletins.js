@@ -533,6 +533,343 @@ async function bolDeletarItem(itemId, contratoId) {
   bolAbrirContrato(contratoId);
 }
 
+// ─── GERAR BOLETIM + EMITIR NFS-e (Modal) ─────────────────────
+
+/**
+ * abrirGerarBoletim(contrato_id, contrato_ref, orgao, valor_mensal)
+ * Abre modal para criar boletim de competência e iniciar emissão de NFS-e.
+ * Se contrato_id não for passado, mostra seletor de contratos primeiro.
+ */
+async function abrirGerarBoletim(contrato_id, contrato_ref, orgao, valor_mensal) {
+  // Se chamado sem argumento, mostrar seletor de contrato
+  if (!contrato_id) {
+    await _abrirSeletorContrato();
+    return;
+  }
+
+  const hoje = new Date();
+  const anoAtual = hoje.getFullYear();
+  const mesAtual = String(hoje.getMonth() + 1).padStart(2, '0');
+  const competenciaDefault = `${anoAtual}-${mesAtual}`;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-gerar-boletim';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px';
+
+  const mesesNome = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+    'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+  const valorBase = parseFloat(valor_mensal) || 0;
+  const valorBaseFmt = brl(valorBase);
+
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:14px;width:100%;max-width:560px;box-shadow:0 24px 80px rgba(0,0,0,.35);overflow:hidden">
+      <div style="background:#059669;color:#fff;padding:16px 20px;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:15px;font-weight:800">📄 Gerar Boletim / Emitir NF-e</div>
+          <div style="font-size:11px;opacity:.85;margin-top:2px">${orgao || contrato_ref || 'Contrato'}</div>
+        </div>
+        <button onclick="document.getElementById('modal-gerar-boletim').remove()"
+          style="background:rgba(255,255,255,.2);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 10px;line-height:1">×</button>
+      </div>
+      <div style="padding:20px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+          <div>
+            <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:4px">Competência (AAAA-MM)</label>
+            <input type="month" id="gbm-competencia" value="${competenciaDefault}"
+              style="width:100%;padding:8px 10px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;box-sizing:border-box"
+              onchange="_gbmRecalcular()">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:4px">Valor Base (contrato)</label>
+            <input type="text" value="${valorBaseFmt}" readonly
+              style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;background:#f8fafc;box-sizing:border-box;color:#64748b">
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+          <div>
+            <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:4px">Glosas (R$)</label>
+            <input type="number" id="gbm-glosas" value="0" min="0" step="0.01"
+              style="width:100%;padding:8px 10px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;box-sizing:border-box"
+              oninput="_gbmRecalcular()">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:4px">Acréscimos (R$)</label>
+            <input type="number" id="gbm-acrescimos" value="0" min="0" step="0.01"
+              style="width:100%;padding:8px 10px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;box-sizing:border-box"
+              oninput="_gbmRecalcular()">
+          </div>
+        </div>
+
+        <div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:13px;font-weight:700;color:#166534">Valor Final da NF:</span>
+          <span id="gbm-valor-final" style="font-size:18px;font-weight:900;color:#15803d">${valorBaseFmt}</span>
+        </div>
+        <input type="hidden" id="gbm-valor-base" value="${valorBase}">
+
+        <div style="margin-bottom:16px">
+          <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:4px">Discriminação da NF <span style="font-weight:400;color:#94a3b8">(editável)</span></label>
+          <textarea id="gbm-discriminacao" rows="4"
+            style="width:100%;padding:8px 10px;border:1.5px solid #d1d5db;border-radius:8px;font-size:12px;line-height:1.5;box-sizing:border-box;resize:vertical"
+            placeholder="Texto que irá no campo Discriminação da NFS-e..."></textarea>
+        </div>
+
+        <div id="gbm-resultado" style="margin-bottom:12px"></div>
+
+        <div style="display:flex;gap:8px">
+          <button onclick="document.getElementById('modal-gerar-boletim').remove()"
+            style="flex:1;padding:10px;font-size:13px;border:1.5px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-weight:600;color:#64748b">
+            Cancelar
+          </button>
+          <button id="gbm-btn-gerar" onclick="_gbmExecutar(${contrato_id})"
+            style="flex:2;padding:10px;font-size:13px;font-weight:800;background:#059669;color:#fff;border:none;border-radius:8px;cursor:pointer">
+            📄 Gerar Boletim
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  // Preencher discriminação gerada automaticamente pelo backend ao criar (inicialmente vazio — o backend gera)
+  // Buscar a discriminação padrão com base no contrato
+  try {
+    const bc = _bolContratos.find(c => c.id === contrato_id);
+    if (bc) {
+      const [ano, mes] = competenciaDefault.split('-');
+      const mNome = mesesNome[parseInt(mes)] || mes;
+      const tipoServ = bc.descricao_servico || bc.nome || 'SERVIÇOS';
+      const numC = bc.contrato_ref || bc.numero_contrato || '';
+      document.getElementById('gbm-discriminacao').value =
+        `PRESTAÇÃO DE SERVIÇOS DE ${tipoServ.toUpperCase()} CONFORME CONTRATO Nº ${numC}, COMPETÊNCIA ${mNome.toUpperCase()}/${ano}. VALOR MENSAL CONFORME BOLETIM DE MEDIÇÃO APROVADO.`;
+    }
+  } catch (_) {}
+}
+
+function _gbmRecalcular() {
+  const base = parseFloat(document.getElementById('gbm-valor-base')?.value) || 0;
+  const glosas = parseFloat(document.getElementById('gbm-glosas')?.value) || 0;
+  const acrescimos = parseFloat(document.getElementById('gbm-acrescimos')?.value) || 0;
+  const total = Math.round((base - glosas + acrescimos) * 100) / 100;
+  const el = document.getElementById('gbm-valor-final');
+  if (el) el.textContent = brl(total);
+}
+
+async function _gbmExecutar(contrato_id) {
+  const btn = document.getElementById('gbm-btn-gerar');
+  const resultEl = document.getElementById('gbm-resultado');
+  const competencia = document.getElementById('gbm-competencia')?.value?.trim();
+  const glosas = parseFloat(document.getElementById('gbm-glosas')?.value) || 0;
+  const acrescimos = parseFloat(document.getElementById('gbm-acrescimos')?.value) || 0;
+  const discriminacao = document.getElementById('gbm-discriminacao')?.value?.trim();
+
+  if (!competencia) { toast('Informe a competência', 'error'); return; }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Gerando...';
+
+  try {
+    const token = localStorage.getItem('montana_token') || '';
+    const headers = { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token };
+
+    // 1. Criar/obter boletim
+    const r1 = await fetch('/api/boletins/gerar-boletim', {
+      method: 'POST', headers,
+      body: JSON.stringify({ contrato_id, competencia }),
+    }).then(r => r.json());
+
+    if (r1.error) throw new Error(r1.error);
+    const boletim = r1.data;
+
+    // 2. Aplicar ajustes se há glosas/acréscimos ou discriminação personalizada
+    if (glosas || acrescimos || discriminacao) {
+      await fetch(`/api/boletins/${boletim.id}/ajustar`, {
+        method: 'PATCH', headers,
+        body: JSON.stringify({ glosas, acrescimos, discriminacao: discriminacao || undefined }),
+      }).then(r => r.json());
+    }
+
+    // Recarregar boletim atualizado
+    const bolAtual = glosas || acrescimos
+      ? await fetch(`/api/boletins/historico`, { headers }).then(r => r.json())
+          .then(hist => (Array.isArray(hist) ? hist : []).find(b => b.id === boletim.id) || boletim)
+      : boletim;
+
+    const valorFinal = bolAtual.valor_total || boletim.valor_total || 0;
+    const jaExistia = !r1.novo;
+
+    resultEl.innerHTML = `
+      <div style="background:#dcfce7;border:1px solid #86efac;border-radius:8px;padding:12px 16px;margin-bottom:10px">
+        <div style="font-weight:700;color:#15803d;margin-bottom:4px">
+          ${jaExistia ? '♻️ Boletim já existente carregado' : '✅ Boletim gerado com sucesso!'}
+        </div>
+        <div style="font-size:12px;color:#166534">
+          ID: <strong>#${boletim.id}</strong> · Competência: <strong>${competencia}</strong> · Valor: <strong>${brl(valorFinal)}</strong>
+          ${boletim.nfse_status === 'EMITIDA' ? ` · NFS-e: <strong>${boletim.nfse_numero}</strong>` : ''}
+        </div>
+      </div>
+    `;
+
+    // Mostrar botão de emitir NFS-e se ainda não emitida
+    if (boletim.nfse_status !== 'EMITIDA') {
+      btn.style.background = '#1d4ed8';
+      btn.textContent = '🚀 Emitir NFS-e agora';
+      btn.disabled = false;
+      btn.onclick = () => emitirNFSe(boletim.id, competencia, valorFinal);
+    } else {
+      btn.textContent = '✅ NFS-e já emitida';
+      btn.disabled = true;
+      btn.style.background = '#6b7280';
+    }
+
+    // Recarregar histórico em background
+    if (typeof loadBolHistorico === 'function') loadBolHistorico();
+
+  } catch (err) {
+    resultEl.innerHTML = `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;color:#dc2626;font-size:12px">❌ ${err.message}</div>`;
+    btn.disabled = false;
+    btn.textContent = '📄 Gerar Boletim';
+  }
+}
+
+/**
+ * emitirNFSe(boletim_id, competencia, valor)
+ * Confirma e emite a NFS-e para o boletim via WebISS.
+ */
+async function emitirNFSe(boletim_id, competencia, valor) {
+  const valorFmt = brl(valor || 0);
+
+  // Criar overlay de confirmação
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-emitir-nfse';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:3500;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:14px;width:100%;max-width:440px;box-shadow:0 24px 80px rgba(0,0,0,.35);overflow:hidden">
+      <div style="background:#1d4ed8;color:#fff;padding:16px 20px;display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:15px;font-weight:800">🚀 Emitir NFS-e via WebISS</div>
+        <button onclick="document.getElementById('modal-emitir-nfse').remove()"
+          style="background:rgba(255,255,255,.2);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 10px;line-height:1">×</button>
+      </div>
+      <div style="padding:20px">
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px 16px;margin-bottom:16px">
+          <div style="font-size:12px;color:#1e40af;margin-bottom:4px">Boletim #${boletim_id} · Competência: <strong>${competencia || '—'}</strong></div>
+          <div style="font-size:20px;font-weight:900;color:#1d4ed8">${valorFmt}</div>
+        </div>
+        <div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:11px;color:#92400e">
+          ⚠️ <strong>Atenção:</strong> Esta ação emite uma NFS-e oficial no portal WebISS (Prefeitura de Palmas). A operação não pode ser desfeita automaticamente — cancelamentos devem ser feitos diretamente no portal.
+        </div>
+        <div id="nfse-resultado" style="margin-bottom:12px"></div>
+        <div style="display:flex;gap:8px">
+          <button onclick="document.getElementById('modal-emitir-nfse').remove()"
+            style="flex:1;padding:10px;font-size:13px;border:1.5px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-weight:600;color:#64748b">
+            Cancelar
+          </button>
+          <button id="nfse-btn-emitir" onclick="_nfseConfirmarEmissao(${boletim_id})"
+            style="flex:2;padding:10px;font-size:13px;font-weight:800;background:#1d4ed8;color:#fff;border:none;border-radius:8px;cursor:pointer">
+            🚀 Confirmar Emissão
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+async function _nfseConfirmarEmissao(boletim_id) {
+  const btn = document.getElementById('nfse-btn-emitir');
+  const resultEl = document.getElementById('nfse-resultado');
+
+  btn.disabled = true;
+  btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px"></span>Emitindo...';
+
+  try {
+    const token = localStorage.getItem('montana_token') || '';
+    const res = await fetch(`/api/boletins/${boletim_id}/emitir-nfse`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Company': currentCompany,
+        'Authorization': 'Bearer ' + token,
+      },
+    });
+
+    const result = await res.json();
+
+    if (result.ok && result.numero_nfse) {
+      resultEl.innerHTML = `
+        <div style="background:#dcfce7;border:1px solid #86efac;border-radius:8px;padding:14px;text-align:center">
+          <div style="font-size:28px;margin-bottom:6px">✅</div>
+          <div style="font-weight:800;color:#15803d;font-size:15px;margin-bottom:4px">NFS-e Emitida com Sucesso!</div>
+          <div style="font-size:13px;color:#166534">Número: <strong style="font-size:18px">${result.numero_nfse}</strong></div>
+          ${result.nfse?.dataEmissao ? `<div style="font-size:11px;color:#64748b;margin-top:4px">Data: ${result.nfse.dataEmissao}</div>` : ''}
+        </div>
+      `;
+      btn.textContent = '✅ Emitida';
+      btn.style.background = '#059669';
+      // Fechar modal após 3s
+      setTimeout(() => {
+        document.getElementById('modal-emitir-nfse')?.remove();
+        document.getElementById('modal-gerar-boletim')?.remove();
+        if (typeof loadBolHistorico === 'function') loadBolHistorico();
+      }, 3000);
+    } else {
+      const erroMsg = result.error || 'Erro desconhecido';
+      resultEl.innerHTML = `
+        <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px">
+          <div style="font-weight:700;color:#dc2626;margin-bottom:4px">❌ Falha na Emissão</div>
+          <div style="font-size:12px;color:#7f1d1d">${erroMsg}</div>
+          ${result.detalhes?.erros?.length ? `<div style="font-size:10px;color:#94a3b8;margin-top:4px">Detalhes: ${JSON.stringify(result.detalhes.erros)}</div>` : ''}
+        </div>
+      `;
+      btn.disabled = false;
+      btn.textContent = '🔄 Tentar Novamente';
+    }
+  } catch (err) {
+    resultEl.innerHTML = `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;color:#dc2626;font-size:12px">❌ Erro de rede: ${err.message}</div>`;
+    btn.disabled = false;
+    btn.textContent = '🔄 Tentar Novamente';
+  }
+}
+
+// Seletor de contrato quando abrirGerarBoletim() chamado sem argumentos
+async function _abrirSeletorContrato() {
+  if (!_bolContratos.length) await loadBolContratos();
+  if (!_bolContratos.length) { toast('Nenhum contrato de boletim cadastrado', 'error'); return; }
+
+  // Buscar valores dos contratos financeiros
+  const contratosFinanc = (await api('/contratos'))?.data || [];
+  const valMap = {};
+  for (const cf of contratosFinanc) {
+    valMap[cf.numContrato] = cf.valor_mensal_bruto || 0;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:14px;width:100%;max-width:500px;box-shadow:0 24px 80px rgba(0,0,0,.35);overflow:hidden">
+      <div style="background:#059669;color:#fff;padding:16px 20px;display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:15px;font-weight:800">📄 Selecionar Contrato</div>
+        <button onclick="this.closest('div[style*=fixed]').remove()"
+          style="background:rgba(255,255,255,.2);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 10px;line-height:1">×</button>
+      </div>
+      <div style="padding:16px;max-height:70vh;overflow-y:auto">
+        ${_bolContratos.map(c => {
+          const vm = valMap[c.contrato_ref || c.numero_contrato] || 0;
+          return `<button onclick="this.closest('div[style*=fixed]').remove();abrirGerarBoletim(${c.id},'${(c.contrato_ref||c.numero_contrato||'').replace(/'/g,"\\'")}','${(c.nome||c.contratante||'').replace(/'/g,"\\'")}',${vm})"
+            style="display:block;width:100%;text-align:left;padding:10px 14px;border:1.5px solid #e2e8f0;border-radius:8px;margin-bottom:8px;background:#fff;cursor:pointer;font-size:13px;transition:background .15s"
+            onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background='#fff'">
+            <div style="font-weight:700;color:#0f172a">${c.nome}</div>
+            <div style="font-size:11px;color:#64748b">${c.contratante || '—'} · ${vm ? brl(vm) + '/mês' : 'valor não cadastrado'}</div>
+          </button>`;
+        }).join('')}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
 // ─── F-7: Inicializar Boletins de Contratos Financeiros ─────────
 async function bolInicializarDeContratos() {
   // Busca os contratos financeiros existentes

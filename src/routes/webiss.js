@@ -8,6 +8,20 @@
  *   GET  /webiss/consultar       — consulta NFS-e emitidas (sem assinatura)
  *   POST /webiss/importar        — importa NFS-e consultadas para o banco local
  *   POST /webiss/emitir          — emite NFS-e via GerarNfse (requer certificado A1)
+ *
+ * PRODUÇÃO — Certificados A1:
+ *   Os arquivos .pfx precisam estar em /opt/montana/app_unificado/certificados/
+ *   na VM GCP (104.196.22.170) com os nomes:
+ *     assessoria.pfx  (CNPJ 14.092.519/0001-51 — Insc. Municipal 237319)
+ *     seguranca.pfx   (CNPJ 19.200.109/0001-09 — Insc. Municipal 515161)
+ *   Copiar via SCP:
+ *     scp -i ~/.ssh/id_montana certificados/assessoria.pfx diretoria@104.196.22.170:/opt/montana/app_unificado/certificados/
+ *     scp -i ~/.ssh/id_montana certificados/seguranca.pfx  diretoria@104.196.22.170:/opt/montana/app_unificado/certificados/
+ *   As senhas e inscrições municipais devem estar no .env do servidor:
+ *     WEBISS_CERT_SENHA_ASSESSORIA=14092519
+ *     WEBISS_CERT_SENHA_SEGURANCA=19200109
+ *     WEBISS_INSC_ASSESSORIA=237319
+ *     WEBISS_INSC_SEGURANCA=515161
  */
 
 require('dotenv').config();
