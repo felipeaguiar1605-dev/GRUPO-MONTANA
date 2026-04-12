@@ -4485,4 +4485,164 @@ router.get('/relatorios/margem-por-posto', (req, res) => {
   }
 });
 
+// ─── APURAÇÃO MENSAL ─────────────────────────────────────────────
+router.get('/relatorios/apuracao-mensal', (req, res) => {
+  const db = req.db;
+  try {
+    db.prepare(`CREATE TABLE IF NOT EXISTS apuracao_mensal (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      competencia TEXT UNIQUE,
+      receita_bruta REAL DEFAULT 0,
+      retencoes REAL DEFAULT 0,
+      receita_liquida REAL DEFAULT 0,
+      despesas_total REAL DEFAULT 0,
+      resultado REAL DEFAULT 0,
+      qtd_nfs INTEGER DEFAULT 0,
+      gerado_em TEXT DEFAULT (datetime('now','localtime')),
+      obs TEXT
+    )`).run();
+  } catch(e) {}
+
+  const meses = parseInt(req.query.meses) || 12;
+  const rows = db.prepare(`SELECT * FROM apuracao_mensal ORDER BY competencia DESC LIMIT ?`).all(meses);
+
+  if (rows.length === 0) {
+    const resultado = [];
+    for (let i = 1; i <= 3; i++) {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - i);
+      const ano = d.getFullYear();
+      const mes = String(d.getMonth() + 1).padStart(2, '0');
+      const from = `${ano}-${mes}-01`;
+      const to   = `${ano}-${mes}-31`;
+      const comp = `${ano}-${mes}`;
+      try {
+        const receita  = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) total, COUNT(*) qtd FROM notas_fiscais WHERE data_emissao BETWEEN ? AND ?`).get(from, to);
+        const despesas = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) total FROM despesas WHERE data_iso BETWEEN ? AND ?`).get(from, to);
+        const ret      = db.prepare(`SELECT COALESCE(SUM(retencao),0) total FROM notas_fiscais WHERE data_emissao BETWEEN ? AND ?`).get(from, to);
+        resultado.push({
+          competencia: comp,
+          receita_bruta: receita.total || 0,
+          retencoes: ret.total || 0,
+          receita_liquida: (receita.total||0) - (ret.total||0),
+          despesas_total: despesas.total || 0,
+          resultado: ((receita.total||0) - (ret.total||0)) - (despesas.total||0),
+          qtd_nfs: receita.qtd || 0,
+          gerado_em: new Date().toISOString()
+        });
+      } catch(e) {}
+    }
+    return res.json({ data: resultado, fonte: 'calculado', total: resultado.length });
+  }
+
+  res.json({ data: rows, fonte: 'cron', total: rows.length });
+});
+
+// ─── SUBCONTRATADOS / FORNECEDORES ───────────────────────────────
+router.get('/relatorios/subcontratados', (req, res) => {
+  const db = req.db;
+  const { from, to } = req.query;
+  const ano = new Date().getFullYear();
+  const dateFrom = from || `${ano}-01-01`;
+  const dateTo   = to   || `${ano}-12-31`;
+
+  const subcontratados = db.prepare(`
+    SELECT
+      fornecedor,
+      cnpj_fornecedor,
+      COUNT(*) qtd_pagamentos,
+      COALESCE(SUM(valor_bruto),0) total_pago,
+      MIN(data_iso) primeiro_pgto,
+      MAX(data_iso) ultimo_pgto,
+      COUNT(DISTINCT substr(data_iso,1,7)) meses_ativos
+    FROM despesas
+    WHERE data_iso BETWEEN ? AND ?
+      AND UPPER(TRIM(categoria)) IN ('FORNECEDOR','SERVIÇO','SERVICO','SUBCONTRATADO','TERCEIROS')
+      AND fornecedor IS NOT NULL AND fornecedor != ''
+    GROUP BY fornecedor, cnpj_fornecedor
+    ORDER BY total_pago DESC
+    LIMIT 50
+  `).all(dateFrom, dateTo);
+
+  const resultado = subcontratados.map(s => {
+    let nfs_recebidas = 0;
+    let total_nfs = 0;
+    try {
+      const tbl = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='nfe_entrada'").get();
+      if (tbl) {
+        const nfs = db.prepare(`SELECT COUNT(*) c, COALESCE(SUM(valor_total),0) t FROM nfe_entrada WHERE cnpj_emitente=? AND data_emissao BETWEEN ? AND ?`).get(s.cnpj_fornecedor||'', dateFrom, dateTo);
+        nfs_recebidas = nfs.c || 0;
+        total_nfs = nfs.t || 0;
+      }
+    } catch(e) {}
+    return {
+      ...s,
+      nfs_recebidas,
+      total_nfs,
+      cobertura_nf: total_nfs > 0 ? Math.min(100, Math.round(total_nfs / s.total_pago * 100)) : 0
+    };
+  });
+
+  const total_geral = resultado.reduce((s,r) => s + r.total_pago, 0);
+  res.json({ data: resultado, total_geral, periodo: { from: dateFrom, to: dateTo } });
+});
+
+// ─── CONSOLIDADO MULTI-EMPRESA ────────────────────────────────────
+router.get('/consolidado/resumo', (req, res) => {
+  const { from, to } = req.query;
+  const ano = new Date().getFullYear();
+  const dateFrom = from || `${ano}-01-01`;
+  const dateTo   = to   || `${ano}-12-31`;
+
+  const resultado = [];
+
+  for (const [key, company] of Object.entries(COMPANIES)) {
+    try {
+      const db = getDb(key);
+      const receita   = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) t, COUNT(*) q FROM notas_fiscais WHERE data_emissao BETWEEN ? AND ?`).get(dateFrom, dateTo);
+      const despesas  = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) t FROM despesas WHERE data_iso BETWEEN ? AND ?`).get(dateFrom, dateTo);
+      const retencoes = db.prepare(`SELECT COALESCE(SUM(retencao),0) t FROM notas_fiscais WHERE data_emissao BETWEEN ? AND ?`).get(dateFrom, dateTo);
+      const extratos  = db.prepare(`SELECT COALESCE(SUM(credito),0) entradas, COALESCE(SUM(debito),0) saidas FROM extratos WHERE data_iso BETWEEN ? AND ?`).get(dateFrom, dateTo);
+      const contratos = db.prepare(`SELECT COUNT(*) c FROM contratos WHERE status IS NULL OR status != 'encerrado'`).get();
+      const nfsPend   = db.prepare(`SELECT COUNT(*) c FROM notas_fiscais WHERE status_conciliacao='PENDENTE'`).get();
+
+      const receita_bruta = receita.t || 0;
+      const ret  = retencoes.t || 0;
+      const desp = despesas.t || 0;
+      const receita_liq = receita_bruta - ret;
+
+      resultado.push({
+        empresa: key,
+        nome: company.nome || key,
+        cnpj: company.cnpj || '',
+        receita_bruta,
+        retencoes: ret,
+        receita_liquida: receita_liq,
+        despesas: desp,
+        resultado: receita_liq - desp,
+        margem_pct: receita_liq > 0 ? Math.round((receita_liq - desp) / receita_liq * 100 * 10) / 10 : 0,
+        entradas_banco: extratos.entradas || 0,
+        saidas_banco: extratos.saidas || 0,
+        qtd_nfs: receita.q || 0,
+        contratos_ativos: contratos.c || 0,
+        nfs_pendentes: nfsPend.c || 0
+      });
+    } catch(e) {
+      resultado.push({ empresa: key, nome: company.nome || key, erro: e.message });
+    }
+  }
+
+  const totais = resultado.reduce((acc, r) => ({
+    receita_bruta:    (acc.receita_bruta||0)    + (r.receita_bruta||0),
+    receita_liquida:  (acc.receita_liquida||0)  + (r.receita_liquida||0),
+    despesas:         (acc.despesas||0)         + (r.despesas||0),
+    resultado:        (acc.resultado||0)        + (r.resultado||0),
+    qtd_nfs:          (acc.qtd_nfs||0)          + (r.qtd_nfs||0),
+    contratos_ativos: (acc.contratos_ativos||0) + (r.contratos_ativos||0),
+  }), {});
+
+  res.json({ empresas: resultado, totais, periodo: { from: dateFrom, to: dateTo } });
+});
+
 module.exports = router;

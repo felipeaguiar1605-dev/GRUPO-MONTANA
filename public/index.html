@@ -346,6 +346,27 @@
   <div class="fbar" id="desp-filters"></div>
   <div class="tw"><table id="tbl-desp"><thead id="desp-head"></thead><tbody id="desp-body"></tbody></table></div>
   <div class="pag" id="desp-pag"></div>
+
+  <!-- Subcontratados / Fornecedores -->
+  <div style="margin-top:24px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="font-size:14px;font-weight:700;color:#0f172a">🏢 Gestão de Subcontratados / Fornecedores</h3>
+      <button onclick="loadSubcontratados()" style="padding:6px 14px;background:#7c3aed;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">🔄 Atualizar</button>
+    </div>
+    <div id="subcontratados-kpis"></div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:#f1f5f9;font-size:11px;color:#64748b">
+        <th style="padding:8px;text-align:left">Fornecedor</th>
+        <th style="padding:8px;text-align:left">CNPJ</th>
+        <th style="padding:8px;text-align:center">Pgtos</th>
+        <th style="padding:8px;text-align:center">Meses</th>
+        <th style="padding:8px;text-align:right">Total Pago</th>
+        <th style="padding:8px;text-align:center">NFs Recebidas</th>
+        <th style="padding:8px;text-align:center">Cobertura NF</th>
+      </tr></thead>
+      <tbody id="subcontratados-body"></tbody>
+    </table>
+  </div>
 </div>
 
 <!-- Prefeitura de Palmas -->
@@ -1114,6 +1135,28 @@
     </div>
   </div>
 
+  <!-- Apuração Mensal Automática -->
+  <div style="margin-bottom:24px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="font-size:14px;font-weight:700;color:#0f172a">📊 Apuração Mensal — Histórico</h3>
+      <button onclick="loadApuracaoMensal()" style="padding:6px 14px;background:#3b82f6;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">🔄 Atualizar</button>
+    </div>
+    <div id="apuracao-kpis"></div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:#f1f5f9;font-size:11px;color:#64748b">
+        <th style="padding:8px;text-align:left">Competência</th>
+        <th style="padding:8px;text-align:right">Receita Bruta</th>
+        <th style="padding:8px;text-align:right">Retenções</th>
+        <th style="padding:8px;text-align:right">Receita Líq.</th>
+        <th style="padding:8px;text-align:right">Despesas</th>
+        <th style="padding:8px;text-align:right">Resultado</th>
+        <th style="padding:8px;text-align:center">Margem</th>
+        <th style="padding:8px;text-align:center">NFs</th>
+      </tr></thead>
+      <tbody id="apuracao-body"><tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:20px">Carregando...</td></tr></tbody>
+    </table>
+  </div>
+
   <div style="display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start">
     <!-- DRE Table -->
     <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
@@ -1687,6 +1730,27 @@
   </div>
   <div id="consolidado-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:16px"><div class="loading">Carregando...</div></div>
   <div id="consolidado-table-wrap"></div>
+
+  <!-- Consolidado Financeiro Detalhado -->
+  <div style="margin-top:24px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="font-size:14px;font-weight:700;color:#0f172a">📊 Resultado Financeiro por Empresa</h3>
+      <button onclick="loadConsolidadoResumo()" style="padding:6px 14px;background:#3b82f6;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">🔄 Atualizar</button>
+    </div>
+    <div id="consolidado-resumo-kpis"></div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px">
+      <thead><tr style="background:#f1f5f9;font-size:11px;color:#64748b">
+        <th style="padding:8px;text-align:left">Empresa</th>
+        <th style="padding:8px;text-align:right">Receita Bruta</th>
+        <th style="padding:8px;text-align:right">Retenções</th>
+        <th style="padding:8px;text-align:right">Receita Líq.</th>
+        <th style="padding:8px;text-align:right">Despesas</th>
+        <th style="padding:8px;text-align:right">Resultado</th>
+        <th style="padding:8px;text-align:center">Margem</th>
+      </tr></thead>
+      <tbody id="consolidado-resumo-body"><tr><td colspan="7" style="text-align:center;padding:20px;color:#94a3b8">Carregando...</td></tr></tbody>
+    </table>
+  </div>
 </div>
 
 <!-- 🔍 Auditoria -->

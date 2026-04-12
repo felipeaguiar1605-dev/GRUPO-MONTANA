@@ -207,6 +207,55 @@ try {
   cron.schedule('0 8 * * *', dispararAlertasDiarios, { timezone: 'America/Araguaina' });
   console.log('  ⏰ Cron de alertas configurado: todo dia 08:00 (America/Araguaina)');
 
+  // ── Apuração mensal automática — dia 1° às 06:00 ───────────
+  cron.schedule('0 6 1 * *', async () => {
+    console.log('[CRON] Iniciando apuração mensal automática...');
+    const mesAnterior = new Date();
+    mesAnterior.setDate(0); // último dia do mês anterior
+    const ano  = mesAnterior.getFullYear();
+    const mes  = String(mesAnterior.getMonth() + 1).padStart(2, '0');
+    const from = `${ano}-${mes}-01`;
+    const to   = `${ano}-${mes}-31`;
+    const comp = `${ano}-${mes}`;
+
+    for (const [key] of Object.entries(COMPANIES)) {
+      try {
+        const db = getDb(key);
+
+        db.prepare(`CREATE TABLE IF NOT EXISTS apuracao_mensal (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          competencia TEXT UNIQUE,
+          receita_bruta REAL DEFAULT 0,
+          retencoes REAL DEFAULT 0,
+          receita_liquida REAL DEFAULT 0,
+          despesas_total REAL DEFAULT 0,
+          resultado REAL DEFAULT 0,
+          qtd_nfs INTEGER DEFAULT 0,
+          gerado_em TEXT DEFAULT (datetime('now','localtime')),
+          obs TEXT
+        )`).run();
+
+        const receita  = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) total, COUNT(*) qtd FROM notas_fiscais WHERE data_emissao BETWEEN ? AND ?`).get(from, to);
+        const despesas = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) total FROM despesas WHERE data_iso BETWEEN ? AND ?`).get(from, to);
+        const retencoes = db.prepare(`SELECT COALESCE(SUM(retencao),0) total FROM notas_fiscais WHERE data_emissao BETWEEN ? AND ?`).get(from, to);
+
+        const receita_bruta = receita.total || 0;
+        const ret  = retencoes.total || 0;
+        const desp = despesas.total || 0;
+
+        db.prepare(`INSERT OR REPLACE INTO apuracao_mensal
+          (competencia, receita_bruta, retencoes, receita_liquida, despesas_total, resultado, qtd_nfs)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`)
+          .run(comp, receita_bruta, ret, receita_bruta - ret, desp, (receita_bruta - ret) - desp, receita.qtd);
+
+        console.log(`[APURAÇÃO] ${key} ${comp}: Receita R$${receita_bruta.toFixed(2)} | Despesas R$${desp.toFixed(2)} | Resultado R$${((receita_bruta - ret) - desp).toFixed(2)}`);
+      } catch(e) {
+        console.error(`[APURAÇÃO] Erro ${key}:`, e.message);
+      }
+    }
+  }, { timezone: 'America/Araguaina' });
+  console.log('  📊 Cron de apuração mensal configurado: dia 1° às 06:00 (America/Araguaina)');
+
   // ── Backup automático diário às 02:00 ──────────────────────
   const fs = require('fs');
   const backupDir = path.join(__dirname, '..', 'backups');

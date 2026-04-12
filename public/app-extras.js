@@ -9,13 +9,15 @@
     if (id === 'certidoes')   loadCertidoes();
     if (id === 'licitacoes')  { loadLicKpis(); loadLicitacoes(); }
     if (id === 'calculadora') { loadOrcamentos(); calcularPosto(); }
-    if (id === 'dre')         loadDRE();
+    if (id === 'dre')         { loadDRE(); loadApuracaoMensal(); }
     if (id === 'margem')      loadMargem();
     if (id === 'reajuste')    loadReajustes();
     if (id === 'rh')          loadRH();
     if (id === 'auditoria')   loadAuditoria();
     if (id === 'retencoes')        loadRetencoes();
     if (id === 'conta-vinculada') loadContaVinculada();
+    if (id === 'consolidado')     loadConsolidadoResumo();
+    if (id === 'desp')            loadSubcontratados();
   };
 })();
 
@@ -1892,6 +1894,184 @@ async function loadConsolidado() {
   } catch(err) {
     el.innerHTML = `<p style="color:#dc2626">Erro: ${err.message}</p>`;
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// APURAÇÃO MENSAL AUTOMÁTICA
+// ═══════════════════════════════════════════════════════════════
+async function loadApuracaoMensal() {
+  const el = document.getElementById('apuracao-body');
+  const kpiEl = document.getElementById('apuracao-kpis');
+  if (!el) return;
+
+  const d = await api('/relatorios/apuracao-mensal?meses=12');
+  if (!d || !d.data) return;
+
+  const brl = v => 'R$\u00a0' + (v||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  const cor = v => v >= 0 ? '#059669' : '#dc2626';
+
+  const ultimo = d.data[0];
+  if (ultimo && kpiEl) {
+    const margem = ultimo.receita_liquida > 0 ? (ultimo.resultado / ultimo.receita_liquida * 100) : 0;
+    kpiEl.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px">
+        <div class="kpi" style="border-left:4px solid #3b82f6">
+          <div class="kpi-l">📅 Última Apuração</div>
+          <div class="kpi-v" style="color:#3b82f6;font-size:15px">${ultimo.competencia}</div>
+          <div class="kpi-s">${d.fonte === 'cron' ? 'gerado automaticamente' : 'calculado agora'}</div>
+        </div>
+        <div class="kpi" style="border-left:4px solid #059669">
+          <div class="kpi-l">💰 Receita Líquida</div>
+          <div class="kpi-v" style="color:#059669">${brl(ultimo.receita_liquida)}</div>
+          <div class="kpi-s">${ultimo.qtd_nfs} NFs emitidas</div>
+        </div>
+        <div class="kpi" style="border-left:4px solid #dc2626">
+          <div class="kpi-l">💸 Despesas</div>
+          <div class="kpi-v" style="color:#dc2626">${brl(ultimo.despesas_total)}</div>
+          <div class="kpi-s">no período</div>
+        </div>
+        <div class="kpi" style="border-left:4px solid ${cor(ultimo.resultado)}">
+          <div class="kpi-l">📊 Resultado</div>
+          <div class="kpi-v" style="color:${cor(ultimo.resultado)}">${brl(ultimo.resultado)}</div>
+          <div class="kpi-s">margem ${margem.toFixed(1)}%</div>
+        </div>
+      </div>`;
+  }
+
+  el.innerHTML = d.data.map(m => {
+    const margem = m.receita_liquida > 0 ? (m.resultado / m.receita_liquida * 100) : 0;
+    return `<tr>
+      <td style="font-weight:700">${m.competencia}</td>
+      <td style="text-align:right">${brl(m.receita_bruta)}</td>
+      <td style="text-align:right;color:#dc2626">${brl(m.retencoes)}</td>
+      <td style="text-align:right;color:#059669">${brl(m.receita_liquida)}</td>
+      <td style="text-align:right;color:#dc2626">${brl(m.despesas_total)}</td>
+      <td style="text-align:right;font-weight:700;color:${cor(m.resultado)}">${brl(m.resultado)}</td>
+      <td style="text-align:center">
+        <span style="background:${cor(margem)}20;color:${cor(margem)};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">${margem.toFixed(1)}%</span>
+      </td>
+      <td style="text-align:center;font-size:10px;color:#94a3b8">${m.qtd_nfs}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GESTÃO DE SUBCONTRATADOS
+// ═══════════════════════════════════════════════════════════════
+async function loadSubcontratados() {
+  const el = document.getElementById('subcontratados-body');
+  const kpiEl = document.getElementById('subcontratados-kpis');
+  if (!el) return;
+
+  const p = window._globalPeriod || {};
+  const qs = p.from ? `?from=${p.from}&to=${p.to}` : '';
+  const d = await api('/relatorios/subcontratados' + qs);
+  if (!d || !d.data) return;
+
+  const brl = v => 'R$\u00a0' + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+  if (kpiEl) {
+    const top = d.data[0];
+    kpiEl.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px">
+        <div class="kpi" style="border-left:4px solid #7c3aed">
+          <div class="kpi-l">🏢 Total Subcontratados</div>
+          <div class="kpi-v" style="color:#7c3aed">${d.data.length}</div>
+          <div class="kpi-s">fornecedores no período</div>
+        </div>
+        <div class="kpi" style="border-left:4px solid #dc2626">
+          <div class="kpi-l">💸 Total Repassado</div>
+          <div class="kpi-v" style="color:#dc2626">${brl(d.total_geral)}</div>
+          <div class="kpi-s">pagamentos a terceiros</div>
+        </div>
+        <div class="kpi" style="border-left:4px solid #d97706">
+          <div class="kpi-l">🏆 Maior Subcontratado</div>
+          <div class="kpi-v" style="color:#d97706;font-size:13px">${top?.fornecedor?.substring(0,20)||'—'}</div>
+          <div class="kpi-s">${brl(top?.total_pago||0)}</div>
+        </div>
+      </div>`;
+  }
+
+  el.innerHTML = d.data.map(s => `
+    <tr>
+      <td style="font-weight:600;font-size:12px">${s.fornecedor||'—'}</td>
+      <td style="color:#64748b;font-size:10px">${s.cnpj_fornecedor||'—'}</td>
+      <td style="text-align:center">${s.qtd_pagamentos}</td>
+      <td style="text-align:center">${s.meses_ativos}m</td>
+      <td style="text-align:right;font-weight:700;color:#dc2626">${brl(s.total_pago)}</td>
+      <td style="text-align:center">${s.nfs_recebidas > 0
+        ? `<span style="color:#059669;font-size:11px">✅ ${s.nfs_recebidas} NFs</span>`
+        : `<span style="color:#dc2626;font-size:11px">⚠️ sem NF</span>`}</td>
+      <td style="text-align:center">
+        <div style="background:#e2e8f0;border-radius:4px;height:6px;width:60px;display:inline-block">
+          <div style="background:${s.cobertura_nf>=80?'#059669':'#d97706'};height:6px;border-radius:4px;width:${Math.min(100,s.cobertura_nf)}%"></div>
+        </div>
+        <span style="font-size:10px;color:#64748b;margin-left:4px">${s.cobertura_nf}%</span>
+      </td>
+    </tr>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CONSOLIDADO MULTI-EMPRESA (tabela financeira detalhada)
+// ═══════════════════════════════════════════════════════════════
+async function loadConsolidadoResumo() {
+  const el = document.getElementById('consolidado-resumo-body');
+  const kpiEl = document.getElementById('consolidado-resumo-kpis');
+  if (!el) return;
+
+  const p = window._globalPeriod || {};
+  const qs = p.from ? `?from=${p.from}&to=${p.to}` : '';
+  const d = await api('/consolidado/resumo' + qs);
+  if (!d || !d.empresas) return;
+
+  const brl = v => 'R$\u00a0' + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const cor = v => v >= 0 ? '#059669' : '#dc2626';
+
+  if (kpiEl) {
+    const t = d.totais;
+    kpiEl.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px">
+        <div class="kpi" style="border-left:4px solid #3b82f6">
+          <div class="kpi-l">🏢 Grupo — Receita Bruta</div>
+          <div class="kpi-v" style="color:#3b82f6">${brl(t.receita_bruta)}</div>
+          <div class="kpi-s">${t.qtd_nfs} NFs · ${t.contratos_ativos} contratos</div>
+        </div>
+        <div class="kpi" style="border-left:4px solid #dc2626">
+          <div class="kpi-l">💸 Grupo — Despesas</div>
+          <div class="kpi-v" style="color:#dc2626">${brl(t.despesas)}</div>
+          <div class="kpi-s">todas as empresas</div>
+        </div>
+        <div class="kpi" style="border-left:4px solid ${cor(t.resultado)}">
+          <div class="kpi-l">📊 Grupo — Resultado</div>
+          <div class="kpi-v" style="color:${cor(t.resultado)}">${brl(t.resultado)}</div>
+          <div class="kpi-s">receita líq. - despesas</div>
+        </div>
+      </div>`;
+  }
+
+  const icones = { assessoria:'🏢', seguranca:'🔒', portodovau:'🛡️', mustang:'🐎' };
+  el.innerHTML = d.empresas.map(e => e.erro ? `
+    <tr><td colspan="7" style="color:#dc2626;padding:8px">${icones[e.empresa]||'🏢'} ${e.nome}: ${e.erro}</td></tr>` : `
+    <tr>
+      <td style="font-weight:700">${icones[e.empresa]||'🏢'} ${e.nome}</td>
+      <td style="text-align:right">${brl(e.receita_bruta)}</td>
+      <td style="text-align:right;color:#dc2626">${brl(e.retencoes)}</td>
+      <td style="text-align:right;color:#059669">${brl(e.receita_liquida)}</td>
+      <td style="text-align:right;color:#dc2626">${brl(e.despesas)}</td>
+      <td style="text-align:right;font-weight:700;color:${cor(e.resultado)}">${brl(e.resultado)}</td>
+      <td style="text-align:center">
+        <span style="background:${cor(e.margem_pct)}20;color:${cor(e.margem_pct)};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">${e.margem_pct}%</span>
+      </td>
+    </tr>`).join('') + `
+    <tr style="background:#f1f5f9;font-weight:700;border-top:2px solid #e2e8f0">
+      <td>TOTAL GRUPO</td>
+      <td style="text-align:right">${brl(d.totais.receita_bruta)}</td>
+      <td style="text-align:right;color:#dc2626">—</td>
+      <td style="text-align:right;color:#059669">${brl(d.totais.receita_liquida)}</td>
+      <td style="text-align:right;color:#dc2626">${brl(d.totais.despesas)}</td>
+      <td style="text-align:right;font-weight:700;color:${cor(d.totais.resultado)}">${brl(d.totais.resultado)}</td>
+      <td></td>
+    </tr>`;
 }
 
 // ── Inadimplência por Contrato ───────────────────────────────
