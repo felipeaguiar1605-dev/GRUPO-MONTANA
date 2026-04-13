@@ -102,7 +102,7 @@ fi
 
 # ── 7. Certidões vencendo em ≤15 dias ──────────────────────
 CERT_VENC=$(sqlite3 /opt/montana/app_unificado/data/assessoria/montana.db \
-  "SELECT tipo||' ('||orgao||') vence '||validade FROM certidoes WHERE date(validade) <= date('now','+15 days') AND date(validade) >= date('now') ORDER BY validade;" 2>/dev/null | head -5)
+  "SELECT tipo||' vence '||data_validade FROM certidoes WHERE date(data_validade) <= date('now','+15 days') AND date(data_validade) >= date('now') ORDER BY data_validade;" 2>/dev/null | head -5)
 if [ -n "$CERT_VENC" ]; then
   CERT_VENC_INLINE=$(echo "$CERT_VENC" | tr '\n' ' | ' | sed 's/ | $//')
   log_item "AVISO" "Certidoes" "$CERT_VENC_INLINE"

@@ -490,10 +490,10 @@ router.post('/sync', async (req, res) => {
 
 router.get('/historico', (req, res) => {
   const rows = req.db.prepare(`
-    SELECT tipo, arquivo, registros, created_at
+    SELECT tipo, arquivo, registros, data_importacao as created_at
     FROM importacoes
     WHERE tipo='bb-sync'
-    ORDER BY created_at DESC LIMIT 20
+    ORDER BY data_importacao DESC LIMIT 20
   `).all();
   res.json({ ok: true, historico: rows });
 });
