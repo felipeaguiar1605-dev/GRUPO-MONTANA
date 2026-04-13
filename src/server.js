@@ -111,6 +111,9 @@ app.use('/api/bb',           require('./routes/bb-sync'));
 // ─── Módulo Volus (Vale Alimentação / Benefícios) ────────────
 app.use('/api/volus',        require('./routes/volus'));
 
+// ─── Módulo Jurídico ─────────────────────────────────────────
+app.use('/api/juridico',     require('./routes/juridico'));
+
 // ─── Módulo Usuários (gestão de acesso) ─────────────────────────
 app.use('/api/usuarios',     require('./routes/usuarios').router);
 

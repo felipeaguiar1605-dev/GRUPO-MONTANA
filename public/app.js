@@ -169,7 +169,8 @@ function showTab(id,el){
   if(id==='keywords') loadKeywords();
   if(id==='config') loadConfig();
   if(id==='consolidado') loadConsolidado();
-  if(id==='estoque') window.estoqueInit && window.estoqueInit();
+  if(id==='estoque')  window.estoqueInit  && window.estoqueInit();
+  if(id==='juridico') window.juridicoInit && window.juridicoInit();
 }
 
 // ─── Global Period Filter ────────────────────────────────────────

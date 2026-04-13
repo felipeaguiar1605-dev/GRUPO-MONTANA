@@ -154,6 +154,18 @@
     </div>
   </div>
 
+  <div class="nav-group" id="ng-juridico">
+    <div class="nav-group-hdr" onclick="toggleNavGroup('ng-juridico')">
+      <span class="ng-icon">⚖️</span><span class="ng-label">Jurídico</span><span class="ng-chevron">▾</span>
+    </div>
+    <div class="nav-group-items" style="display:none">
+      <div class="tab" data-tab="juridico" onclick="navGo('juridico',this);setTimeout(()=>jurShowView('dashboard'),50)">📊 Painel Jurídico</div>
+      <div class="tab" data-tab="juridico" onclick="navGo('juridico',this);setTimeout(()=>jurShowView('oficios'),50)">📬 Ofícios</div>
+      <div class="tab" data-tab="juridico" onclick="navGo('juridico',this);setTimeout(()=>jurShowView('processos'),50)">⚖️ Processos</div>
+      <div class="tab" data-tab="juridico" onclick="navGo('juridico',this);setTimeout(()=>jurShowView('riscos'),50)">🔴 Riscos Contratuais</div>
+    </div>
+  </div>
+
   <div class="nav-group" id="ng-pessoas">
     <div class="nav-group-hdr" onclick="toggleNavGroup('ng-pessoas')">
       <span class="ng-icon">👥</span><span class="ng-label">Pessoas</span><span class="ng-chevron">▾</span>
@@ -2607,4 +2619,447 @@
       <div style="font-weight:800;font-size:14px;margin-bottom:16px;color:#1d4ed8">✏️ Editar Registro de Ponto</div>
       <div style="display:grid;gap:10px">
         <div>
-          <label style="font-size:10px;color:#64748b;font-weight:6
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Tipo *</label>
+          <select id="edit-reg-tipo" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+            <option value="ENTRADA">▶ Entrada</option>
+            <option value="SAIDA">■ Saída</option>
+            <option value="INT_INICIO">⏸ Início Intervalo</option>
+            <option value="INT_FIM">▶ Fim Intervalo</option>
+            <option value="EXTRA">⭐ Hora Extra</option>
+            <option value="FALTA">❌ Falta</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Data e Hora *</label>
+          <input type="datetime-local" id="edit-reg-data-hora" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Observação</label>
+          <input type="text" id="edit-reg-obs" placeholder="Opcional" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+        <button onclick="document.getElementById('modal-editar-registro').style.display='none'" style="padding:7px 16px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;background:#f8fafc">Cancelar</button>
+        <button onclick="salvarEdicaoRegistro()" style="padding:7px 16px;font-size:11px;font-weight:700;background:#1d4ed8;color:#fff;border:none;border-radius:6px;cursor:pointer">✔ Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Registrar Ponto -->
+  <div id="modal-ponto-registrar" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;padding:24px;width:440px;max-width:95vw">
+      <div style="font-weight:800;font-size:14px;margin-bottom:16px;color:#0f766e">🕐 Registrar Ponto</div>
+      <div style="display:grid;gap:10px">
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Funcionário *</label>
+          <select id="reg-func-id" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px"></select>
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Tipo *</label>
+          <select id="reg-tipo" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+            <option value="ENTRADA">▶ Entrada</option>
+            <option value="SAIDA">■ Saída</option>
+            <option value="INT_INICIO">⏸ Início Intervalo</option>
+            <option value="INT_FIM">▶ Fim Intervalo</option>
+            <option value="EXTRA">⭐ Hora Extra</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Data e Hora *</label>
+          <input type="datetime-local" id="reg-data-hora" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Observação</label>
+          <input type="text" id="reg-obs" placeholder="Opcional" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+        <button onclick="document.getElementById('modal-ponto-registrar').style.display='none'" style="padding:7px 16px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;background:#f8fafc">Cancelar</button>
+        <button onclick="salvarRegistroPonto()" style="padding:7px 16px;font-size:11px;font-weight:700;background:#0f766e;color:#fff;border:none;border-radius:6px;cursor:pointer">✔ Registrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Nova Ocorrência -->
+  <div id="modal-ponto-ocorrencia" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;padding:24px;width:460px;max-width:95vw">
+      <div style="font-weight:800;font-size:14px;margin-bottom:16px;color:#d97706">⚠️ Registrar Ocorrência</div>
+      <div style="display:grid;gap:10px">
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Funcionário *</label>
+          <select id="oc-func-id" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px"></select>
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Tipo *</label>
+          <select id="oc-tipo" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+            <option value="FALTA_JUSTIFICADA">Falta Justificada</option>
+            <option value="FALTA_INJUSTIFICADA">Falta Injustificada</option>
+            <option value="AFASTAMENTO_MEDICO">Afastamento Médico</option>
+            <option value="FERIAS">Férias</option>
+            <option value="LICENCA">Licença</option>
+            <option value="FOLGA_COMPENSATORIA">Folga Compensatória</option>
+            <option value="HORA_EXTRA">Hora Extra</option>
+            <option value="ATRASO">Atraso</option>
+          </select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Data Início *</label>
+            <input type="date" id="oc-inicio" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Data Fim</label>
+            <input type="date" id="oc-fim" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+          </div>
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Observação</label>
+          <textarea id="oc-obs" rows="2" placeholder="Detalhes, CID, atestado..." style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box;resize:vertical"></textarea>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+        <button onclick="document.getElementById('modal-ponto-ocorrencia').style.display='none'" style="padding:7px 16px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;background:#f8fafc">Cancelar</button>
+        <button onclick="salvarOcorrencia()" style="padding:7px 16px;font-size:11px;font-weight:700;background:#d97706;color:#fff;border:none;border-radius:6px;cursor:pointer">✔ Salvar</button>
+      </div>
+    </div>
+  </div>
+</div><!-- /pg-ponto -->
+
+<!-- ═══════════════════════ JURÍDICO ═══════════════════════════════ -->
+<div id="pg-juridico" class="pg">
+  <!-- Toolbar -->
+  <div class="toolbar" style="flex-wrap:wrap;gap:8px">
+    <span style="font-size:16px">⚖️</span>
+    <span class="toolbar-title">MÓDULO JURÍDICO</span>
+    <nav style="display:flex;gap:4px;flex-wrap:wrap;margin-left:auto">
+      <button id="jur-btn-dashboard"    onclick="jurShowView('dashboard')"    class="active-est" style="padding:5px 12px;font-size:10px;font-weight:700;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;background:#eff6ff;color:#0369a1">📊 Painel</button>
+      <button id="jur-btn-oficios"      onclick="jurShowView('oficios')"      style="padding:5px 12px;font-size:10px;font-weight:700;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;background:#f8fafc;color:#374151">📬 Ofícios</button>
+      <button id="jur-btn-processos"    onclick="jurShowView('processos')"    style="padding:5px 12px;font-size:10px;font-weight:700;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;background:#f8fafc;color:#374151">⚖️ Processos</button>
+      <button id="jur-btn-riscos"       onclick="jurShowView('riscos')"       style="padding:5px 12px;font-size:10px;font-weight:700;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;background:#f8fafc;color:#374151">🔴 Riscos</button>
+      <button onclick="jurNovoOficioForm()"  style="padding:5px 12px;font-size:10px;font-weight:700;border:none;border-radius:6px;cursor:pointer;background:#dbeafe;color:#1d4ed8">+ Ofício</button>
+      <button onclick="jurNovoProcessoForm()" style="padding:5px 12px;font-size:10px;font-weight:700;border:none;border-radius:6px;cursor:pointer;background:#ede9fe;color:#7c3aed">+ Processo</button>
+      <button onclick="jurNovoRiscoForm()"   style="padding:5px 12px;font-size:10px;font-weight:700;border:none;border-radius:6px;cursor:pointer;background:#fef3c7;color:#d97706">+ Risco</button>
+    </nav>
+  </div>
+
+  <!-- VIEW: Dashboard -->
+  <div id="jur-view-dashboard">
+    <div class="kpis" id="jur-kpis" style="margin-bottom:14px"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
+      <div>
+        <div style="font-weight:700;font-size:12px;color:#1e293b;margin-bottom:8px;display:flex;align-items:center;gap:6px">📬 Ofícios — Alertas</div>
+        <div id="jur-alertas-oficios" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;min-height:80px">
+          <div style="color:#6b7280;font-size:.83rem;padding:8px">Carregando…</div>
+        </div>
+      </div>
+      <div>
+        <div style="font-weight:700;font-size:12px;color:#1e293b;margin-bottom:8px;display:flex;align-items:center;gap:6px">📅 Audiências Próximas (30 dias)</div>
+        <div id="jur-audiencias" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;min-height:80px">
+          <div style="color:#6b7280;font-size:.83rem;padding:8px">Carregando…</div>
+        </div>
+      </div>
+      <div>
+        <div style="font-weight:700;font-size:12px;color:#1e293b;margin-bottom:8px;display:flex;align-items:center;gap:6px">🔴 Riscos Altos</div>
+        <div id="jur-riscos-dash" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;min-height:80px">
+          <div style="color:#6b7280;font-size:.83rem;padding:8px">Carregando…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VIEW: Ofícios -->
+  <div id="jur-view-oficios" style="display:none">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:flex-end">
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Busca</label>
+        <input type="text" id="jur-of-busca" placeholder="Nº, órgão, assunto…" oninput="jurCarregarOficios()" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;min-width:220px">
+      </div>
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Status</label>
+        <select id="jur-of-status" onchange="jurCarregarOficios()" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+          <option value="">Todos</option>
+          <option value="PENDENTE">Pendente</option>
+          <option value="RESPONDIDO">Respondido</option>
+          <option value="ARQUIVADO">Arquivado</option>
+        </select>
+      </div>
+    </div>
+    <div id="jur-oficios-table"><div class="loading">Carregando ofícios…</div></div>
+  </div>
+
+  <!-- VIEW: Processos -->
+  <div id="jur-view-processos" style="display:none">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:flex-end">
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Busca</label>
+        <input type="text" id="jur-pr-busca" placeholder="Número, órgão, assunto…" oninput="jurCarregarProcessos()" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;min-width:220px">
+      </div>
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Tipo</label>
+        <select id="jur-pr-tipo" onchange="jurCarregarProcessos()" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+          <option value="">Todos</option>
+          <option value="JUDICIAL">Judicial</option>
+          <option value="ADMINISTRATIVO">Administrativo</option>
+          <option value="TCU">TCU</option>
+          <option value="TCE">TCE</option>
+          <option value="CGU">CGU</option>
+          <option value="TRABALHISTA">Trabalhista</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Status</label>
+        <select id="jur-pr-status" onchange="jurCarregarProcessos()" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+          <option value="">Todos</option>
+          <option value="ATIVO">Ativo</option>
+          <option value="ENCERRADO">Encerrado</option>
+          <option value="SUSPENSO">Suspenso</option>
+        </select>
+      </div>
+    </div>
+    <div id="jur-processos-table"><div class="loading">Carregando processos…</div></div>
+  </div>
+
+  <!-- VIEW: Riscos Contratuais -->
+  <div id="jur-view-riscos" style="display:none">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:flex-end">
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Contrato</label>
+        <input type="text" id="jur-ri-contrato" placeholder="Referência do contrato…" oninput="jurCarregarRiscos()" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;min-width:200px">
+      </div>
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Probabilidade</label>
+        <select id="jur-ri-prob" onchange="jurCarregarRiscos()" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+          <option value="">Todas</option>
+          <option value="BAIXA">Baixa</option>
+          <option value="MEDIA">Média</option>
+          <option value="ALTA">Alta</option>
+        </select>
+      </div>
+    </div>
+    <div id="jur-riscos-table"><div class="loading">Carregando riscos…</div></div>
+  </div>
+
+  <!-- VIEW: Formulário Ofício -->
+  <div id="jur-view-novo-oficio" style="display:none">
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:20px;max-width:700px">
+      <div style="font-weight:700;font-size:13px;color:#0369a1;margin-bottom:16px">📬 <span id="jur-of-form-titulo">Novo Ofício</span></div>
+      <input type="hidden" id="jur-of-form-id">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Número</label>
+          <input type="text" id="jur-of-form-num" placeholder="Ex: 001/2026" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Tipo *</label>
+          <select id="jur-of-form-tipo" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+            <option value="RECEBIDO">📥 Recebido</option>
+            <option value="ENVIADO">📤 Enviado</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Órgão *</label>
+          <input type="text" id="jur-of-form-orgao" placeholder="Ex: TCE/TO, PGE, SEMUS" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Contrato</label>
+          <input type="text" id="jur-of-form-contrato" placeholder="Ex: UFT 16/2025" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div style="grid-column:1/-1">
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Assunto *</label>
+          <input type="text" id="jur-of-form-assunto" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Data Recebimento</label>
+          <input type="date" id="jur-of-form-receb" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Prazo de Resposta</label>
+          <input type="date" id="jur-of-form-prazo" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Responsável</label>
+          <input type="text" id="jur-of-form-resp" placeholder="Quem deve responder" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Prioridade</label>
+          <select id="jur-of-form-prior" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+            <option value="NORMAL">Normal</option>
+            <option value="URGENTE">🚨 Urgente</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Valor em Risco (R$)</label>
+          <input type="number" id="jur-of-form-valor" placeholder="0,00" min="0" step="0.01" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div style="grid-column:1/-1">
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Observações</label>
+          <textarea id="jur-of-form-obs" rows="2" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box;resize:vertical"></textarea>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button onclick="jurShowView('oficios')" style="padding:7px 16px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;background:#f8fafc">← Voltar</button>
+        <button onclick="jurSalvarOficio()" style="padding:7px 20px;font-size:11px;font-weight:700;background:#0369a1;color:#fff;border:none;border-radius:6px;cursor:pointer">✔ Salvar Ofício</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- VIEW: Formulário Processo -->
+  <div id="jur-view-novo-processo" style="display:none">
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:20px;max-width:760px">
+      <div style="font-weight:700;font-size:13px;color:#7c3aed;margin-bottom:16px">⚖️ Novo Processo</div>
+      <input type="hidden" id="jur-pr-form-id">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Número do Processo</label>
+          <input type="text" id="jur-pr-form-num" placeholder="Ex: 0001234-00.2026.8.27.0000" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Tipo *</label>
+          <select id="jur-pr-form-tipo" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+            <option value="JUDICIAL">⚖️ Judicial</option>
+            <option value="ADMINISTRATIVO">🏛️ Administrativo</option>
+            <option value="TCU">🔍 TCU</option>
+            <option value="TCE">🔍 TCE</option>
+            <option value="CGU">🔍 CGU</option>
+            <option value="TRABALHISTA">👷 Trabalhista</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Órgão / Tribunal *</label>
+          <input type="text" id="jur-pr-form-orgao" placeholder="Ex: TRT 10ª Região" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Vara / Câmara</label>
+          <input type="text" id="jur-pr-form-vara" placeholder="Ex: 3ª Vara do Trabalho" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div style="grid-column:1/-1">
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Assunto *</label>
+          <input type="text" id="jur-pr-form-assunto" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Contrato</label>
+          <input type="text" id="jur-pr-form-contrato" placeholder="Ex: UFT 16/2025" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Autor / Reclamante</label>
+          <input type="text" id="jur-pr-form-autor" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Réu / Reclamado</label>
+          <input type="text" id="jur-pr-form-reu" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Data de Abertura</label>
+          <input type="date" id="jur-pr-form-abertura" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Próxima Audiência</label>
+          <input type="date" id="jur-pr-form-audiencia" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Advogado</label>
+          <input type="text" id="jur-pr-form-advogado" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Fase Processual</label>
+          <input type="text" id="jur-pr-form-fase" placeholder="Ex: Instrução, Recurso, Execução" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Valor da Causa (R$)</label>
+          <input type="number" id="jur-pr-form-vcausa" min="0" step="0.01" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Valor em Risco (R$)</label>
+          <input type="number" id="jur-pr-form-vrisco" min="0" step="0.01" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Probabilidade</label>
+          <select id="jur-pr-form-prob" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+            <option value="BAIXA">Baixa</option>
+            <option value="MEDIA">Média</option>
+            <option value="ALTA">Alta</option>
+          </select>
+        </div>
+        <div style="grid-column:1/-1">
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Observações</label>
+          <textarea id="jur-pr-form-obs" rows="2" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box;resize:vertical"></textarea>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button onclick="jurShowView('processos')" style="padding:7px 16px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;background:#f8fafc">← Voltar</button>
+        <button onclick="jurSalvarProcesso()" style="padding:7px 20px;font-size:11px;font-weight:700;background:#7c3aed;color:#fff;border:none;border-radius:6px;cursor:pointer">✔ Salvar Processo</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- VIEW: Formulário Risco -->
+  <div id="jur-view-novo-risco" style="display:none">
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:20px;max-width:680px">
+      <div style="font-weight:700;font-size:13px;color:#d97706;margin-bottom:16px">🔴 Mapeamento de Risco Contratual</div>
+      <input type="hidden" id="jur-ri-form-id">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Contrato *</label>
+          <input type="text" id="jur-ri-form-contrato" placeholder="Ex: UFT 16/2025" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Tipo de Risco *</label>
+          <input type="text" id="jur-ri-form-tipo" placeholder="Ex: Inadimplência, Rescisão, Multa" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div style="grid-column:1/-1">
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Descrição *</label>
+          <textarea id="jur-ri-form-desc" rows="2" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box;resize:vertical"></textarea>
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Probabilidade</label>
+          <select id="jur-ri-form-prob" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+            <option value="BAIXA">Baixa</option>
+            <option value="MEDIA">Média</option>
+            <option value="ALTA">Alta</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Impacto</label>
+          <select id="jur-ri-form-impacto" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+            <option value="BAIXO">Baixo</option>
+            <option value="MEDIO">Médio</option>
+            <option value="ALTO">Alto</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Valor Estimado (R$)</label>
+          <input type="number" id="jur-ri-form-valor" min="0" step="0.01" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Responsável</label>
+          <input type="text" id="jur-ri-form-resp" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        </div>
+        <div style="grid-column:1/-1">
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Mitigação</label>
+          <textarea id="jur-ri-form-mitig" rows="2" placeholder="Medidas adotadas para mitigar este risco…" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box;resize:vertical"></textarea>
+        </div>
+        <div style="grid-column:1/-1">
+          <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Observações</label>
+          <textarea id="jur-ri-form-obs" rows="2" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box;resize:vertical"></textarea>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button onclick="jurShowView('riscos')" style="padding:7px 16px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;background:#f8fafc">← Voltar</button>
+        <button onclick="jurSalvarRisco()" style="padding:7px 20px;font-size:11px;font-weight:700;background:#d97706;color:#fff;border:none;border-radius:6px;cursor:pointer">✔ Salvar Risco</button>
+      </div>
+    </div>
+  </div>
+</div><!-- /pg-juridico -->
+
+</div><!-- /main-content -->
+
+<script src="/app.js"></script>
+<script src="/app-extras.js"></script>
+<script src="/app-boletins.js"></script>
+<script src="/app-ponto.js"></script>
+<script src="/app-estoque.js"></script>
+<script src="/app-bb.js"></script>
+<script src="/app-ia.js"></script>
+<script src="/app-juridico.js"></script>
+</body>
+</html>
