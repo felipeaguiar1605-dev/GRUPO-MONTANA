@@ -89,15 +89,26 @@ function buscarDRE(db, dateFrom, dateTo) {
   const lucroBruto  = recLiq - custosCSP;
   const resOperac   = lucroBruto - despOpOther;
 
-  // PIS/COFINS próprios — Lucro Real não-cumulativo (regime de caixa)
-  // Base: valor das NFs (competência) como aproximação; apuração exata na aba "Despesas → Apuração Caixa"
-  // Crédito: retenções na fonte já sofridas nas mesmas NFs
+  // PIS/COFINS próprios — Lucro Real não-cumulativo
   const pisProprioBruto    = r(recBruta * 0.0165);
   const cofinsPropriaBruta = r(recBruta * 0.076);
   const pisAPagar          = r(Math.max(pisProprioBruto - ret.pis, 0));
   const cofinsAPagar       = r(Math.max(cofinsPropriaBruta - ret.cofins, 0));
-  const totalTributosProprios = r(pisAPagar + cofinsAPagar);
-  const resultadoFinal     = r(resOperac - totalTributosProprios);
+  const totalPisCofins     = r(pisAPagar + cofinsAPagar);
+
+  // IRPJ e CSLL — Lucro Real (base: resultado operacional apurado)
+  // Base de cálculo: resultado operacional menos PIS/COFINS (lucro antes do IR)
+  const baseIR       = Math.max(resOperac - totalPisCofins, 0);
+  const irpjAliq     = 0.15;          // alíquota base 15%
+  const irpjAdicAliq = 0.10;          // adicional 10% sobre lucro > R$20.000/mês
+  const limiteAdicMensal = 20000;      // R$20.000 (equivalente a R$240k/ano)
+  const irpjBase      = r(baseIR * irpjAliq);
+  const irpjAdicional = r(Math.max((baseIR - limiteAdicMensal) * irpjAdicAliq, 0));
+  const irpjTotal     = r(irpjBase + irpjAdicional);
+  const csllTotal     = r(baseIR * 0.09);
+  const totalImpostos = r(totalPisCofins + irpjTotal + csllTotal);
+
+  const resultadoFinal = r(resOperac - totalImpostos);
 
   return {
     dre: {
@@ -121,9 +132,22 @@ function buscarDRE(db, dateFrom, dateTo) {
         cofins_credito_fonte: r(ret.cofins),
         pis_a_pagar:   pisAPagar,
         cofins_a_pagar: cofinsAPagar,
-        total:         totalTributosProprios,
-        nota: 'Lucro Real não-cumulativo — PIS 1,65% + COFINS 7,6% sobre receita de caixa, deduzindo retenções na fonte já sofridas.'
+        total_pis_cofins: totalPisCofins,
+        nota: 'Lucro Real não-cumulativo — PIS 1,65% + COFINS 7,6%, deduzindo retenções na fonte.'
       },
+      irpj: {
+        base: r(baseIR),
+        aliquota_base: irpjBase,
+        adicional_10pct: irpjAdicional,
+        total: irpjTotal,
+        nota: 'IRPJ: 15% + adicional 10% sobre lucro que exceder R$20.000/mês'
+      },
+      csll: {
+        base: r(baseIR),
+        total: csllTotal,
+        nota: 'CSLL: 9% sobre o lucro apurado'
+      },
+      total_impostos: totalImpostos,
       resultado_liquido:      resultadoFinal,
       margem_liquida_pct: recBruta > 0 ? r((resultadoFinal/recBruta)*100) : 0
     },
@@ -301,99 +325,80 @@ router.get('/pdf', (req, res) => {
     doc.end();
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
-
-// ─── GET /api/dre/contratos — DRE detalhado por contrato ─────────────────────
-router.get('/contratos', (req, res) => {
+// GET /api/dre — DRE principal
+router.get('/', (req, res) => {
   const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
-  const p = { from: dateFrom, to: dateTo };
+  const dados = buscarDRE(req.db, dateFrom, dateTo);
+  res.json({ periodo, ...dados });
+});
 
-  // Receita por contrato (NFs pagas no período)
-  const receitaContratos = req.db.prepare(`
-    SELECT
-      COALESCE(NULLIF(TRIM(contrato_ref),''), 'SEM CONTRATO') as contrato,
-      tomador,
-      COUNT(*) qtd_nfs,
-      COALESCE(SUM(valor_bruto),0)   receita_bruta,
-      COALESCE(SUM(valor_liquido),0) receita_liquida,
-      COALESCE(SUM(retencao),0)      retencoes,
-      COALESCE(SUM(inss),0)          inss,
-      COALESCE(SUM(ir),0)            irrf
-    FROM notas_fiscais
-    WHERE data_emissao >= @from AND data_emissao <= @to
-      AND status_conciliacao != 'CANCELADA'
-    GROUP BY COALESCE(NULLIF(TRIM(contrato_ref),''), 'SEM CONTRATO'), tomador
-    ORDER BY receita_bruta DESC
-  `).all(p);
-
-  // Folha estimada por contrato: salario_base × nº meses no período × funcionários ativos
-  // rh_funcionarios.contrato_ref é a fonte correta
-  const meses = Math.max(1, Math.round(
-    (new Date(dateTo) - new Date(dateFrom)) / (30 * 86400000)
-  ));
-  const folhaContratos = req.db.prepare(`
-    SELECT
-      COALESCE(NULLIF(TRIM(contrato_ref),''), 'SEM CONTRATO') as contrato,
-      COALESCE(SUM(salario_base),0) * @meses AS folha_total
-    FROM rh_funcionarios
-    WHERE status='ATIVO'
-    GROUP BY contrato
-  `).all({ meses });
-  const folhaMap = {};
-  folhaContratos.forEach(r => { folhaMap[r.contrato] = r.folha_total; });
-
-  // VA Volus por contrato (se tabela existir)
-  let vaMap = {};
+// GET /api/dre/historico — apuração mensal salva pelo cron
+router.get('/historico', (req, res) => {
   try {
-    const vaContratos = req.db.prepare(`
-      SELECT
-        COALESCE(NULLIF(TRIM(contrato_ref),''), departamento) as contrato,
-        COALESCE(SUM(valor_total),0) va_total
-      FROM volus_pedidos
-      WHERE competencia >= substr(@from,1,7) AND competencia <= substr(@to,1,7)
-      GROUP BY contrato
-    `).all(p);
-    vaContratos.forEach(r => { vaMap[r.contrato] = r.va_total; });
-  } catch (_) {}
+    const rows = req.db.prepare(`
+      SELECT * FROM apuracao_mensal ORDER BY competencia DESC LIMIT 24
+    `).all();
+    res.json({ data: rows, total: rows.length });
+  } catch (e) {
+    // Tabela pode não existir ainda
+    res.json({ data: [], total: 0, aviso: 'Nenhuma apuração mensal gerada ainda (cron roda dia 1° às 06:00)' });
+  }
+});
 
-  // Monta resultado por contrato
-  const r = v => +((v || 0).toFixed(2));
-  const contratos = receitaContratos.map(c => {
-    const folha = folhaMap[c.contrato] || 0;
-    const va    = vaMap[c.contrato] || 0;
-    const custosDir = folha + va;
-    const lucroBruto = c.receita_liquida - custosDir;
-    const margemBruta = c.receita_bruta > 0 ? +((lucroBruto / c.receita_bruta) * 100).toFixed(1) : 0;
-    return {
-      contrato:        c.contrato,
-      tomador:         c.tomador,
-      qtd_nfs:         c.qtd_nfs,
-      receita_bruta:   r(c.receita_bruta),
-      retencoes:       r(c.retencoes),
-      receita_liquida: r(c.receita_liquida),
-      folha:           r(folha),
-      va_volus:        r(va),
-      custos_diretos:  r(custosDir),
-      lucro_bruto:     r(lucroBruto),
-      margem_bruta_pct: margemBruta,
-    };
-  });
+// POST /api/dre/apurar-agora — força apuração do mês atual manualmente
+router.post('/apurar-agora', (req, res) => {
+  try {
+    const db = req.db;
+    const { ano, mes, competencia } = req.body;
+    let A, M;
+    if (competencia && /^\d{4}-\d{2}$/.test(competencia)) {
+      [A, M] = competencia.split('-');
+    } else {
+      A = ano  || new Date().getFullYear();
+      M = String(mes || (new Date().getMonth() + 1)).padStart(2,'0');
+    }
+    const from = `${A}-${M}-01`;
+    const to   = `${A}-${M}-31`;
+    const comp = `${A}-${M}`;
 
-  // Totais consolidados
-  const totais = contratos.reduce((acc, c) => {
-    acc.receita_bruta   += c.receita_bruta;
-    acc.retencoes       += c.retencoes;
-    acc.receita_liquida += c.receita_liquida;
-    acc.folha           += c.folha;
-    acc.va_volus        += c.va_volus;
-    acc.custos_diretos  += c.custos_diretos;
-    acc.lucro_bruto     += c.lucro_bruto;
-    return acc;
-  }, { receita_bruta: 0, retencoes: 0, receita_liquida: 0, folha: 0, va_volus: 0, custos_diretos: 0, lucro_bruto: 0 });
-  totais.margem_bruta_pct = totais.receita_bruta > 0
-    ? +((totais.lucro_bruto / totais.receita_bruta) * 100).toFixed(1) : 0;
-  Object.keys(totais).forEach(k => { if (typeof totais[k] === 'number' && k !== 'margem_bruta_pct') totais[k] = r(totais[k]); });
+    db.prepare(`CREATE TABLE IF NOT EXISTS apuracao_mensal (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      competencia TEXT UNIQUE,
+      receita_bruta REAL DEFAULT 0,
+      retencoes REAL DEFAULT 0,
+      receita_liquida REAL DEFAULT 0,
+      despesas_total REAL DEFAULT 0,
+      resultado REAL DEFAULT 0,
+      qtd_nfs INTEGER DEFAULT 0,
+      pis_a_pagar REAL DEFAULT 0,
+      cofins_a_pagar REAL DEFAULT 0,
+      irpj_estimado REAL DEFAULT 0,
+      csll_estimado REAL DEFAULT 0,
+      gerado_em TEXT DEFAULT (datetime('now','localtime')),
+      obs TEXT
+    )`).run();
 
-  res.json({ periodo, contratos, totais });
+    const { dre } = buscarDRE(db, from, to);
+    const irpjTotal  = (dre.irpj   && dre.irpj.total)   || 0;
+    const csllTotal  = (dre.csll   && dre.csll.total)    || 0;
+    const pisAPagar  = (dre.tributos_proprios && dre.tributos_proprios.pis_a_pagar)    || 0;
+    const cofAPagar  = (dre.tributos_proprios && dre.tributos_proprios.cofins_a_pagar) || 0;
+
+    db.prepare(`INSERT OR REPLACE INTO apuracao_mensal
+      (competencia, receita_bruta, retencoes, receita_liquida, despesas_total,
+       resultado, qtd_nfs, pis_a_pagar, cofins_a_pagar, irpj_estimado, csll_estimado, obs)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      comp,
+      dre.receita_bruta, dre.deducoes.total, dre.receita_liquida,
+      dre.despesas_operacionais + dre.custos.total,
+      dre.resultado_liquido, dre.qtd_nfs || 0,
+      pisAPagar, cofAPagar, irpjTotal, csllTotal,
+      'Gerado manualmente pelo usuário'
+    );
+
+    res.json({ ok: true, competencia: comp, dre });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 module.exports = router;

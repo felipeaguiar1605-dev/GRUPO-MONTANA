@@ -579,7 +579,7 @@ async function loadDRE() {
       ${dreLinha(0,'(=) RESULTADO OPERACIONAL', d.resultado_operacional, true, '#e2e8f0', false, null)}
       <tr><td colspan="3" style="padding:4px;background:#f1f5f9"></td></tr>
       ${d.tributos_proprios ? `
-      ${dreLinha(0,'(-) TRIBUTOS SOBRE RECEITA (Lucro Real)', d.tributos_proprios.total, true, '#fef9c3', true, null)}
+      ${dreLinha(0,'(-) PIS/COFINS (Lucro Real não-cumulativo)', d.tributos_proprios.total_pis_cofins || d.tributos_proprios.total, true, '#fef9c3', true, null)}
       ${dreLinha(1,'PIS bruto (1,65%)',               d.tributos_proprios.pis_bruto,         false, null, true, null)}
       ${dreLinha(1,'(+) Crédito PIS retido na fonte', d.tributos_proprios.pis_credito_fonte,  false, null, false, null)}
       ${dreLinha(1,'= PIS a recolher',                d.tributos_proprios.pis_a_pagar,        false, '#fef3c7', true, null)}
@@ -588,7 +588,21 @@ async function loadDRE() {
       ${dreLinha(1,'= COFINS a recolher',             d.tributos_proprios.cofins_a_pagar,     false, '#fef3c7', true, null)}
       <tr><td colspan="3" style="padding:4px;background:#f1f5f9"></td></tr>
       ` : ''}
-      ${dreLinha(0,'(=) RESULTADO LÍQUIDO', d.resultado_liquido, true,
+      ${d.irpj ? `
+      ${dreLinha(0,'(-) IRPJ (Lucro Real — 15% + adicional 10%)', d.irpj.total, true, '#fce7f3', true, null)}
+      ${dreLinha(1,'Base de cálculo (lucro apurado)',  d.irpj.base,           false, null, false, null)}
+      ${dreLinha(1,'IRPJ 15%',                        d.irpj.aliquota_base,  false, null, true,  null)}
+      ${d.irpj.adicional_10pct > 0 ? dreLinha(1,'Adicional 10% (lucro > R$20k/mês)', d.irpj.adicional_10pct, false, null, true, null) : ''}
+      ` : ''}
+      ${d.csll ? `
+      ${dreLinha(0,'(-) CSLL (9%)', d.csll.total, true, '#fce7f3', true, null)}
+      <tr><td colspan="3" style="padding:4px;background:#f1f5f9"></td></tr>
+      ` : ''}
+      ${d.total_impostos ? `
+      ${dreLinha(0,'(=) TOTAL DE IMPOSTOS', d.total_impostos, true, '#fef2f2', true, d.receita_bruta > 0 ? +((d.total_impostos/d.receita_bruta)*100).toFixed(1) : null)}
+      <tr><td colspan="3" style="padding:4px;background:#f1f5f9"></td></tr>
+      ` : ''}
+      ${dreLinha(0,'(=) RESULTADO LÍQUIDO (após impostos)', d.resultado_liquido, true,
           d.resultado_liquido >= 0 ? '#bbf7d0' : '#fecaca', false, d.margem_liquida_pct)}
     </table>
   `;
@@ -1913,8 +1927,9 @@ async function loadApuracaoMensal() {
   const ultimo = d.data[0];
   if (ultimo && kpiEl) {
     const margem = ultimo.receita_liquida > 0 ? (ultimo.resultado / ultimo.receita_liquida * 100) : 0;
+    const totalImpostos = (ultimo.pis_a_pagar||0) + (ultimo.cofins_a_pagar||0) + (ultimo.irpj_estimado||0) + (ultimo.csll_estimado||0);
     kpiEl.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px">
         <div class="kpi" style="border-left:4px solid #3b82f6">
           <div class="kpi-l">📅 Última Apuração</div>
           <div class="kpi-v" style="color:#3b82f6;font-size:15px">${ultimo.competencia}</div>
@@ -1935,11 +1950,22 @@ async function loadApuracaoMensal() {
           <div class="kpi-v" style="color:${cor(ultimo.resultado)}">${brl(ultimo.resultado)}</div>
           <div class="kpi-s">margem ${margem.toFixed(1)}%</div>
         </div>
+        <div class="kpi" style="border-left:4px solid #7c3aed">
+          <div class="kpi-l">🏛️ Impostos Estimados</div>
+          <div class="kpi-v" style="color:#7c3aed">${brl(totalImpostos)}</div>
+          <div class="kpi-s">PIS+COFINS+IRPJ+CSLL</div>
+        </div>
+        <div class="kpi" style="border-left:4px solid ${cor(ultimo.resultado - totalImpostos)}">
+          <div class="kpi-l">✅ Resultado Líq. c/ Impostos</div>
+          <div class="kpi-v" style="color:${cor(ultimo.resultado - totalImpostos)};font-size:13px">${brl(ultimo.resultado - totalImpostos)}</div>
+          <div class="kpi-s">após tributação estimada</div>
+        </div>
       </div>`;
   }
 
   el.innerHTML = d.data.map(m => {
     const margem = m.receita_liquida > 0 ? (m.resultado / m.receita_liquida * 100) : 0;
+    const hasTax = m.pis_a_pagar != null || m.irpj_estimado != null;
     return `<tr>
       <td style="font-weight:700">${m.competencia}</td>
       <td style="text-align:right">${brl(m.receita_bruta)}</td>
@@ -1947,12 +1973,44 @@ async function loadApuracaoMensal() {
       <td style="text-align:right;color:#059669">${brl(m.receita_liquida)}</td>
       <td style="text-align:right;color:#dc2626">${brl(m.despesas_total)}</td>
       <td style="text-align:right;font-weight:700;color:${cor(m.resultado)}">${brl(m.resultado)}</td>
+      <td style="text-align:right;color:#7c3aed;font-size:11px">${hasTax ? brl(m.pis_a_pagar||0) : '—'}</td>
+      <td style="text-align:right;color:#7c3aed;font-size:11px">${hasTax ? brl(m.cofins_a_pagar||0) : '—'}</td>
+      <td style="text-align:right;color:#7c3aed;font-size:11px">${hasTax ? brl(m.irpj_estimado||0) : '—'}</td>
+      <td style="text-align:right;color:#7c3aed;font-size:11px">${hasTax ? brl(m.csll_estimado||0) : '—'}</td>
       <td style="text-align:center">
         <span style="background:${cor(margem)}20;color:${cor(margem)};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">${margem.toFixed(1)}%</span>
       </td>
       <td style="text-align:center;font-size:10px;color:#94a3b8">${m.qtd_nfs}</td>
     </tr>`;
   }).join('');
+}
+
+// Apurar o mês atual/anterior manualmente
+async function apurarAgora() {
+  const btn = document.getElementById('btn-apurar-agora');
+  const comp = prompt('Competência (AAAA-MM):', new Date().toISOString().slice(0,7));
+  if (!comp || !/^\d{4}-\d{2}$/.test(comp)) return;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Apurando...'; }
+  try {
+    const r = await api('/dre/apurar-agora', { method:'POST', body: JSON.stringify({ competencia: comp }) });
+    alert(r && r.message ? r.message : 'Apuração concluída!');
+    await loadApuracaoMensal();
+  } catch(e) {
+    alert('Erro: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⚡ Apurar Agora'; }
+  }
+}
+
+// Disparar manualmente e-mail de alertas de reajuste
+async function alertarReajustes() {
+  if (!confirm('Enviar e-mail de alertas de reajuste agora?')) return;
+  try {
+    const r = await api('/notificacoes/alertar-reajustes', { method:'POST', body: JSON.stringify({}) });
+    alert(r && r.message ? r.message : 'E-mail enviado!');
+  } catch(e) {
+    alert('Erro: ' + e.message);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3263,5 +3321,36 @@ async function registrarEntregaEPI(funcionario_id) {
     loadEPIRelatorio();
   } else {
     toast((r && r.error) || 'Erro ao registrar EPI', 'error');
+  }
+}
+
+// ─── AUTO-VINCULAR NFs ───────────────────────────────────────────────────────
+async function autoVincularNFs() {
+  const ok = confirm('Deseja executar a auto-vinculação de Notas Fiscais sem contrato vinculado?\n\nO sistema aplicará as regras automáticas de matching por tomador.');
+  if (!ok) return;
+
+  try {
+    const r = await api('/nfs/auto-vincular', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ somente_sem_contrato: true })
+    });
+
+    if (r && r.ok) {
+      let msg = `✅ Auto-vinculação concluída!\n\n${r.total_vinculadas} NFs vinculadas.`;
+      if (r.resumo && r.resumo.length > 0) {
+        msg += '\n\nDetalhes:\n' + r.resumo.map(x => `  • ${x.contrato}: ${x.vinculadas} NFs`).join('\n');
+      }
+      if (r.ainda_sem_contrato > 0) {
+        msg += `\n\n⚠️ Ainda sem contrato: ${r.ainda_sem_contrato} NFs`;
+      } else {
+        msg += '\n\n🎉 Todas as NFs estão vinculadas!';
+      }
+      alert(msg);
+    } else {
+      toast((r && r.error) || 'Erro na auto-vinculação', 'error');
+    }
+  } catch (e) {
+    toast('Erro: ' + e.message, 'error');
   }
 }

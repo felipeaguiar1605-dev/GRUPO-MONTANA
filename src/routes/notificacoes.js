@@ -258,57 +258,167 @@ async function enviarAlertasEmpresa(db, company) {
   `;
 
   if (certidoes.length) {
-    corpo += `<h3 style="color:#dc2626">📋 Certidões Vencendo em 15 dias (${certidoes.length})</h3><ul>`;
-    certidoes.forEach(c => { corpo += `<li><strong>${c.tipo}</strong> — N° ${c.numero} — Vence: <strong>${c.data_validade}</strong></li>`; });
+    corpo += `<h3 style="color:#dc2626">📋 Certidões Vencendo em 15 Dias (${certidoes.length})</h3><ul>`;
+    certidoes.forEach(c => corpo += `<li><strong>${c.tipo}</strong> — N° ${c.numero} — Vence: <strong>${c.data_validade}</strong></li>`);
     corpo += '</ul>';
   }
+
   if (contratos.length) {
-    corpo += `<h3 style="color:#d97706">📄 Contratos Vencendo em 30 dias (${contratos.length})</h3><ul>`;
-    contratos.forEach(c => { corpo += `<li><strong>${c.numContrato}</strong> — ${c.contrato} — Vence: <strong>${c.vigencia_fim}</strong></li>`; });
+    corpo += `<h3 style="color:#d97706">📄 Contratos Vencendo em 30 Dias (${contratos.length})</h3><ul>`;
+    contratos.forEach(c => corpo += `<li><strong>${c.numContrato}</strong> — ${c.contrato} — Vence: <strong>${c.vigencia_fim}</strong></li>`);
     corpo += '</ul>';
   }
+
   if (pagAtras.n > 0) {
-    corpo += `<h3 style="color:#7c3aed">💸 Despesas Pendentes há +30 dias: ${pagAtras.n}</h3>`;
+    corpo += `<h3 style="color:#7c3aed">💸 Pagamentos Pendentes há +30 dias: ${pagAtras.n}</h3>`;
   }
+
   if (licitacoes.length) {
-    corpo += `<h3 style="color:#0369a1">🏛️ Licitações abrindo em 5 dias (${licitacoes.length})</h3><ul>`;
-    licitacoes.forEach(l => { corpo += `<li><strong>${l.orgao}</strong> — Ed. ${l.numero_edital} — ${l.data_abertura}</li>`; });
+    corpo += `<h3 style="color:#0369a1">🏛️ Licitações Abertura em 5 Dias (${licitacoes.length})</h3><ul>`;
+    licitacoes.forEach(l => corpo += `<li><strong>${l.orgao}</strong> — Ed. ${l.numero_edital} — ${l.data_abertura}</li>`);
     corpo += '</ul>';
   }
+
   if (nfsSemPagamento.length) {
-    const totalNfVal = nfsSemPagamento.reduce((s,n) => s + n.total, 0);
-    corpo += `<h3 style="color:#b45309">🧾 NFs sem pagamento há +60 dias (R$ ${totalNfVal.toLocaleString('pt-BR',{minimumFractionDigits:2})})</h3><ul>`;
-    nfsSemPagamento.forEach(n => {
-      corpo += `<li><strong>${n.tomador}</strong> — ${n.cnt} NF(s) — R$ ${n.total.toLocaleString('pt-BR',{minimumFractionDigits:2})} — desde ${n.mais_antiga}</li>`;
+    corpo += `<h3 style="color:#b45309">⏰ NFs sem Recebimento há +60 dias</h3><ul>`;
+    nfsSemPagamento.forEach(n => corpo += `<li><strong>${n.tomador}</strong> — ${n.cnt} NF(s) — R$ ${n.total.toLocaleString('pt-BR',{minimumFractionDigits:2})}</li>`);
+    corpo += '</ul>';
+  }
+
+  // ── Alertas de reajuste ─────────────────────────────────────
+  let reajusteAlertas = [];
+  try {
+    const em60 = new Date(Date.now() + 60 * 86400000).toISOString().split('T')[0];
+    reajusteAlertas = db.prepare(`
+      SELECT numContrato, contrato, data_proximo_reajuste, indice_reajuste,
+             pct_reajuste_ultimo, valor_mensal_bruto,
+             CAST((julianday(data_proximo_reajuste) - julianday('now')) AS INTEGER) as dias_faltam
+      FROM contratos
+      WHERE data_proximo_reajuste IS NOT NULL
+        AND data_proximo_reajuste != ''
+        AND data_proximo_reajuste <= ?
+        AND data_proximo_reajuste >= ?
+      ORDER BY data_proximo_reajuste
+    `).all(em60, hoje);
+  } catch(_) {}
+
+  if (reajusteAlertas.length) {
+    corpo += `<h3 style="color:#0891b2">📈 Contratos com Reajuste nos Próximos 60 Dias (${reajusteAlertas.length})</h3><ul>`;
+    reajusteAlertas.forEach(r => {
+      const brl = v => `R$ ${(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}`;
+      corpo += `<li>
+        <strong>${r.numContrato}</strong> — ${r.contrato}<br>
+        📅 Reajuste previsto: <strong>${r.data_proximo_reajuste}</strong> (em ${r.dias_faltam} dias)
+        ${r.indice_reajuste ? ` — Índice: ${r.indice_reajuste}` : ''}
+        ${r.pct_reajuste_ultimo ? ` — Último %: ${r.pct_reajuste_ultimo}%` : ''}
+        ${r.valor_mensal_bruto ? ` — Valor mensal atual: ${brl(r.valor_mensal_bruto)}` : ''}
+      </li>`;
     });
     corpo += '</ul>';
   }
+
   corpo += `</div></div>`;
 
-  const assunto = `🔔 ${totalAlertas} Alerta(s) Montana — ${company.nomeAbrev} — ${new Date().toLocaleDateString('pt-BR')}`;
+  const total = totalAlertas + reajusteAlertas.length;
+  if (total === 0) return { enviado: false, total: 0, motivo: 'sem alertas' };
 
-  const nodemailer = require('nodemailer');
-  const transporter = nodemailer.createTransport({
-    host:   smtp.host,
-    port:   parseInt(smtp.port) || 587,
-    secure: parseInt(smtp.port) === 465,
-    auth:   { user: smtp.user, pass: smtp.pass }
-  });
+  const assunto = `🔔 ${total} Alerta(s) — ${company.nomeAbrev || company.nome} — ${new Date().toLocaleDateString('pt-BR')}`;
 
-  await transporter.sendMail({
-    from:    smtp.from || smtp.user,
-    to:      smtp.to,
-    subject: assunto,
-    html:    corpo
-  });
+  let nodemailer;
+  try { nodemailer = require('nodemailer'); }
+  catch(e) { return { enviado: false, total, motivo: 'nodemailer não instalado' }; }
 
-  // Log no banco
   try {
-    db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('email',?,?,?,'enviado')`).run(smtp.to, assunto, corpo);
-  } catch (_e) {}
-
-  return { enviado: true, total: totalAlertas };
+    const transporter = nodemailer.createTransport({
+      host:   smtp.host,
+      port:   parseInt(smtp.port) || 587,
+      secure: parseInt(smtp.port) === 465,
+      auth:   { user: smtp.user, pass: smtp.pass }
+    });
+    await transporter.sendMail({ from: smtp.from || smtp.user, to: smtp.to, subject: assunto, html: corpo });
+    try {
+      db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('email',?,?,?,'enviado')`).run(smtp.to, assunto, corpo);
+    } catch(_) {}
+    return { enviado: true, total };
+  } catch (e) {
+    try {
+      db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status,erro) VALUES ('email',?,?,'','erro',?)`).run(smtp.to||'', assunto, e.message);
+    } catch(_) {}
+    return { enviado: false, total, motivo: e.message };
+  }
 }
+
+// ─── POST /api/notificacoes/alertar-reajustes — disparo manual ────
+router.post('/alertar-reajustes', async (req, res) => {
+  try {
+    const smtp = getSmtp(req.db);
+    if (!smtp.host || !smtp.user) return res.status(400).json({ error: 'Configure o SMTP antes.' });
+
+    const hoje = new Date().toISOString().split('T')[0];
+    const em60 = new Date(Date.now() + 60 * 86400000).toISOString().split('T')[0];
+
+    const reajustes = req.db.prepare(`
+      SELECT numContrato, contrato, data_proximo_reajuste, indice_reajuste,
+             pct_reajuste_ultimo, valor_mensal_bruto,
+             CAST((julianday(data_proximo_reajuste) - julianday('now')) AS INTEGER) as dias_faltam
+      FROM contratos
+      WHERE data_proximo_reajuste IS NOT NULL
+        AND data_proximo_reajuste != ''
+        AND data_proximo_reajuste <= ?
+      ORDER BY data_proximo_reajuste
+    `).all(em60);
+
+    if (!reajustes.length) return res.json({ ok: true, enviado: false, message: 'Nenhum contrato com reajuste nos próximos 60 dias.' });
+
+    let nodemailer;
+    try { nodemailer = require('nodemailer'); }
+    catch(e) { return res.status(500).json({ error: 'nodemailer não instalado.' }); }
+
+    const brl = v => `R$ ${(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}`;
+    let corpo = `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+      <div style="background:#0891b2;color:#fff;padding:20px;border-radius:8px 8px 0 0">
+        <h2 style="margin:0">📈 Alerta de Reajustes — ${req.company.nome}</h2>
+        <p style="margin:4px 0 0;opacity:.8;font-size:13px">${new Date().toLocaleDateString('pt-BR',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
+      </div>
+      <div style="border:1px solid #e2e8f0;border-top:none;padding:20px;border-radius:0 0 8px 8px">
+        <p>${reajustes.length} contrato(s) com reajuste previsto nos próximos 60 dias:</p>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <tr style="background:#f1f5f9;font-weight:bold">
+            <th style="padding:8px;text-align:left;border:1px solid #e2e8f0">Contrato</th>
+            <th style="padding:8px;text-align:left;border:1px solid #e2e8f0">Data Reajuste</th>
+            <th style="padding:8px;text-align:left;border:1px solid #e2e8f0">Dias</th>
+            <th style="padding:8px;text-align:left;border:1px solid #e2e8f0">Índice</th>
+            <th style="padding:8px;text-align:right;border:1px solid #e2e8f0">Valor Mensal</th>
+          </tr>
+          ${reajustes.map(r => `
+          <tr style="${r.dias_faltam <= 15 ? 'background:#fef2f2' : r.dias_faltam <= 30 ? 'background:#fffbeb' : ''}">
+            <td style="padding:7px 8px;border:1px solid #e2e8f0"><strong>${r.numContrato}</strong><br><span style="font-size:11px;color:#6b7280">${r.contrato}</span></td>
+            <td style="padding:7px 8px;border:1px solid #e2e8f0;font-weight:600">${r.data_proximo_reajuste}</td>
+            <td style="padding:7px 8px;border:1px solid #e2e8f0;color:${r.dias_faltam<=15?'#dc2626':r.dias_faltam<=30?'#d97706':'#059669'};font-weight:700">${r.dias_faltam}d</td>
+            <td style="padding:7px 8px;border:1px solid #e2e8f0">${r.indice_reajuste||'—'}${r.pct_reajuste_ultimo?' ('+r.pct_reajuste_ultimo+'%)':''}</td>
+            <td style="padding:7px 8px;border:1px solid #e2e8f0;text-align:right">${r.valor_mensal_bruto?brl(r.valor_mensal_bruto):'—'}</td>
+          </tr>`).join('')}
+        </table>
+        <p style="margin-top:16px;font-size:12px;color:#6b7280">Acesse o sistema para registrar o reajuste e atualizar os valores contratuais.</p>
+      </div></div>
+    `;
+
+    const assunto = `📈 ${reajustes.length} Reajuste(s) — ${req.company.nomeAbrev} — ${new Date().toLocaleDateString('pt-BR')}`;
+
+    const transporter = nodemailer.createTransport({
+      host: smtp.host, port: parseInt(smtp.port)||587,
+      secure: parseInt(smtp.port)===465, auth: { user: smtp.user, pass: smtp.pass }
+    });
+    await transporter.sendMail({ from: smtp.from||smtp.user, to: smtp.to, subject: assunto, html: corpo });
+
+    try {
+      req.db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('email',?,?,?,'enviado')`).run(smtp.to, assunto, corpo);
+    } catch(_) {}
+
+    res.json({ ok: true, enviado: true, total: reajustes.length, message: `E-mail enviado para ${smtp.to}` });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 
 module.exports = router;
 module.exports.enviarAlertasEmpresa = enviarAlertasEmpresa;
