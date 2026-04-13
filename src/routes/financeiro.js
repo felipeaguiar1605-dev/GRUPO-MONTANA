@@ -491,12 +491,17 @@ router.get('/fluxo', (req, res) => {
     `).all(...params, limit, offset);
 
     // Totais
-    const totais = db.prepare(`
+    const totaisRow = db.prepare(`
         SELECT
-            COALESCE(SUM(CASE WHEN fc.tipo = 'entrada' THEN fc.valor ELSE 0 END), 0) AS total_entradas,
-            COALESCE(SUM(CASE WHEN fc.tipo = 'saida' THEN fc.valor ELSE 0 END), 0) AS total_saidas
+            COALESCE(SUM(CASE WHEN fc.tipo = 'entrada' THEN fc.valor ELSE 0 END), 0) AS entradas,
+            COALESCE(SUM(CASE WHEN fc.tipo = 'saida' THEN fc.valor ELSE 0 END), 0) AS saidas
         FROM fluxo_caixa fc ${where}
     `).get(...params);
+    const totais = {
+        entradas: totaisRow.entradas,
+        saidas: totaisRow.saidas,
+        saldo: totaisRow.entradas - totaisRow.saidas
+    };
 
     res.render('financeiro/fluxo', {
         title: 'Fluxo de Caixa',

@@ -14,61 +14,75 @@
         <%- include('../partials/header') %>
         <div class="page-content">
 
+            <% if (typeof mensagem !== 'undefined' && mensagem) { %>
+                <div class="alert alert-success" data-dismiss><%= mensagem %></div>
+            <% } %>
+            <% if (typeof erro !== 'undefined' && erro) { %>
+                <div class="alert alert-danger" data-dismiss><%= erro %></div>
+            <% } %>
+
             <div class="page-header">
                 <h1>Relatorios</h1>
             </div>
 
-            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:16px;">
+            <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
 
-                <!-- Relatorio de Vendas -->
-                <a href="/relatorios/vendas" style="text-decoration:none; color:inherit;">
-                    <div class="card" style="cursor:pointer; transition:all 0.2s; height:100%;">
-                        <div class="card-body" style="text-align:center; padding:32px 20px;">
-                            <div style="width:56px; height:56px; border-radius:12px; background:var(--success-light); color:var(--success); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
-                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg>
-                            </div>
-                            <h3 style="font-size:16px; margin-bottom:8px;">Relatorio de Vendas</h3>
-                            <p style="font-size:13px; color:var(--gray-500); margin:0;">Total de vendas, ticket medio, por forma de pagamento e por vendedor</p>
-                        </div>
+                <!-- Vendas -->
+                <a href="/relatorios/vendas" class="stat-card" style="text-decoration:none; cursor:pointer; transition: transform 0.2s;">
+                    <div class="stat-icon blue">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
+                            <path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/>
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Vendas</h4>
+                        <div class="stat-change">Relatorio de vendas por periodo, forma de pagamento e vendedor</div>
                     </div>
                 </a>
 
-                <!-- Relatorio de Estoque -->
-                <a href="/relatorios/estoque" style="text-decoration:none; color:inherit;">
-                    <div class="card" style="cursor:pointer; transition:all 0.2s; height:100%;">
-                        <div class="card-body" style="text-align:center; padding:32px 20px;">
-                            <div style="width:56px; height:56px; border-radius:12px; background:var(--info-light); color:var(--info); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
-                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
-                            </div>
-                            <h3 style="font-size:16px; margin-bottom:8px;">Relatorio de Estoque</h3>
-                            <p style="font-size:13px; color:var(--gray-500); margin:0;">Valor do estoque, itens abaixo do minimo e sem movimentacao</p>
-                        </div>
+                <!-- Estoque -->
+                <a href="/relatorios/estoque" class="stat-card" style="text-decoration:none; cursor:pointer; transition: transform 0.2s;">
+                    <div class="stat-icon cyan">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/>
+                            <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+                            <line x1="12" y1="22.08" x2="12" y2="12"/>
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Estoque</h4>
+                        <div class="stat-change">Posicao de estoque, itens abaixo do minimo e sem movimento</div>
                     </div>
                 </a>
 
-                <!-- Relatorio Financeiro -->
-                <a href="/relatorios/financeiro" style="text-decoration:none; color:inherit;">
-                    <div class="card" style="cursor:pointer; transition:all 0.2s; height:100%;">
-                        <div class="card-body" style="text-align:center; padding:32px 20px;">
-                            <div style="width:56px; height:56px; border-radius:12px; background:var(--primary-light); color:var(--primary); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
-                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
-                            </div>
-                            <h3 style="font-size:16px; margin-bottom:8px;">Relatorio Financeiro</h3>
-                            <p style="font-size:13px; color:var(--gray-500); margin:0;">DRE simplificado e projecao de fluxo de caixa</p>
-                        </div>
+                <!-- Financeiro -->
+                <a href="/relatorios/financeiro" class="stat-card" style="text-decoration:none; cursor:pointer; transition: transform 0.2s;">
+                    <div class="stat-icon green">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="1" x2="12" y2="23"/>
+                            <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Financeiro</h4>
+                        <div class="stat-change">DRE simplificado, receitas, despesas e projecao</div>
                     </div>
                 </a>
 
-                <!-- Relatorio de Comissoes -->
-                <a href="/relatorios/comissoes" style="text-decoration:none; color:inherit;">
-                    <div class="card" style="cursor:pointer; transition:all 0.2s; height:100%;">
-                        <div class="card-body" style="text-align:center; padding:32px 20px;">
-                            <div style="width:56px; height:56px; border-radius:12px; background:var(--warning-light); color:var(--warning); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
-                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/></svg>
-                            </div>
-                            <h3 style="font-size:16px; margin-bottom:8px;">Relatorio de Comissoes</h3>
-                            <p style="font-size:13px; color:var(--gray-500); margin:0;">Comissoes por vendedor e periodo</p>
-                        </div>
+                <!-- Comissoes -->
+                <a href="/relatorios/comissoes" class="stat-card" style="text-decoration:none; cursor:pointer; transition: transform 0.2s;">
+                    <div class="stat-icon yellow">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/>
+                            <circle cx="9" cy="7" r="4"/>
+                            <path d="M23 21v-2a4 4 0 00-3-3.87"/>
+                            <path d="M16 3.13a4 4 0 010 7.75"/>
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Comissoes</h4>
+                        <div class="stat-change">Comissoes por vendedor, valores pagos e pendentes</div>
                     </div>
                 </a>
 

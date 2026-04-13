@@ -13,76 +13,98 @@
     <div class="main-content">
         <%- include('../partials/header') %>
         <div class="page-content">
+
+            <% if (typeof mensagem !== 'undefined' && mensagem) { %>
+                <div class="alert alert-success" data-dismiss><%= mensagem %></div>
+            <% } %>
+            <% if (typeof erro !== 'undefined' && erro) { %>
+                <div class="alert alert-danger" data-dismiss><%= erro %></div>
+            <% } %>
+
+            <div class="breadcrumb">
+                <a href="/relatorios">Relatorios</a> <span>/</span> <span>Comissoes</span>
+            </div>
+
             <div class="page-header">
                 <h1>Relatorio de Comissoes</h1>
                 <a href="/relatorios" class="btn btn-secondary">Voltar</a>
             </div>
 
-            <div class="card" style="margin-bottom: 20px;">
+            <!-- Filtros -->
+            <div class="card" style="margin-bottom:16px;">
                 <div class="card-body">
                     <form method="GET" action="/relatorios/comissoes" class="filters">
-                        <div class="form-group" style="margin-bottom:0;">
-                            <label style="font-size:12px;">Vendedor</label>
+                        <div class="form-group" style="margin-bottom:0; min-width:200px;">
+                            <label>Vendedor</label>
                             <select name="vendedor_id" class="form-control">
                                 <option value="">Todos</option>
-                                <% if (typeof vendedores !== 'undefined') { %>
-                                    <% vendedores.forEach(function(v) { %>
-                                        <option value="<%= v.id %>" <%= (typeof filtros !== 'undefined' && filtros.vendedor_id == v.id) ? 'selected' : '' %>><%= v.nome %></option>
-                                    <% }); %>
-                                <% } %>
+                                <% vendedores.forEach(function(v) { %>
+                                    <option value="<%= v.id %>" <%= filtros.vendedor_id == v.id ? 'selected' : '' %>><%= v.nome %></option>
+                                <% }); %>
                             </select>
                         </div>
-                        <div class="form-group" style="margin-bottom:0;">
-                            <label style="font-size:12px;">De</label>
-                            <input type="date" name="data_inicio" class="form-control" value="<%= typeof filtros !== 'undefined' ? filtros.data_inicio || '' : '' %>">
+                        <div class="form-group" style="margin-bottom:0; min-width:140px;">
+                            <label>Data Inicio</label>
+                            <input type="date" name="data_inicio" class="form-control" value="<%= filtros.data_inicio || '' %>">
                         </div>
-                        <div class="form-group" style="margin-bottom:0;">
-                            <label style="font-size:12px;">Ate</label>
-                            <input type="date" name="data_fim" class="form-control" value="<%= typeof filtros !== 'undefined' ? filtros.data_fim || '' : '' %>">
+                        <div class="form-group" style="margin-bottom:0; min-width:140px;">
+                            <label>Data Fim</label>
+                            <input type="date" name="data_fim" class="form-control" value="<%= filtros.data_fim || '' %>">
                         </div>
-                        <button type="submit" class="btn btn-primary" style="align-self:flex-end;">Filtrar</button>
+                        <div class="form-group" style="margin-bottom:0; align-self:flex-end;">
+                            <button type="submit" class="btn btn-primary">Filtrar</button>
+                            <a href="/relatorios/comissoes" class="btn btn-secondary">Limpar</a>
+                        </div>
                     </form>
                 </div>
             </div>
 
-            <% if (typeof comissoes !== 'undefined' && comissoes.length > 0) { %>
+            <!-- Tabela de Comissoes -->
             <div class="card">
-                <div class="card-header"><h3>Comissoes por Vendedor</h3></div>
-                <div class="card-body table-container">
+                <div class="card-header">
+                    <h3>Comissoes por Vendedor</h3>
+                </div>
+                <div class="table-container">
                     <table>
                         <thead>
                             <tr>
                                 <th>Vendedor</th>
                                 <th>Total Vendas</th>
                                 <th>Total Comissao</th>
-                                <th>Pagas</th>
-                                <th>Pendentes</th>
+                                <th>Comissoes Pagas</th>
+                                <th>Comissoes Pendentes</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <% comissoes.forEach(function(item) { %>
-                            <tr>
-                                <td><strong><%= item.vendedor_nome %></strong></td>
-                                <td><%= formatMoney(item.total_vendas) %></td>
-                                <td><%= formatMoney(item.total_comissao) %></td>
-                                <td><span class="badge badge-success"><%= formatMoney(item.comissoes_pagas) %></span></td>
-                                <td><span class="badge badge-warning"><%= formatMoney(item.comissoes_pendentes) %></span></td>
-                            </tr>
-                            <% }); %>
+                            <% if (comissoes.length === 0) { %>
+                                <tr>
+                                    <td colspan="5" style="text-align:center; color:var(--gray-400); padding:32px;">
+                                        Nenhuma comissao encontrada no periodo
+                                    </td>
+                                </tr>
+                            <% } else { %>
+                                <% comissoes.forEach(function(c) { %>
+                                    <tr>
+                                        <td><strong><%= c.vendedor_nome %></strong></td>
+                                        <td><%= formatMoney(c.total_vendas) %></td>
+                                        <td><strong><%= formatMoney(c.total_comissao) %></strong></td>
+                                        <td><span style="color:var(--success);"><%= formatMoney(c.comissoes_pagas) %></span></td>
+                                        <td><span style="color:var(--warning);"><%= formatMoney(c.comissoes_pendentes) %></span></td>
+                                    </tr>
+                                <% }); %>
+                                <tr style="background:var(--gray-50); font-weight:700;">
+                                    <td>TOTAL</td>
+                                    <td><%= formatMoney(comissoes.reduce(function(sum, c) { return sum + (parseFloat(c.total_vendas) || 0); }, 0)) %></td>
+                                    <td><%= formatMoney(comissoes.reduce(function(sum, c) { return sum + (parseFloat(c.total_comissao) || 0); }, 0)) %></td>
+                                    <td style="color:var(--success);"><%= formatMoney(comissoes.reduce(function(sum, c) { return sum + (parseFloat(c.comissoes_pagas) || 0); }, 0)) %></td>
+                                    <td style="color:var(--warning);"><%= formatMoney(comissoes.reduce(function(sum, c) { return sum + (parseFloat(c.comissoes_pendentes) || 0); }, 0)) %></td>
+                                </tr>
+                            <% } %>
                         </tbody>
                     </table>
                 </div>
             </div>
-            <% } else { %>
-            <div class="card">
-                <div class="card-body">
-                    <div class="empty-state">
-                        <h3>Sem dados de comissoes</h3>
-                        <p>Nenhuma comissao encontrada no periodo selecionado.</p>
-                    </div>
-                </div>
-            </div>
-            <% } %>
+
         </div>
     </div>
 </div>

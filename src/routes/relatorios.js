@@ -22,18 +22,25 @@ router.get('/vendas', (req, res) => {
 
     // Total de vendas no periodo
     const totalVendas = db.prepare(`
-        SELECT COUNT(*) AS count, COALESCE(SUM(total), 0) AS total
+        SELECT COUNT(*) AS quantidade_vendas, COALESCE(SUM(total), 0) AS total_vendas
         FROM vendas
         WHERE empresa_id = ? AND status != 'cancelada'
           AND data_venda >= ? AND data_venda <= ?
     `).get(empresaId, data_inicio, data_fim + ' 23:59:59');
 
     // Ticket medio
-    const ticketMedio = totalVendas.count > 0 ? totalVendas.total / totalVendas.count : 0;
+    const ticketMedio = totalVendas.quantidade_vendas > 0 ? totalVendas.total_vendas / totalVendas.quantidade_vendas : 0;
+
+    // Resumo object for linted view
+    const resumo = {
+        total_vendas: totalVendas.total_vendas,
+        quantidade_vendas: totalVendas.quantidade_vendas,
+        ticket_medio: ticketMedio
+    };
 
     // Por forma de pagamento
     const porFormaPagamento = db.prepare(`
-        SELECT forma_pagamento, COUNT(*) AS count, COALESCE(SUM(total), 0) AS total
+        SELECT forma_pagamento, COUNT(*) AS quantidade, COALESCE(SUM(total), 0) AS total
         FROM vendas
         WHERE empresa_id = ? AND status != 'cancelada'
           AND data_venda >= ? AND data_venda <= ?
@@ -43,7 +50,7 @@ router.get('/vendas', (req, res) => {
 
     // Por vendedor
     const porVendedor = db.prepare(`
-        SELECT v.nome AS vendedor_nome, COUNT(*) AS count, COALESCE(SUM(vd.total), 0) AS total
+        SELECT v.nome AS vendedor_nome, COUNT(*) AS quantidade, COALESCE(SUM(vd.total), 0) AS total
         FROM vendas vd
         LEFT JOIN vendedores v ON v.id = vd.vendedor_id
         WHERE vd.empresa_id = ? AND vd.status != 'cancelada'
@@ -52,32 +59,11 @@ router.get('/vendas', (req, res) => {
         ORDER BY total DESC
     `).all(empresaId, data_inicio, data_fim + ' 23:59:59');
 
-    // Vendas agrupadas
-    let groupBy, selectDate;
-    if (agrupar === 'mes') {
-        groupBy = "strftime('%Y-%m', data_venda)";
-        selectDate = "strftime('%Y-%m', data_venda) AS periodo";
-    } else {
-        groupBy = "date(data_venda)";
-        selectDate = "date(data_venda) AS periodo";
-    }
-
-    const vendasAgrupadas = db.prepare(`
-        SELECT ${selectDate}, COUNT(*) AS count, COALESCE(SUM(total), 0) AS total
-        FROM vendas
-        WHERE empresa_id = ? AND status != 'cancelada'
-          AND data_venda >= ? AND data_venda <= ?
-        GROUP BY ${groupBy}
-        ORDER BY periodo DESC
-    `).all(empresaId, data_inicio, data_fim + ' 23:59:59');
-
     res.render('relatorios/vendas', {
         title: 'Relatorio de Vendas',
-        totalVendas,
-        ticketMedio,
+        resumo,
         porFormaPagamento,
         porVendedor,
-        vendasAgrupadas,
         filtros: { data_inicio, data_fim, agrupar }
     });
 });
@@ -90,8 +76,7 @@ router.get('/estoque', (req, res) => {
     const valorEstoque = db.prepare(`
         SELECT
             COUNT(*) AS total_itens,
-            COALESCE(SUM(COALESCE(e.quantidade, 0) * p.preco_custo), 0) AS valor_custo,
-            COALESCE(SUM(COALESCE(e.quantidade, 0) * p.preco_venda), 0) AS valor_venda
+            COALESCE(SUM(COALESCE(e.quantidade, 0) * p.preco_custo), 0) AS valor_total_estoque
         FROM produtos p
         LEFT JOIN estoque e ON e.produto_id = p.id AND e.empresa_id = p.empresa_id
         WHERE p.empresa_id = ? AND p.ativo = 1
@@ -119,20 +104,28 @@ router.get('/estoque', (req, res) => {
         SELECT p.id, p.codigo, p.nome, COALESCE(e.quantidade, 0) AS quantidade,
                p.preco_custo,
                c.nome AS categoria_nome,
-               MAX(em.created_at) AS ultima_movimentacao
+               MAX(em.created_at) AS ultimo_movimento
         FROM produtos p
         LEFT JOIN estoque e ON e.produto_id = p.id AND e.empresa_id = p.empresa_id
         LEFT JOIN categorias c ON c.id = p.categoria_id
         LEFT JOIN estoque_movimentacoes em ON em.produto_id = p.id AND em.empresa_id = p.empresa_id
         WHERE p.empresa_id = ? AND p.ativo = 1
         GROUP BY p.id
-        HAVING ultima_movimentacao IS NULL OR ultima_movimentacao < ?
-        ORDER BY ultima_movimentacao ASC
+        HAVING ultimo_movimento IS NULL OR ultimo_movimento < ?
+        ORDER BY ultimo_movimento ASC
     `).all(empresaId, trintaDiasStr);
+
+    // Build resumo object for linted view
+    const resumo = {
+        valor_total_estoque: valorEstoque.valor_total_estoque,
+        total_itens: valorEstoque.total_itens,
+        abaixo_minimo: abaixoMinimo.length,
+        sem_movimento: semMovimento.length
+    };
 
     res.render('relatorios/estoque', {
         title: 'Relatorio de Estoque',
-        valorEstoque,
+        resumo,
         abaixoMinimo,
         semMovimento
     });
@@ -147,62 +140,74 @@ router.get('/financeiro', (req, res) => {
     const data_inicio = req.query.data_inicio || inicioMes.toISOString().split('T')[0];
     const data_fim = req.query.data_fim || hoje.toISOString().split('T')[0];
 
-    // DRE simplificado - Receitas
-    const receitas = db.prepare(`
-        SELECT categoria, COALESCE(SUM(valor), 0) AS total
+    // Total receitas
+    const totalReceitas = db.prepare(`
+        SELECT COALESCE(SUM(valor), 0) AS total
         FROM fluxo_caixa
         WHERE empresa_id = ? AND tipo = 'entrada'
           AND data_movimento >= ? AND data_movimento <= ?
-        GROUP BY categoria
-        ORDER BY total DESC
-    `).all(empresaId, data_inicio, data_fim);
+    `).get(empresaId, data_inicio, data_fim).total;
 
-    const totalReceitas = receitas.reduce((sum, r) => sum + r.total, 0);
-
-    // DRE simplificado - Despesas
-    const despesas = db.prepare(`
-        SELECT categoria, COALESCE(SUM(valor), 0) AS total
+    // Total despesas
+    const totalDespesas = db.prepare(`
+        SELECT COALESCE(SUM(valor), 0) AS total
         FROM fluxo_caixa
         WHERE empresa_id = ? AND tipo = 'saida'
           AND data_movimento >= ? AND data_movimento <= ?
-        GROUP BY categoria
-        ORDER BY total DESC
+    `).get(empresaId, data_inicio, data_fim).total;
+
+    const lucro = totalReceitas - totalDespesas;
+
+    // DRE por mes
+    const dre = db.prepare(`
+        SELECT
+            strftime('%Y-%m', data_movimento) AS mes,
+            COALESCE(SUM(CASE WHEN tipo = 'entrada' THEN valor ELSE 0 END), 0) AS receitas,
+            COALESCE(SUM(CASE WHEN tipo = 'saida' THEN valor ELSE 0 END), 0) AS despesas
+        FROM fluxo_caixa
+        WHERE empresa_id = ? AND data_movimento >= ? AND data_movimento <= ?
+        GROUP BY mes
+        ORDER BY mes DESC
     `).all(empresaId, data_inicio, data_fim);
 
-    const totalDespesas = despesas.reduce((sum, d) => sum + d.total, 0);
-
-    // Resultado
-    const resultado = totalReceitas - totalDespesas;
-
-    // Projecao do fluxo de caixa (proximos 30 dias)
-    const prox30 = new Date();
-    prox30.setDate(prox30.getDate() + 30);
-    const prox30Str = prox30.toISOString().split('T')[0];
+    // Projecao - proximos 3 meses
     const hojeStr = hoje.toISOString().split('T')[0];
+    const projecao = [];
+    for (let m = 0; m < 3; m++) {
+        const mesInicio = new Date(hoje.getFullYear(), hoje.getMonth() + m, 1);
+        const mesFim = new Date(hoje.getFullYear(), hoje.getMonth() + m + 1, 0);
+        const mesInicioStr = mesInicio.toISOString().split('T')[0];
+        const mesFimStr = mesFim.toISOString().split('T')[0];
+        const mesLabel = mesInicio.toISOString().substring(0, 7);
 
-    const projecaoReceber = db.prepare(`
-        SELECT COALESCE(SUM(valor), 0) AS total
-        FROM contas_receber
-        WHERE empresa_id = ? AND status IN ('pendente', 'vencida')
-          AND data_vencimento >= ? AND data_vencimento <= ?
-    `).get(empresaId, hojeStr, prox30Str);
+        const recPrev = db.prepare(`
+            SELECT COALESCE(SUM(valor), 0) AS total FROM contas_receber
+            WHERE empresa_id = ? AND status IN ('pendente', 'vencida')
+              AND data_vencimento >= ? AND data_vencimento <= ?
+        `).get(empresaId, mesInicioStr, mesFimStr).total;
 
-    const projecaoPagar = db.prepare(`
-        SELECT COALESCE(SUM(valor), 0) AS total
-        FROM contas_pagar
-        WHERE empresa_id = ? AND status IN ('pendente', 'vencida')
-          AND data_vencimento >= ? AND data_vencimento <= ?
-    `).get(empresaId, hojeStr, prox30Str);
+        const despPrev = db.prepare(`
+            SELECT COALESCE(SUM(valor), 0) AS total FROM contas_pagar
+            WHERE empresa_id = ? AND status IN ('pendente', 'vencida')
+              AND data_vencimento >= ? AND data_vencimento <= ?
+        `).get(empresaId, mesInicioStr, mesFimStr).total;
+
+        projecao.push({
+            mes: mesLabel,
+            receitas_previstas: recPrev,
+            despesas_previstas: despPrev
+        });
+    }
 
     res.render('relatorios/financeiro', {
         title: 'Relatorio Financeiro',
-        receitas,
-        totalReceitas,
-        despesas,
-        totalDespesas,
-        resultado,
-        projecaoReceber: projecaoReceber.total,
-        projecaoPagar: projecaoPagar.total,
+        resumo: {
+            total_receitas: totalReceitas,
+            total_despesas: totalDespesas,
+            lucro: lucro
+        },
+        dre,
+        projecao,
         filtros: { data_inicio, data_fim }
     });
 });
@@ -225,29 +230,19 @@ router.get('/comissoes', (req, res) => {
         params.push(parseInt(vendedor_id));
     }
 
-    // Comissoes por vendedor
-    const comissoesPorVendedor = db.prepare(`
-        SELECT v.nome AS vendedor_nome, v.id AS vendedor_id,
-               COUNT(*) AS total_vendas,
-               COALESCE(SUM(c.valor), 0) AS total_comissao,
-               COALESCE(AVG(c.percentual), 0) AS percentual_medio,
-               SUM(CASE WHEN c.status = 'pendente' THEN c.valor ELSE 0 END) AS pendente,
-               SUM(CASE WHEN c.status = 'paga' THEN c.valor ELSE 0 END) AS paga
-        FROM comissoes c
-        JOIN vendedores v ON v.id = c.vendedor_id
-        ${where}
-        GROUP BY c.vendedor_id
-        ORDER BY total_comissao DESC
-    `).all(...params);
-
-    // Detalhes das comissoes
+    // Comissoes por vendedor (linted view expects: vendedor_nome, total_vendas, total_comissao, comissoes_pagas, comissoes_pendentes)
     const comissoes = db.prepare(`
-        SELECT c.*, v.nome AS vendedor_nome, vd.numero AS venda_numero, vd.total AS venda_total
+        SELECT v.nome AS vendedor_nome, v.id AS vendedor_id,
+               COALESCE(SUM(vd.total), 0) AS total_vendas,
+               COALESCE(SUM(c.valor), 0) AS total_comissao,
+               COALESCE(SUM(CASE WHEN c.status = 'paga' THEN c.valor ELSE 0 END), 0) AS comissoes_pagas,
+               COALESCE(SUM(CASE WHEN c.status = 'pendente' THEN c.valor ELSE 0 END), 0) AS comissoes_pendentes
         FROM comissoes c
         JOIN vendedores v ON v.id = c.vendedor_id
         LEFT JOIN vendas vd ON vd.id = c.venda_id
         ${where}
-        ORDER BY c.created_at DESC
+        GROUP BY c.vendedor_id
+        ORDER BY total_comissao DESC
     `).all(...params);
 
     const vendedores = db.prepare(
@@ -256,7 +251,6 @@ router.get('/comissoes', (req, res) => {
 
     res.render('relatorios/comissoes', {
         title: 'Relatorio de Comissoes',
-        comissoesPorVendedor,
         comissoes,
         vendedores,
         filtros: { data_inicio, data_fim, vendedor_id }

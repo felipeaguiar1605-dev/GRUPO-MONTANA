@@ -14,6 +14,13 @@
         <%- include('../partials/header') %>
         <div class="page-content">
 
+            <% if (typeof mensagem !== 'undefined' && mensagem) { %>
+                <div class="alert alert-success" data-dismiss><%= mensagem %></div>
+            <% } %>
+            <% if (typeof erro !== 'undefined' && erro) { %>
+                <div class="alert alert-danger" data-dismiss><%= erro %></div>
+            <% } %>
+
             <div class="breadcrumb">
                 <a href="/relatorios">Relatorios</a> <span>/</span> <span>Financeiro</span>
             </div>
@@ -23,127 +30,117 @@
                 <a href="/relatorios" class="btn btn-secondary">Voltar</a>
             </div>
 
-            <!-- Filtros -->
-            <div class="card" style="margin-bottom:16px;">
-                <div class="card-body">
-                    <form method="GET" action="/relatorios/financeiro" class="filters">
-                        <div class="form-group" style="margin-bottom:0; min-width:140px;">
-                            <label>Data Inicio</label>
-                            <input type="date" name="data_inicio" class="form-control" value="<%= filtros.data_inicio %>">
-                        </div>
-                        <div class="form-group" style="margin-bottom:0; min-width:140px;">
-                            <label>Data Fim</label>
-                            <input type="date" name="data_fim" class="form-control" value="<%= filtros.data_fim %>">
-                        </div>
-                        <div class="form-group" style="margin-bottom:0; align-self:flex-end;">
-                            <button type="submit" class="btn btn-primary">Gerar</button>
-                        </div>
-                    </form>
+            <!-- Resumo -->
+            <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                <div class="stat-card">
+                    <div class="stat-icon green">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Total Receitas</h4>
+                        <div class="stat-value" style="color: var(--success);"><%= formatMoney(resumo.total_receitas) %></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon red">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Total Despesas</h4>
+                        <div class="stat-value" style="color: var(--danger);"><%= formatMoney(resumo.total_despesas) %></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon <%= resumo.lucro >= 0 ? 'blue' : 'red' %>">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Lucro</h4>
+                        <div class="stat-value" style="color: <%= resumo.lucro >= 0 ? 'var(--success)' : 'var(--danger)' %>;"><%= formatMoney(resumo.lucro) %></div>
+                    </div>
                 </div>
             </div>
 
             <!-- DRE Simplificado -->
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
-
-                <!-- Receitas -->
-                <div class="card">
-                    <div class="card-header" style="background:var(--success-light);">
-                        <h3 style="color:var(--success);">Receitas</h3>
-                        <strong style="color:var(--success); font-size:18px;"><%= formatMoney(totalReceitas) %></strong>
-                    </div>
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Categoria</th>
-                                    <th>Valor</th>
-                                    <th>%</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <% if (receitas.length === 0) { %>
-                                    <tr><td colspan="3" style="text-align:center; color:var(--gray-400); padding:24px;">Sem receitas no periodo</td></tr>
-                                <% } else { %>
-                                    <% receitas.forEach(function(r) { %>
-                                        <tr>
-                                            <td><strong><%= r.categoria || 'Outros' %></strong></td>
-                                            <td><%= formatMoney(r.total) %></td>
-                                            <td><%= totalReceitas > 0 ? ((r.total / totalReceitas) * 100).toFixed(1) : '0.0' %>%</td>
-                                        </tr>
-                                    <% }); %>
-                                <% } %>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Despesas -->
-                <div class="card">
-                    <div class="card-header" style="background:var(--danger-light);">
-                        <h3 style="color:var(--danger);">Despesas</h3>
-                        <strong style="color:var(--danger); font-size:18px;"><%= formatMoney(totalDespesas) %></strong>
-                    </div>
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Categoria</th>
-                                    <th>Valor</th>
-                                    <th>%</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <% if (despesas.length === 0) { %>
-                                    <tr><td colspan="3" style="text-align:center; color:var(--gray-400); padding:24px;">Sem despesas no periodo</td></tr>
-                                <% } else { %>
-                                    <% despesas.forEach(function(d) { %>
-                                        <tr>
-                                            <td><strong><%= d.categoria || 'Outros' %></strong></td>
-                                            <td><%= formatMoney(d.total) %></td>
-                                            <td><%= totalDespesas > 0 ? ((d.total / totalDespesas) * 100).toFixed(1) : '0.0' %>%</td>
-                                        </tr>
-                                    <% }); %>
-                                <% } %>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-            </div>
-
-            <!-- Resultado -->
             <div class="card" style="margin-bottom:16px;">
-                <div class="card-body" style="text-align:center; padding:24px;">
-                    <h3 style="color:var(--gray-500); font-size:14px; text-transform:uppercase; margin-bottom:8px;">Resultado do Periodo</h3>
-                    <div style="font-size:36px; font-weight:700; color:<%= resultado >= 0 ? 'var(--success)' : 'var(--danger)' %>;">
-                        <%= formatMoney(resultado) %>
-                    </div>
-                    <div style="font-size:14px; color:var(--gray-500); margin-top:4px;">
-                        <%= resultado >= 0 ? 'Lucro' : 'Prejuizo' %> no periodo
-                    </div>
+                <div class="card-header">
+                    <h3>DRE Simplificado (por Mes)</h3>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Mes</th>
+                                <th>Receitas</th>
+                                <th>Despesas</th>
+                                <th>Lucro/Prejuizo</th>
+                                <th>Margem</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% if (typeof dre !== 'undefined' && dre.length > 0) { %>
+                                <% dre.forEach(function(d) { %>
+                                    <%
+                                        var lucro = (d.receitas || 0) - (d.despesas || 0);
+                                        var margem = d.receitas > 0 ? ((lucro / d.receitas) * 100).toFixed(1) : '0.0';
+                                    %>
+                                    <tr>
+                                        <td><strong><%= d.mes %></strong></td>
+                                        <td style="color:var(--success);"><%= formatMoney(d.receitas) %></td>
+                                        <td style="color:var(--danger);"><%= formatMoney(d.despesas) %></td>
+                                        <td><strong style="color: <%= lucro >= 0 ? 'var(--success)' : 'var(--danger)' %>;"><%= formatMoney(lucro) %></strong></td>
+                                        <td><%= margem %>%</td>
+                                    </tr>
+                                <% }); %>
+                            <% } else { %>
+                                <tr>
+                                    <td colspan="5" style="text-align:center; color:var(--gray-400); padding:24px;">
+                                        Nenhum dado encontrado
+                                    </td>
+                                </tr>
+                            <% } %>
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
             <!-- Projecao -->
             <div class="card">
-                <div class="card-header"><h3>Projecao de Fluxo (Proximos 30 dias)</h3></div>
-                <div class="card-body">
-                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:24px; text-align:center;">
-                        <div>
-                            <div style="font-size:12px; color:var(--gray-500); text-transform:uppercase; margin-bottom:4px;">A Receber</div>
-                            <div style="font-size:24px; font-weight:700; color:var(--success);"><%= formatMoney(projecaoReceber) %></div>
-                        </div>
-                        <div>
-                            <div style="font-size:12px; color:var(--gray-500); text-transform:uppercase; margin-bottom:4px;">A Pagar</div>
-                            <div style="font-size:24px; font-weight:700; color:var(--danger);"><%= formatMoney(projecaoPagar) %></div>
-                        </div>
-                        <div>
-                            <div style="font-size:12px; color:var(--gray-500); text-transform:uppercase; margin-bottom:4px;">Saldo Projetado</div>
-                            <div style="font-size:24px; font-weight:700; color:<%= (projecaoReceber - projecaoPagar) >= 0 ? 'var(--success)' : 'var(--danger)' %>;">
-                                <%= formatMoney(projecaoReceber - projecaoPagar) %>
-                            </div>
-                        </div>
-                    </div>
+                <div class="card-header">
+                    <h3>Projecao</h3>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Mes</th>
+                                <th>Receitas Previstas</th>
+                                <th>Despesas Previstas</th>
+                                <th>Saldo Previsto</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% if (typeof projecao !== 'undefined' && projecao.length > 0) { %>
+                                <% projecao.forEach(function(p) { %>
+                                    <%
+                                        var saldoPrev = (p.receitas_previstas || 0) - (p.despesas_previstas || 0);
+                                    %>
+                                    <tr>
+                                        <td><strong><%= p.mes %></strong></td>
+                                        <td style="color:var(--success);"><%= formatMoney(p.receitas_previstas) %></td>
+                                        <td style="color:var(--danger);"><%= formatMoney(p.despesas_previstas) %></td>
+                                        <td><strong style="color: <%= saldoPrev >= 0 ? 'var(--success)' : 'var(--danger)' %>;"><%= formatMoney(saldoPrev) %></strong></td>
+                                    </tr>
+                                <% }); %>
+                            <% } else { %>
+                                <tr>
+                                    <td colspan="4" style="text-align:center; color:var(--gray-400); padding:24px;">
+                                        Nenhuma projecao disponivel
+                                    </td>
+                                </tr>
+                            <% } %>
+                        </tbody>
+                    </table>
                 </div>
             </div>
 

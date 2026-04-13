@@ -14,6 +14,13 @@
         <%- include('../partials/header') %>
         <div class="page-content">
 
+            <% if (typeof mensagem !== 'undefined' && mensagem) { %>
+                <div class="alert alert-success" data-dismiss><%= mensagem %></div>
+            <% } %>
+            <% if (typeof erro !== 'undefined' && erro) { %>
+                <div class="alert alert-danger" data-dismiss><%= erro %></div>
+            <% } %>
+
             <div class="breadcrumb">
                 <a href="/financeiro">Financeiro</a> <span>/</span> <span>Fluxo de Caixa</span>
             </div>
@@ -21,37 +28,6 @@
             <div class="page-header">
                 <h1>Fluxo de Caixa</h1>
                 <a href="/financeiro" class="btn btn-secondary">Voltar</a>
-            </div>
-
-            <!-- Resumo -->
-            <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
-                <div class="stat-card">
-                    <div class="stat-icon green">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>
-                    </div>
-                    <div class="stat-info">
-                        <h4>Total Entradas</h4>
-                        <div class="stat-value" style="color:var(--success);"><%= formatMoney(totais.total_entradas) %></div>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-icon red">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/></svg>
-                    </div>
-                    <div class="stat-info">
-                        <h4>Total Saidas</h4>
-                        <div class="stat-value" style="color:var(--danger);"><%= formatMoney(totais.total_saidas) %></div>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-icon <%= (totais.total_entradas - totais.total_saidas) >= 0 ? 'blue' : 'red' %>">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
-                    </div>
-                    <div class="stat-info">
-                        <h4>Saldo</h4>
-                        <div class="stat-value"><%= formatMoney(totais.total_entradas - totais.total_saidas) %></div>
-                    </div>
-                </div>
             </div>
 
             <!-- Filtros -->
@@ -66,14 +42,6 @@
                             <label>Data Fim</label>
                             <input type="date" name="data_fim" class="form-control" value="<%= filtros.data_fim || '' %>">
                         </div>
-                        <div class="form-group" style="margin-bottom:0; min-width:130px;">
-                            <label>Tipo</label>
-                            <select name="tipo" class="form-control">
-                                <option value="">Todos</option>
-                                <option value="entrada" <%= filtros.tipo === 'entrada' ? 'selected' : '' %>>Entrada</option>
-                                <option value="saida" <%= filtros.tipo === 'saida' ? 'selected' : '' %>>Saida</option>
-                            </select>
-                        </div>
                         <div class="form-group" style="margin-bottom:0; align-self:flex-end;">
                             <button type="submit" class="btn btn-primary">Filtrar</button>
                             <a href="/financeiro/fluxo" class="btn btn-secondary">Limpar</a>
@@ -82,7 +50,38 @@
                 </div>
             </div>
 
-            <!-- Tabela -->
+            <!-- Resumo -->
+            <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                <div class="stat-card">
+                    <div class="stat-icon green">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Total Entradas</h4>
+                        <div class="stat-value" style="color: var(--success);"><%= formatMoney(totais.entradas) %></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon red">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Total Saidas</h4>
+                        <div class="stat-value" style="color: var(--danger);"><%= formatMoney(totais.saidas) %></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon <%= totais.saldo >= 0 ? 'blue' : 'red' %>">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Saldo</h4>
+                        <div class="stat-value" style="color: <%= totais.saldo >= 0 ? 'var(--success)' : 'var(--danger)' %>;"><%= formatMoney(totais.saldo) %></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabela de Movimentos -->
             <div class="card">
                 <div class="table-container">
                     <table>
@@ -92,8 +91,8 @@
                                 <th>Tipo</th>
                                 <th>Categoria</th>
                                 <th>Descricao</th>
+                                <th>Forma Pagamento</th>
                                 <th>Valor</th>
-                                <th>Forma Pgto</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -116,56 +115,40 @@
                                         </td>
                                         <td><%= m.categoria || '-' %></td>
                                         <td><%= m.descricao %></td>
+                                        <td><%= m.forma_pagamento || '-' %></td>
                                         <td>
                                             <strong style="color: <%= m.tipo === 'entrada' ? 'var(--success)' : 'var(--danger)' %>;">
                                                 <%= m.tipo === 'entrada' ? '+' : '-' %> <%= formatMoney(m.valor) %>
                                             </strong>
                                         </td>
-                                        <td><%= m.forma_pagamento || '-' %></td>
                                     </tr>
                                 <% }); %>
                             <% } %>
                         </tbody>
-                        <% if (movimentos.length > 0) { %>
-                            <tfoot>
-                                <tr style="background:var(--gray-50); font-weight:700;">
-                                    <td colspan="4" style="text-align:right; padding:12px 16px;">Totais:</td>
-                                    <td colspan="2" style="padding:12px 16px;">
-                                        <div style="color:var(--success);">+ <%= formatMoney(totais.total_entradas) %></div>
-                                        <div style="color:var(--danger);">- <%= formatMoney(totais.total_saidas) %></div>
-                                        <div style="border-top:1px solid var(--gray-300); margin-top:4px; padding-top:4px;">
-                                            = <%= formatMoney(totais.total_entradas - totais.total_saidas) %>
-                                        </div>
-                                    </td>
-                                </tr>
-                            </tfoot>
-                        <% } %>
                     </table>
                 </div>
 
-                <% if (totalPages > 1) { %>
+                <% if (totalPaginas > 1) { %>
                     <div class="card-footer">
                         <div class="pagination">
-                            <% if (page > 1) { %>
-                                <a href="/financeiro/fluxo?page=<%= page - 1 %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>&tipo=<%= filtros.tipo || '' %>">&laquo; Anterior</a>
+                            <% if (pagina > 1) { %>
+                                <a href="/financeiro/fluxo?pagina=<%= pagina - 1 %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>">&laquo; Anterior</a>
                             <% } %>
-                            <% for (let i = 1; i <= totalPages; i++) { %>
-                                <% if (i === page) { %>
+                            <% for (var i = 1; i <= totalPaginas; i++) { %>
+                                <% if (i === pagina) { %>
                                     <span class="active"><%= i %></span>
-                                <% } else { %>
-                                    <a href="/financeiro/fluxo?page=<%= i %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>&tipo=<%= filtros.tipo || '' %>"><%= i %></a>
+                                <% } else if (Math.abs(i - pagina) <= 2 || i === 1 || i === totalPaginas) { %>
+                                    <a href="/financeiro/fluxo?pagina=<%= i %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>"><%= i %></a>
+                                <% } else if (Math.abs(i - pagina) === 3) { %>
+                                    <span>...</span>
                                 <% } %>
                             <% } %>
-                            <% if (page < totalPages) { %>
-                                <a href="/financeiro/fluxo?page=<%= page + 1 %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>&tipo=<%= filtros.tipo || '' %>">Proximo &raquo;</a>
+                            <% if (pagina < totalPaginas) { %>
+                                <a href="/financeiro/fluxo?pagina=<%= pagina + 1 %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>">Proximo &raquo;</a>
                             <% } %>
                         </div>
                     </div>
                 <% } %>
-            </div>
-
-            <div style="margin-top:12px; font-size:13px; color:var(--gray-500);">
-                Mostrando <%= movimentos.length %> de <%= total %> movimento(s)
             </div>
 
         </div>
