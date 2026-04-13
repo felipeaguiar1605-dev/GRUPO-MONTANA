@@ -43,10 +43,14 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// CORS — restrito a localhost (app local, sem acesso externo)
+// CORS — restrito a origens permitidas
+const CORS_EXTRA = process.env.CORS_ORIGIN || '';
 app.use((req, res, next) => {
   const origin = req.headers.origin || '';
-  if (!origin || /^https?:\/\/localhost(:\d+)?$/.test(origin) || /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin) || /^https?:\/\/104\.196\.22\.170(:\d+)?$/.test(origin)) {
+  const allowed = /^https?:\/\/localhost(:\d+)?$/.test(origin)
+    || /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)
+    || (CORS_EXTRA && origin === CORS_EXTRA);
+  if (!origin || allowed) {
     res.header('Access-Control-Allow-Origin', origin || '*');
   }
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');

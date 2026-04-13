@@ -1021,8 +1021,9 @@ router.get('/nfs', (req, res) => {
 router.delete('/nfs/:id', (req, res) => {
   try {
     const nf = req.db.prepare('SELECT numero FROM notas_fiscais WHERE id = ?').get(req.params.id);
+    if (!nf) return res.status(404).json({ error: 'Nota fiscal não encontrada' });
     req.db.prepare('DELETE FROM notas_fiscais WHERE id = ?').run(req.params.id);
-    audit(req, 'DELETE', 'notas_fiscais', req.params.id, `NF ${nf?.numero || ''}`);
+    audit(req, 'DELETE', 'notas_fiscais', req.params.id, `NF ${nf.numero || ''}`);
     dashCacheInvalidate(req.companyKey);
     res.json({ ok: true });
   } catch(e) { errRes(res, e); }

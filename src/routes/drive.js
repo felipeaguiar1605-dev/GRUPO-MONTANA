@@ -101,14 +101,15 @@ router.get('/auth', (req, res) => {
 
   try {
     const jwt = require('jsonwebtoken');
-    jwt.verify(token, process.env.JWT_SECRET);
+    const { JWT_SECRET } = require('../auth');
+    jwt.verify(token, JWT_SECRET);
   } catch {
     return res.status(401).send('Token inválido');
   }
 
   const oauth2 = getOAuth2Client();
-  // Codifica company no state para recuperar no callback
-  const state = Buffer.from(JSON.stringify({ company, token })).toString('base64');
+  // Codifica apenas company no state (não inclui token para evitar exposição)
+  const state = Buffer.from(JSON.stringify({ company })).toString('base64');
 
   const url = oauth2.generateAuthUrl({
     access_type: 'offline',
@@ -186,7 +187,11 @@ router.post('/buscar', companyMw, async (req, res) => {
 
     // Monta query de busca — 'me' in owners limita ao Drive próprio (não arquivos compartilhados)
     let q = "trashed = false and 'me' in owners";
-    if (termo) q += ` and fullText contains '${termo.replace(/'/g, "\\'")}'`;
+    if (termo) {
+      // Sanitiza: remove aspas simples e caracteres especiais da query do Drive API
+      const termoSafe = termo.replace(/['\\\n\r]/g, ' ').trim();
+      if (termoSafe) q += ` and fullText contains '${termoSafe}'`;
+    }
     if (tipo === 'pdf')   q += ` and mimeType = 'application/pdf'`;
     if (tipo === 'sheet') q += ` and mimeType = 'application/vnd.google-apps.spreadsheet'`;
     if (tipo === 'doc')   q += ` and mimeType = 'application/vnd.google-apps.document'`;
