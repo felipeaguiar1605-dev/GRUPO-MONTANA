@@ -219,12 +219,12 @@ try {
           if (wppCfg.length > 0 && globalThis.fetch) {
             globalThis.fetch(`http://127.0.0.1:${PORT}/api/whatsapp/enviar-alertas`, {
               method: 'POST',
-              headers: { 'X-Company': key, 'Authorization': 'Bearer ' + (process.env.JWT_SECRET || 'montana') }
+              headers: { 'X-Company': key, 'Authorization': 'Bearer ' + require('jsonwebtoken').sign({ usuario: 'cron', role: 'admin' }, require('./auth').JWT_SECRET, { expiresIn: '5m' }) }
             }).then(r => r.json()).then(r => {
               if (r.enviado) console.log(`  💬 WhatsApp alertas enviados [${key}]`);
             }).catch(e2 => console.error(`  ⚠ WhatsApp cron [${key}]:`, e2.message));
           }
-        } catch(e3) {}
+        } catch(e3) { console.error(`  ⚠ WhatsApp cron [${key}]:`, e3.message); }
       } catch (e) {
         console.error(`  ⚠ Cron alerta [${key}]:`, e.message);
       }
@@ -304,11 +304,11 @@ try {
             await fetch(`http://127.0.0.1:${PORT}/api/bb/sync`, {
               method: 'POST',
               headers: { 'Content-Type':'application/json', 'X-Company': key,
-                         'Authorization': 'Bearer ' + (process.env.JWT_SECRET || 'montana') },
+                         'Authorization': 'Bearer ' + require('jsonwebtoken').sign({ usuario: 'cron', role: 'admin' }, require('./auth').JWT_SECRET, { expiresIn: '5m' }) },
               body: JSON.stringify({ dataInicio: ini, dataFim: fim }),
             }).then(r => r.json()).then(r => {
               console.log(`  [BB-SYNC] ${key}: ${r.imported || 0} importados`);
-            });
+            }).catch(eFetch => console.error(`  [BB-SYNC] fetch ${key}:`, eFetch.message));
           }
         } catch(eBB) { console.error(`  [BB-SYNC] ${key}:`, eBB.message); }
 
@@ -402,7 +402,7 @@ app.listen(PORT, () => {
   ║  🔒 Segurança   (19.200.109) → data/seguranca/           ║
   ║  🛡️  Porto do Vau (41.034.574) → data/portodovau/        ║
   ║  🐎 Mustang     (26.600.137) → data/mustang/             ║
-  ║  🔐 Auth JWT ativo (admin/montana2026)                   ║
+  ║  🔐 Auth JWT ativo                                       ║
   ╚══════════════════════════════════════════════════════════╝
   `);
 });

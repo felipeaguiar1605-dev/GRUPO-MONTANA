@@ -78,7 +78,11 @@ function seedAdmin(db) {
   ensureTable(db);
   const existe = db.prepare('SELECT id FROM usuarios WHERE usuario = ?').get('admin');
   if (!existe) {
-    const senhaAdmin = process.env.ADMIN_SENHA || 'montana2026';
+    const senhaAdmin = process.env.ADMIN_SENHA;
+    if (!senhaAdmin) {
+      console.warn('  ⚠ ADMIN_SENHA não definida no .env — defina para criar o admin com senha segura.');
+      return;
+    }
     const hash = bcrypt.hashSync(senhaAdmin, 10);
     db.prepare(`
       INSERT INTO usuarios (usuario, nome, email, senha_hash, role, criado_por)
@@ -86,12 +90,14 @@ function seedAdmin(db) {
     `).run(hash);
 
     // Migra usuário financeiro também
-    const senhaFin = process.env.FINANCEIRO_SENHA || 'fin2026';
-    const hashFin = bcrypt.hashSync(senhaFin, 10);
-    db.prepare(`
-      INSERT OR IGNORE INTO usuarios (usuario, nome, email, senha_hash, role, criado_por)
-      VALUES ('financeiro', 'Financeiro', '', ?, 'financeiro', 'sistema')
-    `).run(hashFin);
+    const senhaFin = process.env.FINANCEIRO_SENHA;
+    if (senhaFin) {
+      const hashFin = bcrypt.hashSync(senhaFin, 10);
+      db.prepare(`
+        INSERT OR IGNORE INTO usuarios (usuario, nome, email, senha_hash, role, criado_por)
+        VALUES ('financeiro', 'Financeiro', '', ?, 'financeiro', 'sistema')
+      `).run(hashFin);
+    }
   }
 }
 

@@ -114,7 +114,8 @@ router.delete('/:id', (req, res) => {
 
 // GET /api/certidoes/arquivo/:filename — serve PDF
 router.get('/arquivo/:filename', (req, res) => {
-  const filePath = path.join(__dirname, '..', '..', req.company.uploadsPath, 'certidoes', req.params.filename);
+  const filename = path.basename(req.params.filename); // sanitiza: remove ../
+  const filePath = path.join(__dirname, '..', '..', req.company.uploadsPath, 'certidoes', filename);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Arquivo não encontrado' });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="${req.params.filename}"`);

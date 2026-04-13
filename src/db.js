@@ -502,6 +502,9 @@ function getDb(companyKey) {
   if (_instances.has(companyKey)) return _instances.get(companyKey);
 
   const dbPath = path.join(__dirname, '..', COMPANIES[companyKey].dbPath);
+  const dbDir = path.dirname(dbPath);
+  const fs = require('fs');
+  if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');       // escrita simultânea sem lock
   db.pragma('foreign_keys = ON');

@@ -84,7 +84,7 @@ function auditMiddleware(req, res, next) {
         (req.headers['x-company'] || req.query?.company || '').toLowerCase() ||
         'desconhecida');
 
-      const usuario = (req.user?.username || req.user?.user || 'anon');
+      const usuario = (req.usuario?.usuario || 'anon');
       const ip = req.ip ||
         req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
         req.connection?.remoteAddress || '';

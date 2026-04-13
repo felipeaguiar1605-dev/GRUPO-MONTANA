@@ -219,7 +219,7 @@ router.patch('/:id([0-9]+)', (req, res) => {
     vals.push(Number(req.params.id));
     d.prepare(`UPDATE ponto_registros SET ${campos.join(', ')} WHERE id = ?`).run(...vals);
     // Auditoria
-    const usuario = req.user?.login || 'anon';
+    const usuario = req.usuario?.usuario || 'anon';
     const ip = req.ip || '';
     try {
       d.prepare(`INSERT INTO audit_log (usuario,acao,tabela,registro_id,detalhe,ip) VALUES (?,?,?,?,?,?)`)
@@ -886,7 +886,7 @@ router.delete('/:id([0-9]+)', (req, res) => {
     if (reg) {
       d.prepare('DELETE FROM ponto_registros WHERE id = ?').run(Number(req.params.id));
       // Auditoria
-      const usuario = req.user?.login || 'anon';
+      const usuario = req.usuario?.usuario || 'anon';
       const ip = req.ip || '';
       try {
         d.prepare(`INSERT INTO audit_log (usuario,acao,tabela,registro_id,detalhe,ip) VALUES (?,?,?,?,?,?)`)

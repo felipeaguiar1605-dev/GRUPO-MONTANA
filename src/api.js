@@ -30,12 +30,20 @@ function dashCacheInvalidate(company) {
 // ─── AUDITORIA ───────────────────────────────────────────────────
 function audit(req, acao, tabela, registroId = '', detalhe = '') {
   try {
-    const usuario = req.user?.login || 'anon';
+    const usuario = req.usuario?.usuario || 'anon';
     const ip = req.ip || req.connection?.remoteAddress || '';
     req.db.prepare(
       `INSERT INTO audit_log (usuario, acao, tabela, registro_id, detalhe, ip) VALUES (?,?,?,?,?,?)`
     ).run(usuario, acao, tabela, String(registroId), detalhe, ip);
   } catch (_) { /* auditoria nunca deve quebrar a operação */ }
+}
+
+// Helper: sanitiza parâmetros de paginação
+function safePagination(query) {
+  const page  = Math.max(1, parseInt(query.page)  || 1);
+  const limit = Math.max(1, Math.min(parseInt(query.limit) || 100, 1000));
+  const offset = (page - 1) * limit;
+  return { page, limit, offset };
 }
 
 // Helper: valida extensão do arquivo enviado
@@ -568,7 +576,8 @@ router.get('/extratos/meses', (req, res) => {
 
 router.get('/extratos', (req, res) => {
   try {
-  const { from, to, status, mes, posto, page = 1, limit = 100 } = req.query;
+  const { from, to, status, mes, posto } = req.query;
+  const pg = safePagination(req.query);
   let where = '1=1';
   const params = {};
   if (from) { where += ' AND data_iso >= @from'; params.from = from; }
@@ -577,14 +586,13 @@ router.get('/extratos', (req, res) => {
   if (mes) { where += ' AND mes = @mes'; params.mes = mes; }
   if (posto) { where += ' AND posto = @posto'; params.posto = posto; }
 
-  const offset = (parseInt(page) - 1) * parseInt(limit);
-  params.limit = parseInt(limit);
-  params.offset = offset;
+  params.limit = pg.limit;
+  params.offset = pg.offset;
 
   const total = req.db.prepare(`SELECT COUNT(*) as cnt FROM extratos WHERE ${where}`).get(params).cnt;
   const rows = req.db.prepare(`SELECT * FROM extratos WHERE ${where} ORDER BY data_iso DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
 
-  res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
+  res.json({ total, page: pg.page, pages: Math.ceil(total / pg.limit), data: rows });
   } catch(e) { errRes(res, e); }
 });
 
@@ -995,19 +1003,19 @@ router.patch('/parcelas/:id', (req, res) => {
 
 // ─── NOTAS FISCAIS ───────────────────────────────────────────────
 router.get('/nfs', (req, res) => {
-  const { cidade, tomador, from, to, page = 1, limit = 100 } = req.query;
+  const { cidade, tomador, from, to } = req.query;
+  const pg = safePagination(req.query);
   let where = '1=1';
   const params = {};
   if (cidade) { where += ' AND cidade = @cidade'; params.cidade = cidade; }
   if (tomador) { where += ' AND tomador = @tomador'; params.tomador = tomador; }
   if (from) { where += ' AND data_emissao >= @from'; params.from = from; }
   if (to)   { where += ' AND data_emissao <= @to';   params.to = to; }
-  const offset = (parseInt(page) - 1) * parseInt(limit);
-  params.limit = parseInt(limit); params.offset = offset;
+  params.limit = pg.limit; params.offset = pg.offset;
 
   const total = req.db.prepare(`SELECT COUNT(*) as cnt FROM notas_fiscais WHERE ${where}`).get(params).cnt;
   const rows = req.db.prepare(`SELECT * FROM notas_fiscais WHERE ${where} ORDER BY id DESC LIMIT @limit OFFSET @offset`).all(params);
-  res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
+  res.json({ total, page: pg.page, pages: Math.ceil(total / pg.limit), data: rows });
 });
 
 router.delete('/nfs/:id', (req, res) => {
@@ -1107,34 +1115,34 @@ router.post('/nfs/corrigir-lote', (req, res) => {
 
 // ─── LIQUIDAÇÕES ─────────────────────────────────────────────────
 router.get('/liquidacoes', (req, res) => {
-  const { gestao, from, to, page = 1, limit = 100 } = req.query;
+  const { gestao, from, to } = req.query;
+  const pg = safePagination(req.query);
   let where = '1=1';
   const params = {};
   if (gestao) { where += ' AND gestao = @gestao'; params.gestao = gestao; }
   if (from) { where += ' AND data_liquidacao_iso >= @from'; params.from = from; }
   if (to) { where += ' AND data_liquidacao_iso <= @to'; params.to = to; }
-  const offset = (parseInt(page) - 1) * parseInt(limit);
-  params.limit = parseInt(limit); params.offset = offset;
+  params.limit = pg.limit; params.offset = pg.offset;
 
   const total = req.db.prepare(`SELECT COUNT(*) as cnt FROM liquidacoes WHERE ${where}`).get(params).cnt;
   const rows = req.db.prepare(`SELECT * FROM liquidacoes WHERE ${where} ORDER BY data_liquidacao_iso DESC LIMIT @limit OFFSET @offset`).all(params);
-  res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
+  res.json({ total, page: pg.page, pages: Math.ceil(total / pg.limit), data: rows });
 });
 
 // ─── PAGAMENTOS ──────────────────────────────────────────────────
 router.get('/pagamentos', (req, res) => {
-  const { gestao, from, to, page = 1, limit = 100 } = req.query;
+  const { gestao, from, to } = req.query;
+  const pg = safePagination(req.query);
   let where = '1=1';
   const params = {};
   if (gestao) { where += ' AND gestao = @gestao'; params.gestao = gestao; }
   if (from) { where += ' AND data_pagamento_iso >= @from'; params.from = from; }
   if (to) { where += ' AND data_pagamento_iso <= @to'; params.to = to; }
-  const offset = (parseInt(page) - 1) * parseInt(limit);
-  params.limit = parseInt(limit); params.offset = offset;
+  params.limit = pg.limit; params.offset = pg.offset;
 
   const total = req.db.prepare(`SELECT COUNT(*) as cnt FROM pagamentos WHERE ${where}`).get(params).cnt;
   const rows = req.db.prepare(`SELECT * FROM pagamentos WHERE ${where} ORDER BY data_pagamento_iso DESC LIMIT @limit OFFSET @offset`).all(params);
-  res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
+  res.json({ total, page: pg.page, pages: Math.ceil(total / pg.limit), data: rows });
 });
 
 // ─── VINCULAÇÕES (CRUD) ─────────────────────────────────────────
@@ -1188,11 +1196,13 @@ router.post('/vinculacoes/batch', (req, res) => {
 });
 
 router.delete('/vinculacoes/:extrato_id', (req, res) => {
-  const { extrato_id } = req.params;
-  req.db.prepare(`DELETE FROM vinculacoes WHERE extrato_id = ?`).run(extrato_id);
-  req.db.prepare(`UPDATE extratos SET contrato_vinculado = '', status_conciliacao = 'PENDENTE', updated_at = datetime('now') WHERE id = ?`).run(extrato_id);
-  audit(req, 'DELETE', 'vinculacoes', extrato_id, `desvinculação extrato ${extrato_id}`);
-  res.json({ ok: true });
+  try {
+    const { extrato_id } = req.params;
+    req.db.prepare(`DELETE FROM vinculacoes WHERE extrato_id = ?`).run(extrato_id);
+    req.db.prepare(`UPDATE extratos SET contrato_vinculado = '', status_conciliacao = 'PENDENTE', updated_at = datetime('now') WHERE id = ?`).run(extrato_id);
+    audit(req, 'DELETE', 'vinculacoes', extrato_id, `desvinculação extrato ${extrato_id}`);
+    res.json({ ok: true });
+  } catch(e) { errRes(res, e); }
 });
 
 // ─── IMPORTAÇÃO DE CSVs ──────────────────────────────────────────
@@ -2003,7 +2013,8 @@ function calcRetencoes(categoria, valor_bruto) {
 }
 
 router.get('/despesas', (req, res) => {
-  const { categoria, fornecedor, status, from, to, contrato_ref, page = 1, limit = 100 } = req.query;
+  const { categoria, fornecedor, status, from, to, contrato_ref } = req.query;
+  const pg = safePagination(req.query);
   let where = '1=1';
   const params = {};
   if (categoria) { where += ' AND categoria = @categoria'; params.categoria = categoria; }
@@ -2012,12 +2023,11 @@ router.get('/despesas', (req, res) => {
   if (from) { where += ' AND data_iso >= @from'; params.from = from; }
   if (to) { where += ' AND data_iso <= @to'; params.to = to; }
   if (contrato_ref) { where += ' AND contrato_ref = @contrato_ref'; params.contrato_ref = contrato_ref; }
-  const offset = (parseInt(page) - 1) * parseInt(limit);
-  params.limit = parseInt(limit); params.offset = offset;
+  params.limit = pg.limit; params.offset = pg.offset;
 
   const total = req.db.prepare(`SELECT COUNT(*) as cnt FROM despesas WHERE ${where}`).get(params).cnt;
   const rows = req.db.prepare(`SELECT * FROM despesas WHERE ${where} ORDER BY data_iso DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
-  res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
+  res.json({ total, page: pg.page, pages: Math.ceil(total / pg.limit), data: rows });
 });
 
 router.get('/despesas/resumo', (req, res) => {
@@ -2292,10 +2302,13 @@ router.patch('/despesas/:id', (req, res) => {
 });
 
 router.delete('/despesas/:id', (req, res) => {
-  const desp = req.db.prepare('SELECT descricao, valor_bruto FROM despesas WHERE id = ?').get(req.params.id);
-  req.db.prepare('DELETE FROM despesas WHERE id = ?').run(req.params.id);
-  audit(req, 'DELETE', 'despesas', req.params.id, `${desp?.descricao || ''} R$${desp?.valor_bruto || 0}`);
-  res.json({ ok: true });
+  try {
+    const desp = req.db.prepare('SELECT descricao, valor_bruto FROM despesas WHERE id = ?').get(req.params.id);
+    if (!desp) return res.status(404).json({ error: 'Despesa não encontrada' });
+    req.db.prepare('DELETE FROM despesas WHERE id = ?').run(req.params.id);
+    audit(req, 'DELETE', 'despesas', req.params.id, `${desp.descricao || ''} R$${desp.valor_bruto || 0}`);
+    res.json({ ok: true });
+  } catch(e) { errRes(res, e); }
 });
 
 router.post('/import/despesas', (req, res, next) => getUpload(req).single('file')(req, res, next), (req, res) => {
@@ -4371,7 +4384,7 @@ router.post('/conciliar-auto-valor', (req, res) => {
     `);
 
     let vinculados = 0;
-    const usuario = req.user?.login || 'auto';
+    const usuario = req.usuario?.usuario || 'auto';
 
     const processar = req.db.transaction(() => {
       for (const ext of extratos) {
