@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Comissoes - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <% if (typeof mensagem !== 'undefined' && mensagem) { %>
+                <div class="alert alert-success" data-dismiss><%= mensagem %></div>
+            <% } %>
+            <% if (typeof erro !== 'undefined' && erro) { %>
+                <div class="alert alert-danger" data-dismiss><%= erro %></div>
+            <% } %>
+
+            <div class="page-header">
+                <h1>Comissoes</h1>
+            </div>
+
+            <!-- Pagamento em Lote -->
+            <div class="card" style="margin-bottom: 16px;">
+                <div class="card-header">
+                    <h3>Pagamento em Lote</h3>
+                </div>
+                <div class="card-body">
+                    <p style="font-size: 13px; color: var(--gray-600); margin-bottom: 12px;">Selecione um vendedor e o periodo para pagar todas as comissoes pendentes de uma vez:</p>
+                    <form method="POST" action="/comissoes/pagar-lote" id="pagarLoteForm" style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
+                        <div class="form-group" style="margin-bottom: 0; min-width: 250px;">
+                            <label>Vendedor</label>
+                            <select name="vendedor_id" class="form-control" required>
+                                <option value="">Selecione o vendedor</option>
+                                <% vendedores.forEach(function(v) { %>
+                                    <option value="<%= v.id %>"><%= v.nome %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; min-width: 140px;">
+                            <label>Mes</label>
+                            <input type="month" name="mes" class="form-control">
+                        </div>
+                        <button type="submit" class="btn btn-success" onclick="return confirm('Tem certeza que deseja pagar todas as comissoes pendentes deste vendedor no periodo selecionado?')">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                            Pagar Todas Pendentes
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Filtros -->
+            <div class="card" style="margin-bottom: 16px;">
+                <div class="card-body" style="padding: 16px;">
+                    <form method="GET" action="/comissoes" id="filtroForm">
+                        <div class="filters">
+                            <div class="form-group" style="margin-bottom: 0; min-width: 180px;">
+                                <label>Vendedor</label>
+                                <select name="vendedor_id" class="form-control">
+                                    <option value="">Todos</option>
+                                    <% vendedores.forEach(function(v) { %>
+                                        <option value="<%= v.id %>" <%= filtros.vendedor_id == v.id ? 'selected' : '' %>><%= v.nome %></option>
+                                    <% }); %>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0; min-width: 140px;">
+                                <label>Status</label>
+                                <select name="status" class="form-control">
+                                    <option value="">Todos</option>
+                                    <option value="pendente" <%= filtros.status === 'pendente' ? 'selected' : '' %>>Pendente</option>
+                                    <option value="paga" <%= filtros.status === 'paga' ? 'selected' : '' %>>Paga</option>
+                                    <option value="cancelada" <%= filtros.status === 'cancelada' ? 'selected' : '' %>>Cancelada</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0; min-width: 140px;">
+                                <label>Data Inicio</label>
+                                <input type="date" name="data_inicio" class="form-control" value="<%= filtros.data_inicio || '' %>">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0; min-width: 140px;">
+                                <label>Data Fim</label>
+                                <input type="date" name="data_fim" class="form-control" value="<%= filtros.data_fim || '' %>">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0; align-self: flex-end;">
+                                <button type="submit" class="btn btn-primary">Filtrar</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Tabela de Comissoes -->
+            <div class="card">
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Vendedor</th>
+                                <th>Venda</th>
+                                <th>Valor</th>
+                                <th>Percentual</th>
+                                <th>Status</th>
+                                <th>Data</th>
+                                <th>Data Pagamento</th>
+                                <th>Acoes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% if (comissoes.length === 0) { %>
+                                <tr>
+                                    <td colspan="8">
+                                        <div class="empty-state">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="10"/></svg>
+                                            <h3>Nenhuma comissao encontrada</h3>
+                                            <p>As comissoes serao geradas automaticamente ao registrar vendas com vendedor vinculado.</p>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <% } else { %>
+                                <% comissoes.forEach(function(c) { %>
+                                    <tr>
+                                        <td><strong><%= c.vendedor_nome %></strong></td>
+                                        <td>
+                                            <a href="/vendas/ver/<%= c.venda_id %>"><%= c.venda_numero %></a>
+                                        </td>
+                                        <td><strong><%= formatMoney(c.valor) %></strong></td>
+                                        <td><%= c.percentual %>%</td>
+                                        <td>
+                                            <% if (c.status === 'pendente') { %>
+                                                <span class="badge badge-warning">Pendente</span>
+                                            <% } else if (c.status === 'paga') { %>
+                                                <span class="badge badge-success">Paga</span>
+                                            <% } else { %>
+                                                <span class="badge badge-danger">Cancelada</span>
+                                            <% } %>
+                                        </td>
+                                        <td><%= moment(c.created_at).format('DD/MM/YYYY') %></td>
+                                        <td><%= c.data_pagamento ? moment(c.data_pagamento).format('DD/MM/YYYY') : '-' %></td>
+                                        <td>
+                                            <div class="actions">
+                                                <% if (c.status === 'pendente') { %>
+                                                    <form method="POST" action="/comissoes/pagar/<%= c.id %>" style="display: inline;">
+                                                        <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Confirma o pagamento desta comissao?')">Pagar</button>
+                                                    </form>
+                                                <% } %>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <% }); %>
+                            <% } %>
+                        </tbody>
+                    </table>
+                </div>
+
+                <% if (typeof totalPaginas !== 'undefined' && totalPaginas > 1) { %>
+                    <div class="card-footer">
+                        <div class="pagination">
+                            <% if (pagina > 1) { %>
+                                <a href="/comissoes?pagina=<%= pagina - 1 %>&vendedor_id=<%= filtros.vendedor_id || '' %>&status=<%= filtros.status || '' %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>">Anterior</a>
+                            <% } %>
+                            <% for (let i = 1; i <= totalPaginas; i++) { %>
+                                <% if (i === pagina) { %>
+                                    <span class="active"><%= i %></span>
+                                <% } else if (Math.abs(i - pagina) <= 2 || i === 1 || i === totalPaginas) { %>
+                                    <a href="/comissoes?pagina=<%= i %>&vendedor_id=<%= filtros.vendedor_id || '' %>&status=<%= filtros.status || '' %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>"><%= i %></a>
+                                <% } else if (Math.abs(i - pagina) === 3) { %>
+                                    <span>...</span>
+                                <% } %>
+                            <% } %>
+                            <% if (pagina < totalPaginas) { %>
+                                <a href="/comissoes?pagina=<%= pagina + 1 %>&vendedor_id=<%= filtros.vendedor_id || '' %>&status=<%= filtros.status || '' %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>">Proximo</a>
+                            <% } %>
+                        </div>
+                    </div>
+                <% } %>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>

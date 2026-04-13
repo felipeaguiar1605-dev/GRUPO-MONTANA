@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %> - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <div class="breadcrumb">
+                <a href="/clientes">Clientes</a>
+                <span>/</span>
+                <span><%= title %></span>
+            </div>
+
+            <div class="page-header">
+                <h1><%= title %></h1>
+            </div>
+
+            <% if (erro) { %>
+                <div class="alert alert-danger">
+                    <%= erro %>
+                </div>
+            <% } %>
+
+            <div class="card">
+                <div class="card-body">
+                    <form method="POST" action="/clientes/<%= cliente.id ? 'editar/' + cliente.id : 'novo' %>">
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="tipo_pessoa">Tipo de Pessoa</label>
+                                <select name="tipo_pessoa" id="tipo_pessoa" class="form-control">
+                                    <option value="PF" <%= cliente.tipo_pessoa === 'PF' ? 'selected' : '' %>>Pessoa Fisica (PF)</option>
+                                    <option value="PJ" <%= cliente.tipo_pessoa === 'PJ' ? 'selected' : '' %>>Pessoa Juridica (PJ)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="nome">Nome / Razao Social *</label>
+                                <input type="text" name="nome" id="nome" class="form-control" value="<%= cliente.nome || '' %>" required>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="cpf_cnpj">CPF / CNPJ</label>
+                                <input type="text" name="cpf_cnpj" id="cpf_cnpj" class="form-control" value="<%= cliente.cpf_cnpj || '' %>" maxlength="18" onkeyup="maskCpfCnpj(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="rg_ie">RG / Inscricao Estadual</label>
+                                <input type="text" name="rg_ie" id="rg_ie" class="form-control" value="<%= cliente.rg_ie || '' %>">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="email">Email</label>
+                                <input type="email" name="email" id="email" class="form-control" value="<%= cliente.email || '' %>">
+                            </div>
+                            <div class="form-group">
+                                <label for="limite_credito">Limite de Credito</label>
+                                <input type="text" name="limite_credito" id="limite_credito" class="form-control" value="<%= cliente.limite_credito || '0.00' %>" onkeyup="formatMoney(this)">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="telefone">Telefone</label>
+                                <input type="text" name="telefone" id="telefone" class="form-control" value="<%= cliente.telefone || '' %>" maxlength="15" onkeyup="maskTelefone(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="celular">Celular</label>
+                                <input type="text" name="celular" id="celular" class="form-control" value="<%= cliente.celular || '' %>" maxlength="15" onkeyup="maskTelefone(this)">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="endereco">Endereco</label>
+                                <input type="text" name="endereco" id="endereco" class="form-control" value="<%= cliente.endereco || '' %>">
+                            </div>
+                            <div class="form-group">
+                                <label for="numero">Numero</label>
+                                <input type="text" name="numero" id="numero" class="form-control" value="<%= cliente.numero || '' %>">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="complemento">Complemento</label>
+                                <input type="text" name="complemento" id="complemento" class="form-control" value="<%= cliente.complemento || '' %>">
+                            </div>
+                            <div class="form-group">
+                                <label for="bairro">Bairro</label>
+                                <input type="text" name="bairro" id="bairro" class="form-control" value="<%= cliente.bairro || '' %>">
+                            </div>
+                        </div>
+
+                        <div class="form-row-3">
+                            <div class="form-group">
+                                <label for="cidade">Cidade</label>
+                                <input type="text" name="cidade" id="cidade" class="form-control" value="<%= cliente.cidade || '' %>">
+                            </div>
+                            <div class="form-group">
+                                <label for="estado">Estado</label>
+                                <select name="estado" id="estado" class="form-control">
+                                    <option value="">Selecione...</option>
+                                    <% const estados = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO']; %>
+                                    <% estados.forEach(function(uf) { %>
+                                        <option value="<%= uf %>" <%= (cliente.estado || 'GO') === uf ? 'selected' : '' %>><%= uf %></option>
+                                    <% }); %>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="cep">CEP</label>
+                                <input type="text" name="cep" id="cep" class="form-control" value="<%= cliente.cep || '' %>" maxlength="9" onkeyup="maskCep(this)">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="observacoes">Observacoes</label>
+                            <textarea name="observacoes" id="observacoes" class="form-control" rows="3"><%= cliente.observacoes || '' %></textarea>
+                        </div>
+
+                        <div class="btn-group" style="margin-top: 20px;">
+                            <button type="submit" class="btn btn-primary">
+                                <%= cliente.id ? 'Salvar Alteracoes' : 'Cadastrar Cliente' %>
+                            </button>
+                            <a href="/clientes" class="btn btn-secondary">Cancelar</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+<script src="/js/app.js"></script>
+</body>
+</html>

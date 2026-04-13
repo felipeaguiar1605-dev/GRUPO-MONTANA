@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Movimentacoes de Estoque - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <% if (typeof mensagem !== 'undefined' && mensagem) { %>
+                <div class="alert alert-success" data-dismiss><%= mensagem %></div>
+            <% } %>
+            <% if (typeof erro !== 'undefined' && erro) { %>
+                <div class="alert alert-danger" data-dismiss><%= erro %></div>
+            <% } %>
+
+            <div class="breadcrumb">
+                <a href="/estoque">Estoque</a> <span>/</span> <span>Movimentacoes</span>
+            </div>
+
+            <div class="page-header">
+                <h1>Movimentacoes de Estoque</h1>
+                <a href="/estoque" class="btn btn-secondary">Voltar</a>
+            </div>
+
+            <!-- Filtros -->
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-body">
+                    <form method="GET" action="/estoque/movimentacoes" class="filters">
+                        <div class="form-group" style="margin-bottom:0; min-width:200px;">
+                            <label>Produto</label>
+                            <select name="produto_id" class="form-control">
+                                <option value="">Todos</option>
+                                <% produtos.forEach(function(p) { %>
+                                    <option value="<%= p.id %>" <%= filtros.produto_id == p.id ? 'selected' : '' %>><%= p.nome %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; min-width:150px;">
+                            <label>Tipo</label>
+                            <select name="tipo" class="form-control">
+                                <option value="">Todos</option>
+                                <option value="entrada" <%= filtros.tipo === 'entrada' ? 'selected' : '' %>>Entrada</option>
+                                <option value="saida" <%= filtros.tipo === 'saida' ? 'selected' : '' %>>Saida</option>
+                                <option value="ajuste" <%= filtros.tipo === 'ajuste' ? 'selected' : '' %>>Ajuste</option>
+                                <option value="transferencia" <%= filtros.tipo === 'transferencia' ? 'selected' : '' %>>Transferencia</option>
+                                <option value="devolucao" <%= filtros.tipo === 'devolucao' ? 'selected' : '' %>>Devolucao</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; min-width:140px;">
+                            <label>Data Inicio</label>
+                            <input type="date" name="data_inicio" class="form-control" value="<%= filtros.data_inicio || '' %>">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; min-width:140px;">
+                            <label>Data Fim</label>
+                            <input type="date" name="data_fim" class="form-control" value="<%= filtros.data_fim || '' %>">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; align-self:flex-end;">
+                            <button type="submit" class="btn btn-primary">Filtrar</button>
+                            <a href="/estoque/movimentacoes" class="btn btn-secondary">Limpar</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Tabela -->
+            <div class="card">
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Data</th>
+                                <th>Produto</th>
+                                <th>Tipo</th>
+                                <th>Quantidade</th>
+                                <th>Anterior</th>
+                                <th>Posterior</th>
+                                <th>Usuario</th>
+                                <th>Observacao</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% if (movimentacoes.length === 0) { %>
+                                <tr>
+                                    <td colspan="8" style="text-align:center; color:var(--gray-400); padding:32px;">
+                                        Nenhuma movimentacao encontrada
+                                    </td>
+                                </tr>
+                            <% } else { %>
+                                <% movimentacoes.forEach(function(m) { %>
+                                    <tr>
+                                        <td><%= moment(m.created_at).format('DD/MM/YYYY HH:mm') %></td>
+                                        <td><strong><%= m.produto_nome %></strong></td>
+                                        <td>
+                                            <% if (m.tipo === 'entrada') { %>
+                                                <span class="badge badge-success">Entrada</span>
+                                            <% } else if (m.tipo === 'saida') { %>
+                                                <span class="badge badge-danger">Saida</span>
+                                            <% } else if (m.tipo === 'ajuste') { %>
+                                                <span class="badge badge-warning">Ajuste</span>
+                                            <% } else if (m.tipo === 'transferencia') { %>
+                                                <span class="badge badge-info">Transferencia</span>
+                                            <% } else if (m.tipo === 'devolucao') { %>
+                                                <span class="badge badge-secondary">Devolucao</span>
+                                            <% } else { %>
+                                                <span class="badge badge-secondary"><%= m.tipo %></span>
+                                            <% } %>
+                                        </td>
+                                        <td>
+                                            <strong style="color: <%= (m.tipo === 'entrada' || m.tipo === 'devolucao') ? 'var(--success)' : 'var(--danger)' %>;">
+                                                <%= (m.tipo === 'entrada' || m.tipo === 'devolucao') ? '+' : '-' %><%= m.quantidade %>
+                                            </strong>
+                                        </td>
+                                        <td><%= m.quantidade_anterior %></td>
+                                        <td><%= m.quantidade_posterior %></td>
+                                        <td><%= m.usuario_nome || '-' %></td>
+                                        <td style="max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"><%= m.observacao || '-' %></td>
+                                    </tr>
+                                <% }); %>
+                            <% } %>
+                        </tbody>
+                    </table>
+                </div>
+
+                <% if (totalPaginas > 1) { %>
+                    <div class="card-footer">
+                        <div class="pagination">
+                            <% if (pagina > 1) { %>
+                                <a href="/estoque/movimentacoes?pagina=<%= pagina - 1 %>&produto_id=<%= filtros.produto_id || '' %>&tipo=<%= filtros.tipo || '' %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>">&laquo; Anterior</a>
+                            <% } %>
+                            <% for (var i = 1; i <= totalPaginas; i++) { %>
+                                <% if (i === pagina) { %>
+                                    <span class="active"><%= i %></span>
+                                <% } else if (Math.abs(i - pagina) <= 2 || i === 1 || i === totalPaginas) { %>
+                                    <a href="/estoque/movimentacoes?pagina=<%= i %>&produto_id=<%= filtros.produto_id || '' %>&tipo=<%= filtros.tipo || '' %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>"><%= i %></a>
+                                <% } else if (Math.abs(i - pagina) === 3) { %>
+                                    <span>...</span>
+                                <% } %>
+                            <% } %>
+                            <% if (pagina < totalPaginas) { %>
+                                <a href="/estoque/movimentacoes?pagina=<%= pagina + 1 %>&produto_id=<%= filtros.produto_id || '' %>&tipo=<%= filtros.tipo || '' %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>">Proximo &raquo;</a>
+                            <% } %>
+                        </div>
+                    </div>
+                <% } %>
+            </div>
+
+        </div>
+    </div>
+</div>
+<script src="/js/app.js"></script>
+</body>
+</html>

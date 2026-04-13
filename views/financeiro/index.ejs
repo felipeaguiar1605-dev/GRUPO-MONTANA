@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financeiro - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <% if (typeof mensagem !== 'undefined' && mensagem) { %>
+                <div class="alert alert-success" data-dismiss><%= mensagem %></div>
+            <% } %>
+            <% if (typeof erro !== 'undefined' && erro) { %>
+                <div class="alert alert-danger" data-dismiss><%= erro %></div>
+            <% } %>
+
+            <div class="page-header">
+                <h1>Financeiro</h1>
+                <div class="btn-group">
+                    <a href="/financeiro/pagar" class="btn btn-danger">Contas a Pagar</a>
+                    <a href="/financeiro/receber" class="btn btn-success">Contas a Receber</a>
+                    <a href="/financeiro/fluxo" class="btn btn-primary">Fluxo de Caixa</a>
+                </div>
+            </div>
+
+            <!-- Cards de Resumo -->
+            <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+                <div class="stat-card">
+                    <div class="stat-icon red">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Total a Pagar</h4>
+                        <div class="stat-value"><%= formatMoney(resumo.total_pagar) %></div>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon green">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Total a Receber</h4>
+                        <div class="stat-value"><%= formatMoney(resumo.total_receber) %></div>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon <%= (resumo.vencidas_pagar + resumo.vencidas_receber) > 0 ? 'red' : 'green' %>">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Contas Vencidas</h4>
+                        <div class="stat-value" style="color: var(--danger);"><%= resumo.vencidas_pagar + resumo.vencidas_receber %></div>
+                        <div class="stat-change">Pagar: <%= resumo.vencidas_pagar %> | Receber: <%= resumo.vencidas_receber %></div>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon <%= resumo.saldo >= 0 ? 'blue' : 'red' %>">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Saldo</h4>
+                        <div class="stat-value" style="color: <%= resumo.saldo >= 0 ? 'var(--success)' : 'var(--danger)' %>;"><%= formatMoney(resumo.saldo) %></div>
+                        <div class="stat-change">Receber - Pagar</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabelas: Proximos pagamentos e recebimentos -->
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+
+                <!-- Proximos Pagamentos -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Proximos Pagamentos</h3>
+                        <a href="/financeiro/pagar" class="btn btn-sm btn-secondary">Ver todas</a>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Descricao</th>
+                                    <th>Fornecedor</th>
+                                    <th>Valor</th>
+                                    <th>Vencimento</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <% if (proximosPagar.length === 0) { %>
+                                    <tr>
+                                        <td colspan="5" style="text-align:center; color:var(--gray-400); padding:24px;">
+                                            Nenhuma conta a pagar proxima
+                                        </td>
+                                    </tr>
+                                <% } else { %>
+                                    <% proximosPagar.forEach(function(cp) { %>
+                                        <tr>
+                                            <td><%= cp.descricao %></td>
+                                            <td><%= cp.fornecedor_nome || '-' %></td>
+                                            <td><strong><%= formatMoney(cp.valor) %></strong></td>
+                                            <td><%= moment(cp.data_vencimento).format('DD/MM/YYYY') %></td>
+                                            <td>
+                                                <% if (cp.status === 'vencida') { %>
+                                                    <span class="badge badge-danger">Vencida</span>
+                                                <% } else { %>
+                                                    <span class="badge badge-warning">Pendente</span>
+                                                <% } %>
+                                            </td>
+                                        </tr>
+                                    <% }); %>
+                                <% } %>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Proximos Recebimentos -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Proximos Recebimentos</h3>
+                        <a href="/financeiro/receber" class="btn btn-sm btn-secondary">Ver todas</a>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Descricao</th>
+                                    <th>Cliente</th>
+                                    <th>Valor</th>
+                                    <th>Vencimento</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <% if (proximosReceber.length === 0) { %>
+                                    <tr>
+                                        <td colspan="5" style="text-align:center; color:var(--gray-400); padding:24px;">
+                                            Nenhuma conta a receber proxima
+                                        </td>
+                                    </tr>
+                                <% } else { %>
+                                    <% proximosReceber.forEach(function(cr) { %>
+                                        <tr>
+                                            <td><%= cr.descricao %></td>
+                                            <td><%= cr.cliente_nome || '-' %></td>
+                                            <td><strong><%= formatMoney(cr.valor) %></strong></td>
+                                            <td><%= moment(cr.data_vencimento).format('DD/MM/YYYY') %></td>
+                                            <td>
+                                                <% if (cr.status === 'vencida') { %>
+                                                    <span class="badge badge-danger">Vencida</span>
+                                                <% } else { %>
+                                                    <span class="badge badge-warning">Pendente</span>
+                                                <% } %>
+                                            </td>
+                                        </tr>
+                                    <% }); %>
+                                <% } %>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+    </div>
+</div>
+<script src="/js/app.js"></script>
+</body>
+</html>

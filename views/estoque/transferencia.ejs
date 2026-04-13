@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transferencia de Estoque - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <% if (msg) { %>
+                <div class="alert alert-success" data-dismiss><%= msg %></div>
+            <% } %>
+            <% if (erro) { %>
+                <div class="alert alert-danger" data-dismiss><%= erro %></div>
+            <% } %>
+
+            <div class="breadcrumb">
+                <a href="/estoque">Estoque</a> <span>/</span> <span>Transferencia</span>
+            </div>
+
+            <div class="page-header">
+                <h1>Transferencia entre Empresas</h1>
+                <a href="/estoque" class="btn btn-secondary">Voltar</a>
+            </div>
+
+            <div class="card" style="max-width:600px;">
+                <div class="card-header"><h3>Transferir Produto</h3></div>
+                <div class="card-body">
+                    <form method="POST" action="/estoque/transferencia">
+                        <div class="form-group">
+                            <label>Produto *</label>
+                            <select name="produto_id" id="produtoSelect" class="form-control" required onchange="atualizarQtdAtual()">
+                                <option value="">Selecione o produto...</option>
+                                <% produtos.forEach(function(p) { %>
+                                    <option value="<%= p.id %>" data-qtd="<%= p.quantidade %>">
+                                        <%= p.codigo ? p.codigo + ' - ' : '' %><%= p.nome %> (Disponivel: <%= p.quantidade %>)
+                                    </option>
+                                <% }); %>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Empresa Destino *</label>
+                            <select name="empresa_destino_id" class="form-control" required>
+                                <option value="">Selecione a empresa destino...</option>
+                                <% outrasEmpresas.forEach(function(e) { %>
+                                    <option value="<%= e.id %>"><%= e.nome_fantasia || e.razao_social %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Estoque Disponivel</label>
+                                <input type="text" id="qtdDisponivel" class="form-control" readonly style="background:var(--gray-50); font-weight:700; font-size:18px;">
+                            </div>
+                            <div class="form-group">
+                                <label>Quantidade a Transferir *</label>
+                                <input type="number" name="quantidade" id="qtdTransferir" class="form-control" step="0.01" min="0.01" required
+                                    style="font-weight:700; font-size:18px;">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Observacao</label>
+                            <textarea name="observacao" class="form-control" rows="3" placeholder="Motivo da transferencia..."></textarea>
+                        </div>
+
+                        <div class="btn-group">
+                            <button type="submit" class="btn btn-primary btn-lg" onclick="return validarTransferencia()">Confirmar Transferencia</button>
+                            <a href="/estoque" class="btn btn-secondary btn-lg">Cancelar</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+<script src="/js/app.js"></script>
+<script>
+    function atualizarQtdAtual() {
+        const select = document.getElementById('produtoSelect');
+        const option = select.options[select.selectedIndex];
+        const qtd = option.getAttribute('data-qtd') || '0';
+        document.getElementById('qtdDisponivel').value = qtd;
+        document.getElementById('qtdTransferir').max = qtd;
+    }
+
+    function validarTransferencia() {
+        const disponivel = parseFloat(document.getElementById('qtdDisponivel').value) || 0;
+        const transferir = parseFloat(document.getElementById('qtdTransferir').value) || 0;
+
+        if (transferir > disponivel) {
+            alert('Quantidade a transferir excede o estoque disponivel!');
+            return false;
+        }
+        return confirm('Confirmar transferencia de ' + transferir + ' unidade(s)?');
+    }
+</script>
+</body>
+</html>

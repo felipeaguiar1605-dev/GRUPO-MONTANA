@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= (typeof compra !== 'undefined' && compra && compra.id) ? 'Editar Compra' : 'Nova Compra' %> - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <% if (typeof mensagem !== 'undefined' && mensagem) { %>
+                <div class="alert alert-success" data-dismiss><%= mensagem %></div>
+            <% } %>
+            <% if (typeof erro !== 'undefined' && erro) { %>
+                <div class="alert alert-danger" data-dismiss><%= erro %></div>
+            <% } %>
+
+            <div class="breadcrumb">
+                <a href="/compras">Compras</a> <span>/</span> <span><%= (typeof compra !== 'undefined' && compra && compra.id) ? 'Editar Compra' : 'Nova Compra' %></span>
+            </div>
+
+            <div class="page-header">
+                <h1><%= (typeof compra !== 'undefined' && compra && compra.id) ? 'Editar Compra' : 'Nova Compra' %></h1>
+            </div>
+
+            <form method="POST" action="<%= (typeof compra !== 'undefined' && compra && compra.id) ? '/compras/editar/' + compra.id : '/compras/nova' %>" id="compraForm">
+                <div class="card" style="margin-bottom: 16px;">
+                    <div class="card-header"><h3>Dados da Compra</h3></div>
+                    <div class="card-body">
+                        <div class="form-row-3">
+                            <div class="form-group">
+                                <label>Fornecedor *</label>
+                                <select name="fornecedor_id" class="form-control" required>
+                                    <option value="">Selecione...</option>
+                                    <% fornecedores.forEach(function(f) { %>
+                                        <option value="<%= f.id %>" <%= (typeof compra !== 'undefined' && compra && compra.fornecedor_id == f.id) ? 'selected' : '' %>><%= f.razao_social || f.nome_fantasia %><%= f.nome_fantasia ? ' (' + f.nome_fantasia + ')' : '' %></option>
+                                    <% }); %>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Data da Compra</label>
+                                <input type="date" name="data_compra" class="form-control" value="<%= (typeof compra !== 'undefined' && compra && compra.data_compra) ? compra.data_compra.toString().substring(0,10) : new Date().toISOString().split('T')[0] %>">
+                            </div>
+                            <div class="form-group">
+                                <label>Status</label>
+                                <select name="status" class="form-control">
+                                    <option value="pedido" <%= (typeof compra !== 'undefined' && compra && compra.status === 'pedido') ? 'selected' : '' %>>Pedido</option>
+                                    <option value="cotacao" <%= (typeof compra !== 'undefined' && compra && compra.status === 'cotacao') ? 'selected' : '' %>>Cotacao</option>
+                                    <option value="recebida" <%= (typeof compra !== 'undefined' && compra && compra.status === 'recebida') ? 'selected' : '' %>>Recebida</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row-3">
+                            <div class="form-group">
+                                <label>Forma de Pagamento</label>
+                                <select name="forma_pagamento" class="form-control">
+                                    <option value="boleto" <%= (typeof compra !== 'undefined' && compra && compra.forma_pagamento === 'boleto') ? 'selected' : '' %>>Boleto</option>
+                                    <option value="pix" <%= (typeof compra !== 'undefined' && compra && compra.forma_pagamento === 'pix') ? 'selected' : '' %>>PIX</option>
+                                    <option value="dinheiro" <%= (typeof compra !== 'undefined' && compra && compra.forma_pagamento === 'dinheiro') ? 'selected' : '' %>>Dinheiro</option>
+                                    <option value="cartao_credito" <%= (typeof compra !== 'undefined' && compra && compra.forma_pagamento === 'cartao_credito') ? 'selected' : '' %>>Cartao de Credito</option>
+                                    <option value="cartao_debito" <%= (typeof compra !== 'undefined' && compra && compra.forma_pagamento === 'cartao_debito') ? 'selected' : '' %>>Cartao de Debito</option>
+                                    <option value="cheque" <%= (typeof compra !== 'undefined' && compra && compra.forma_pagamento === 'cheque') ? 'selected' : '' %>>Cheque</option>
+                                    <option value="prazo" <%= (typeof compra !== 'undefined' && compra && compra.forma_pagamento === 'prazo') ? 'selected' : '' %>>A Prazo</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Parcelas</label>
+                                <input type="number" name="parcelas" class="form-control" value="<%= (typeof compra !== 'undefined' && compra && compra.parcelas) ? compra.parcelas : '1' %>" min="1" max="48">
+                            </div>
+                            <div class="form-group">
+                                <label>Frete (R$)</label>
+                                <input type="number" name="frete" id="frete" class="form-control" value="<%= (typeof compra !== 'undefined' && compra && compra.frete) ? compra.frete : '0' %>" step="0.01" min="0" onchange="calcularTotais()">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Observacoes</label>
+                            <textarea name="observacoes" class="form-control" rows="3" placeholder="Observacoes da compra..."><%= (typeof compra !== 'undefined' && compra && compra.observacoes) ? compra.observacoes : '' %></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Itens da Compra -->
+                <div class="card" style="margin-bottom: 16px;">
+                    <div class="card-header">
+                        <h3>Itens da Compra</h3>
+                        <button type="button" class="btn btn-sm btn-primary" onclick="adicionarItem()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            Adicionar Item
+                        </button>
+                    </div>
+                    <div class="table-container">
+                        <table id="itensTable">
+                            <thead>
+                                <tr>
+                                    <th style="width: 35%;">Produto</th>
+                                    <th style="width: 12%;">Quantidade</th>
+                                    <th style="width: 18%;">Preco Unitario</th>
+                                    <th style="width: 12%;">Desconto</th>
+                                    <th style="width: 18%;">Subtotal</th>
+                                    <th style="width: 5%;"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="itensBody">
+                                <!-- Itens serao adicionados via JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-body" style="padding: 12px 20px; text-align: center; color: var(--gray-400);" id="emptyItemsMsg">
+                        Clique em "Adicionar Item" para incluir produtos na compra.
+                    </div>
+                </div>
+
+                <!-- Totais -->
+                <div class="card" style="margin-bottom: 16px;">
+                    <div class="card-body">
+                        <div style="max-width: 400px; margin-left: auto;">
+                            <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px;">
+                                <span style="color: var(--gray-600);">Subtotal:</span>
+                                <span id="displaySubtotal" style="font-weight: 500;">R$ 0,00</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px;">
+                                <span style="color: var(--gray-600);">Frete:</span>
+                                <span id="displayFrete">R$ 0,00</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; color: var(--danger);">
+                                <span>Desconto:</span>
+                                <span id="displayDesconto">- R$ 0,00</span>
+                            </div>
+                            <hr style="border: none; border-top: 2px solid var(--gray-200); margin: 4px 0;">
+                            <div style="display: flex; justify-content: space-between; padding: 8px 0;">
+                                <span style="font-weight: 700; font-size: 18px; color: var(--dark);">Total:</span>
+                                <span id="displayTotal" style="font-weight: 700; font-size: 24px; color: var(--primary);">R$ 0,00</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="btn-group" style="justify-content: flex-end;">
+                    <a href="/compras" class="btn btn-secondary">Cancelar</a>
+                    <button type="submit" class="btn btn-primary btn-lg" id="btnSalvar">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                        <%= (typeof compra !== 'undefined' && compra && compra.id) ? 'Salvar Alteracoes' : 'Salvar Compra' %>
+                    </button>
+                </div>
+            </form>
+
+        </div>
+    </div>
+</div>
+<script src="/js/app.js"></script>
+<script>
+var produtosData = <%- JSON.stringify(produtos) %>;
+var itemCount = 0;
+
+function adicionarItem(produtoId, quantidade, precoUnitario, desconto) {
+    itemCount++;
+    var tbody = document.getElementById('itensBody');
+    document.getElementById('emptyItemsMsg').style.display = 'none';
+
+    var tr = document.createElement('tr');
+    tr.id = 'item-row-' + itemCount;
+
+    var options = '<option value="">Selecione o produto</option>';
+    for (var i = 0; i < produtosData.length; i++) {
+        var p = produtosData[i];
+        var selected = (produtoId && p.id == produtoId) ? ' selected' : '';
+        options += '<option value="' + p.id + '" data-preco="' + (p.preco_custo || 0) + '"' + selected + '>' +
+            (p.codigo ? p.codigo + ' - ' : '') + p.nome + ' (Custo: R$ ' + (p.preco_custo || 0).toFixed(2) + ')</option>';
+    }
+
+    var qtyVal = quantidade || 1;
+    var precoVal = precoUnitario || 0;
+    var descVal = desconto || 0;
+
+    tr.innerHTML =
+        '<td>' +
+            '<select name="produto_id" class="form-control" onchange="selecionarProduto(this, ' + itemCount + ')" required>' +
+            options +
+            '</select>' +
+        '</td>' +
+        '<td><input type="number" name="quantidade" class="form-control" value="' + qtyVal + '" min="0.01" step="0.01" onchange="calcularSubtotalItem(' + itemCount + ')" oninput="calcularSubtotalItem(' + itemCount + ')" id="qty-' + itemCount + '" required></td>' +
+        '<td><input type="number" name="preco_unitario" class="form-control" value="' + parseFloat(precoVal).toFixed(2) + '" min="0" step="0.01" onchange="calcularSubtotalItem(' + itemCount + ')" oninput="calcularSubtotalItem(' + itemCount + ')" id="preco-' + itemCount + '" required></td>' +
+        '<td><input type="number" name="desconto_item" class="form-control" value="' + parseFloat(descVal).toFixed(2) + '" min="0" step="0.01" onchange="calcularSubtotalItem(' + itemCount + ')" oninput="calcularSubtotalItem(' + itemCount + ')" id="desc-' + itemCount + '"></td>' +
+        '<td><strong id="subtotal-' + itemCount + '">R$ 0,00</strong></td>' +
+        '<td><button type="button" class="btn btn-sm btn-danger" onclick="removerItem(' + itemCount + ')" title="Remover item">X</button></td>';
+
+    tbody.appendChild(tr);
+    calcularSubtotalItem(itemCount);
+}
+
+function removerItem(id) {
+    var row = document.getElementById('item-row-' + id);
+    if (row) row.remove();
+    calcularTotais();
+    var tbody = document.getElementById('itensBody');
+    if (tbody.children.length === 0) {
+        document.getElementById('emptyItemsMsg').style.display = 'block';
+    }
+}
+
+function selecionarProduto(select, itemId) {
+    var option = select.options[select.selectedIndex];
+    var preco = option.getAttribute('data-preco') || 0;
+    document.getElementById('preco-' + itemId).value = parseFloat(preco).toFixed(2);
+    calcularSubtotalItem(itemId);
+}
+
+function calcularSubtotalItem(itemId) {
+    var qty = parseFloat(document.getElementById('qty-' + itemId).value) || 0;
+    var preco = parseFloat(document.getElementById('preco-' + itemId).value) || 0;
+    var desc = parseFloat(document.getElementById('desc-' + itemId).value) || 0;
+    var subtotal = (qty * preco) - desc;
+    if (subtotal < 0) subtotal = 0;
+    document.getElementById('subtotal-' + itemId).textContent = formatarMoeda(subtotal);
+    calcularTotais();
+}
+
+function calcularTotais() {
+    var tbody = document.getElementById('itensBody');
+    var rows = tbody.querySelectorAll('tr');
+    var subtotal = 0;
+    var descontoItens = 0;
+
+    rows.forEach(function(row) {
+        var id = row.id.replace('item-row-', '');
+        var qty = parseFloat(document.getElementById('qty-' + id)?.value) || 0;
+        var preco = parseFloat(document.getElementById('preco-' + id)?.value) || 0;
+        var desc = parseFloat(document.getElementById('desc-' + id)?.value) || 0;
+        subtotal += qty * preco;
+        descontoItens += desc;
+    });
+
+    var frete = parseFloat(document.getElementById('frete').value) || 0;
+    var total = subtotal - descontoItens + frete;
+    if (total < 0) total = 0;
+
+    document.getElementById('displaySubtotal').textContent = formatarMoeda(subtotal);
+    document.getElementById('displayFrete').textContent = formatarMoeda(frete);
+    document.getElementById('displayDesconto').textContent = '- ' + formatarMoeda(descontoItens);
+    document.getElementById('displayTotal').textContent = formatarMoeda(total);
+}
+
+function formatarMoeda(valor) {
+    return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+// Validate form before submit
+document.getElementById('compraForm').addEventListener('submit', function(e) {
+    var tbody = document.getElementById('itensBody');
+    if (tbody.children.length === 0) {
+        e.preventDefault();
+        alert('Adicione ao menos um item na compra.');
+        return false;
+    }
+});
+
+// Initialize
+<% if (typeof compra !== 'undefined' && compra && compra.itens && compra.itens.length > 0) { %>
+    <% compra.itens.forEach(function(item) { %>
+        adicionarItem(<%= item.produto_id %>, <%= item.quantidade %>, <%= item.preco_unitario %>, <%= item.desconto || 0 %>);
+    <% }); %>
+<% } else { %>
+    adicionarItem();
+<% } %>
+calcularTotais();
+</script>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vendedores - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <% if (typeof mensagem !== 'undefined' && mensagem) { %>
+                <div class="alert alert-success" data-dismiss><%= mensagem %></div>
+            <% } %>
+            <% if (typeof erro !== 'undefined' && erro) { %>
+                <div class="alert alert-danger" data-dismiss><%= erro %></div>
+            <% } %>
+
+            <div class="page-header">
+                <h1>Vendedores</h1>
+                <a href="/vendedores/novo" class="btn btn-primary">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    Novo Vendedor
+                </a>
+            </div>
+
+            <!-- Filtros -->
+            <div class="card" style="margin-bottom: 16px;">
+                <div class="card-body" style="padding: 16px;">
+                    <form method="GET" action="/vendedores" id="filtroForm">
+                        <div class="filters">
+                            <div class="search-input" style="margin-bottom: 0; flex: 1;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                <input type="text" name="busca" placeholder="Buscar por nome, CPF ou email..." value="<%= typeof busca !== 'undefined' ? busca : '' %>" onkeyup="searchDebounce(this, 'filtroForm')">
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Tabela -->
+            <div class="card">
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Nome</th>
+                                <th>CPF</th>
+                                <th>Telefone</th>
+                                <th>Email</th>
+                                <th>Comissao %</th>
+                                <th>Meta Mensal</th>
+                                <th>Status</th>
+                                <th>Acoes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% if (vendedores.length === 0) { %>
+                                <tr>
+                                    <td colspan="8">
+                                        <div class="empty-state">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4-4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                                            <h3>Nenhum vendedor encontrado</h3>
+                                            <p>Cadastre seu primeiro vendedor.</p>
+                                            <a href="/vendedores/novo" class="btn btn-primary">Novo Vendedor</a>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <% } else { %>
+                                <% vendedores.forEach(function(v) { %>
+                                    <tr>
+                                        <td><strong><%= v.nome %></strong></td>
+                                        <td><%= v.cpf || '-' %></td>
+                                        <td><%= v.telefone || '-' %></td>
+                                        <td><%= v.email || '-' %></td>
+                                        <td><%= v.comissao_percentual %>%</td>
+                                        <td><%= formatMoney(v.meta_mensal) %></td>
+                                        <td>
+                                            <% if (v.ativo) { %>
+                                                <span class="badge badge-success">Ativo</span>
+                                            <% } else { %>
+                                                <span class="badge badge-danger">Inativo</span>
+                                            <% } %>
+                                        </td>
+                                        <td>
+                                            <div class="actions">
+                                                <a href="/vendedores/editar/<%= v.id %>" class="btn btn-sm btn-secondary">Editar</a>
+                                                <a href="#" onclick="confirmarExclusao('/vendedores/excluir/<%= v.id %>', '<%= v.nome %>')" class="btn btn-sm btn-danger">Excluir</a>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <% }); %>
+                            <% } %>
+                        </tbody>
+                    </table>
+                </div>
+
+                <% if (typeof totalPaginas !== 'undefined' && totalPaginas > 1) { %>
+                    <div class="card-footer">
+                        <div class="pagination">
+                            <% if (pagina > 1) { %>
+                                <a href="/vendedores?pagina=<%= pagina - 1 %>&busca=<%= busca || '' %>">Anterior</a>
+                            <% } %>
+                            <% for (let i = 1; i <= totalPaginas; i++) { %>
+                                <% if (i === pagina) { %>
+                                    <span class="active"><%= i %></span>
+                                <% } else if (i === 1 || i === totalPaginas || (i >= pagina - 2 && i <= pagina + 2)) { %>
+                                    <a href="/vendedores?pagina=<%= i %>&busca=<%= busca || '' %>"><%= i %></a>
+                                <% } else if (i === pagina - 3 || i === pagina + 3) { %>
+                                    <span>...</span>
+                                <% } %>
+                            <% } %>
+                            <% if (pagina < totalPaginas) { %>
+                                <a href="/vendedores?pagina=<%= pagina + 1 %>&busca=<%= busca || '' %>">Proximo</a>
+                            <% } %>
+                        </div>
+                    </div>
+                <% } %>
+            </div>
+
+        </div>
+    </div>
+</div>
+<script src="/js/app.js"></script>
+<script>
+function confirmarExclusao(url, nome) {
+    if (confirm('Tem certeza que deseja excluir o vendedor "' + nome + '"?')) {
+        window.location.href = url;
+    }
+}
+</script>
+</body>
+</html>

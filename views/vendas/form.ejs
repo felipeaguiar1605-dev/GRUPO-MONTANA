@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nova Venda - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <% if (typeof erro !== 'undefined' && erro) { %>
+                <div class="alert alert-danger" data-dismiss><%= erro %></div>
+            <% } %>
+
+            <div class="breadcrumb">
+                <a href="/vendas">Vendas</a> <span>/</span> <span>Nova Venda</span>
+            </div>
+
+            <div class="page-header">
+                <h1>Nova Venda</h1>
+            </div>
+
+            <form method="POST" action="/vendas/nova" id="vendaForm">
+                <!-- Dados gerais -->
+                <div class="card" style="margin-bottom: 16px;">
+                    <div class="card-header">
+                        <h3>Dados da Venda</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-row-4">
+                            <div class="form-group">
+                                <label>Cliente</label>
+                                <select name="cliente_id" class="form-control">
+                                    <option value="">Consumidor Final</option>
+                                    <% clientes.forEach(function(c) { %>
+                                        <option value="<%= c.id %>"><%= c.nome %></option>
+                                    <% }); %>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Vendedor</label>
+                                <select name="vendedor_id" id="vendedor_id" class="form-control">
+                                    <option value="">Sem vendedor</option>
+                                    <% vendedores.forEach(function(v) { %>
+                                        <option value="<%= v.id %>" data-comissao="<%= v.comissao_percentual %>"><%= v.nome %> (<%= v.comissao_percentual %>%)</option>
+                                    <% }); %>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Tipo</label>
+                                <select name="tipo" id="tipoVenda" class="form-control" onchange="atualizarPrecos()">
+                                    <option value="varejo">Varejo</option>
+                                    <option value="atacado">Atacado</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Forma de Pagamento</label>
+                                <select name="forma_pagamento" id="formaPagamento" class="form-control" onchange="toggleParcelas()">
+                                    <option value="dinheiro">Dinheiro</option>
+                                    <option value="pix">PIX</option>
+                                    <option value="cartao_debito">Cartao Debito</option>
+                                    <option value="cartao_credito">Cartao Credito</option>
+                                    <option value="boleto">Boleto</option>
+                                    <option value="prazo">A Prazo</option>
+                                    <option value="cheque">Cheque</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row-4">
+                            <div class="form-group" id="parcelasGroup" style="display: none;">
+                                <label>Parcelas</label>
+                                <select name="parcelas" class="form-control">
+                                    <option value="1">1x</option>
+                                    <option value="2">2x</option>
+                                    <option value="3">3x</option>
+                                    <option value="4">4x</option>
+                                    <option value="5">5x</option>
+                                    <option value="6">6x</option>
+                                    <option value="10">10x</option>
+                                    <option value="12">12x</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Itens da Venda -->
+                <div class="card" style="margin-bottom: 16px;">
+                    <div class="card-header">
+                        <h3>Itens da Venda</h3>
+                        <button type="button" class="btn btn-sm btn-primary" onclick="adicionarItem()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            Adicionar Item
+                        </button>
+                    </div>
+                    <div class="table-container">
+                        <table id="itensTable">
+                            <thead>
+                                <tr>
+                                    <th style="min-width: 250px;">Produto</th>
+                                    <th style="width: 100px;">Estoque</th>
+                                    <th style="width: 100px;">Qtd</th>
+                                    <th style="width: 130px;">Preco Unit.</th>
+                                    <th style="width: 120px;">Desconto</th>
+                                    <th style="width: 130px;">Subtotal</th>
+                                    <th style="width: 60px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="itensBody">
+                                <!-- Rows added dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-body" style="padding: 12px 20px; text-align: center; color: var(--gray-400);" id="emptyItemsMsg">
+                        Clique em "Adicionar Item" para incluir produtos na venda.
+                    </div>
+                </div>
+
+                <!-- Totais e observações -->
+                <div class="card" style="margin-bottom: 16px;">
+                    <div class="card-body">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+                            <div>
+                                <div class="form-group">
+                                    <label>Observacoes</label>
+                                    <textarea name="observacoes" class="form-control" rows="4" placeholder="Observacoes sobre a venda..."></textarea>
+                                </div>
+                            </div>
+                            <div>
+                                <div style="display: flex; flex-direction: column; gap: 12px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <span style="color: var(--gray-600);">Subtotal:</span>
+                                        <span id="displaySubtotal" style="font-size: 16px; font-weight: 500;">R$ 0,00</span>
+                                    </div>
+                                    <div style="display: flex; gap: 12px; align-items: center;">
+                                        <label style="white-space: nowrap; color: var(--gray-600); margin: 0;">Desconto (%):</label>
+                                        <input type="number" name="desconto_percentual" id="descontoPerc" class="form-control" value="0" min="0" max="100" step="0.01" onchange="calcularTotais()" oninput="calcularTotais()" style="width: 100px;">
+                                    </div>
+                                    <div style="display: flex; gap: 12px; align-items: center;">
+                                        <label style="white-space: nowrap; color: var(--gray-600); margin: 0;">Desconto (R$):</label>
+                                        <input type="number" name="desconto_valor" id="descontoVal" class="form-control" value="0" min="0" step="0.01" onchange="calcularTotais()" oninput="calcularTotais()" style="width: 100px;">
+                                    </div>
+                                    <hr style="border: none; border-top: 1px solid var(--gray-200);">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <span style="font-weight: 700; font-size: 18px; color: var(--dark);">Total:</span>
+                                        <span id="displayTotal" style="font-size: 24px; font-weight: 700; color: var(--primary);">R$ 0,00</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="btn-group" style="justify-content: flex-end;">
+                    <a href="/vendas" class="btn btn-secondary">Cancelar</a>
+                    <button type="submit" class="btn btn-success btn-lg" id="btnSalvar">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                        Finalizar Venda
+                    </button>
+                </div>
+            </form>
+
+        </div>
+    </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+var produtosData = <%- JSON.stringify(produtos) %>;
+var itemCount = 0;
+
+function adicionarItem() {
+    itemCount++;
+    var tbody = document.getElementById('itensBody');
+    document.getElementById('emptyItemsMsg').style.display = 'none';
+
+    var tr = document.createElement('tr');
+    tr.id = 'item-row-' + itemCount;
+
+    var options = '<option value="">Selecione o produto</option>';
+    for (var i = 0; i < produtosData.length; i++) {
+        var p = produtosData[i];
+        options += '<option value="' + p.id + '">' + (p.codigo ? p.codigo + ' - ' : '') + p.nome + '</option>';
+    }
+
+    tr.innerHTML =
+        '<td>' +
+            '<select name="produto_id" class="form-control" onchange="selecionarProduto(this, ' + itemCount + ')" required>' +
+            options +
+            '</select>' +
+        '</td>' +
+        '<td><span id="estoque-' + itemCount + '" style="color: var(--gray-500);">-</span></td>' +
+        '<td><input type="number" name="quantidade" class="form-control" value="1" min="0.01" step="0.01" onchange="calcularSubtotalItem(' + itemCount + ')" oninput="calcularSubtotalItem(' + itemCount + ')" id="qty-' + itemCount + '" required></td>' +
+        '<td><input type="number" name="preco_unitario" class="form-control" value="0" min="0" step="0.01" onchange="calcularSubtotalItem(' + itemCount + ')" oninput="calcularSubtotalItem(' + itemCount + ')" id="price-' + itemCount + '" required></td>' +
+        '<td><input type="number" name="desconto_item" class="form-control" value="0" min="0" step="0.01" onchange="calcularSubtotalItem(' + itemCount + ')" oninput="calcularSubtotalItem(' + itemCount + ')" id="disc-' + itemCount + '"></td>' +
+        '<td><strong id="subtotal-' + itemCount + '">R$ 0,00</strong></td>' +
+        '<td><button type="button" class="btn btn-sm btn-danger" onclick="removerItem(' + itemCount + ')" title="Remover item">X</button></td>';
+
+    tbody.appendChild(tr);
+}
+
+function removerItem(id) {
+    var row = document.getElementById('item-row-' + id);
+    if (row) row.remove();
+    calcularTotais();
+    var tbody = document.getElementById('itensBody');
+    if (tbody.children.length === 0) {
+        document.getElementById('emptyItemsMsg').style.display = 'block';
+    }
+}
+
+function selecionarProduto(select, itemId) {
+    var produtoId = parseInt(select.value);
+    var produto = null;
+    for (var i = 0; i < produtosData.length; i++) {
+        if (produtosData[i].id === produtoId) {
+            produto = produtosData[i];
+            break;
+        }
+    }
+
+    if (produto) {
+        var tipo = document.getElementById('tipoVenda').value;
+        var preco = tipo === 'atacado' && produto.preco_atacado > 0 ? produto.preco_atacado : produto.preco_venda;
+        document.getElementById('price-' + itemId).value = preco.toFixed(2);
+        document.getElementById('estoque-' + itemId).textContent = produto.estoque.toFixed(2);
+
+        if (produto.estoque <= 0) {
+            document.getElementById('estoque-' + itemId).style.color = 'var(--danger)';
+        } else {
+            document.getElementById('estoque-' + itemId).style.color = 'var(--success)';
+        }
+    } else {
+        document.getElementById('price-' + itemId).value = '0';
+        document.getElementById('estoque-' + itemId).textContent = '-';
+        document.getElementById('estoque-' + itemId).style.color = 'var(--gray-500)';
+    }
+    calcularSubtotalItem(itemId);
+}
+
+function calcularSubtotalItem(itemId) {
+    var qty = parseFloat(document.getElementById('qty-' + itemId).value) || 0;
+    var price = parseFloat(document.getElementById('price-' + itemId).value) || 0;
+    var disc = parseFloat(document.getElementById('disc-' + itemId).value) || 0;
+    var subtotal = (qty * price) - disc;
+    if (subtotal < 0) subtotal = 0;
+    document.getElementById('subtotal-' + itemId).textContent = formatarMoeda(subtotal);
+    calcularTotais();
+}
+
+function calcularTotais() {
+    var tbody = document.getElementById('itensBody');
+    var rows = tbody.querySelectorAll('tr');
+    var subtotal = 0;
+
+    rows.forEach(function(row) {
+        var id = row.id.replace('item-row-', '');
+        var qty = parseFloat(document.getElementById('qty-' + id)?.value) || 0;
+        var price = parseFloat(document.getElementById('price-' + id)?.value) || 0;
+        var disc = parseFloat(document.getElementById('disc-' + id)?.value) || 0;
+        var itemSubtotal = (qty * price) - disc;
+        if (itemSubtotal < 0) itemSubtotal = 0;
+        subtotal += itemSubtotal;
+    });
+
+    var descPerc = parseFloat(document.getElementById('descontoPerc').value) || 0;
+    var descVal = parseFloat(document.getElementById('descontoVal').value) || 0;
+    var descontoTotal = descVal + (subtotal * descPerc / 100);
+    var total = subtotal - descontoTotal;
+    if (total < 0) total = 0;
+
+    document.getElementById('displaySubtotal').textContent = formatarMoeda(subtotal);
+    document.getElementById('displayTotal').textContent = formatarMoeda(total);
+}
+
+function atualizarPrecos() {
+    var tbody = document.getElementById('itensBody');
+    var rows = tbody.querySelectorAll('tr');
+    rows.forEach(function(row) {
+        var id = row.id.replace('item-row-', '');
+        var select = row.querySelector('select[name="produto_id"]');
+        if (select && select.value) {
+            selecionarProduto(select, id);
+        }
+    });
+}
+
+function toggleParcelas() {
+    var fp = document.getElementById('formaPagamento').value;
+    var pg = document.getElementById('parcelasGroup');
+    if (fp === 'prazo' || fp === 'cartao_credito') {
+        pg.style.display = 'block';
+    } else {
+        pg.style.display = 'none';
+    }
+}
+
+function formatarMoeda(valor) {
+    return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+// Validate form before submit
+document.getElementById('vendaForm').addEventListener('submit', function(e) {
+    var tbody = document.getElementById('itensBody');
+    if (tbody.children.length === 0) {
+        e.preventDefault();
+        alert('Adicione ao menos um item na venda.');
+        return false;
+    }
+});
+
+// Start with one item row
+adicionarItem();
+</script>
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clientes - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <% if (msg) { %>
+                <div class="alert alert-success" data-dismiss>
+                    <%= msg %>
+                </div>
+            <% } %>
+
+            <div class="page-header">
+                <h1>Clientes</h1>
+                <a href="/clientes/novo" class="btn btn-primary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    Novo Cliente
+                </a>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Lista de Clientes (<%= total %>)</h3>
+                    <form method="GET" action="/clientes" id="formBusca" class="filters" style="margin-bottom:0;">
+                        <div class="search-input">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            <input type="text" name="busca" placeholder="Buscar por nome ou CPF/CNPJ..." value="<%= busca %>" class="form-control" onkeyup="searchDebounce(this, 'formBusca')">
+                        </div>
+                    </form>
+                </div>
+                <div class="table-container">
+                    <% if (clientes.length > 0) { %>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Nome</th>
+                                    <th>CPF/CNPJ</th>
+                                    <th>Telefone</th>
+                                    <th>Celular</th>
+                                    <th>Cidade</th>
+                                    <th>Status</th>
+                                    <th>Acoes</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <% clientes.forEach(function(c) { %>
+                                    <tr>
+                                        <td><strong><%= c.nome %></strong></td>
+                                        <td><%= c.cpf_cnpj || '-' %></td>
+                                        <td><%= c.telefone || '-' %></td>
+                                        <td><%= c.celular || '-' %></td>
+                                        <td><%= c.cidade || '-' %></td>
+                                        <td>
+                                            <% if (c.ativo) { %>
+                                                <span class="badge badge-success">Ativo</span>
+                                            <% } else { %>
+                                                <span class="badge badge-danger">Inativo</span>
+                                            <% } %>
+                                        </td>
+                                        <td>
+                                            <div class="actions">
+                                                <a href="/clientes/editar/<%= c.id %>" class="btn btn-sm btn-secondary">Editar</a>
+                                                <% if (c.ativo) { %>
+                                                    <button onclick="confirmarExclusao('/clientes/excluir/<%= c.id %>', '<%= c.nome %>')" class="btn btn-sm btn-danger">Excluir</button>
+                                                <% } %>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <% }); %>
+                            </tbody>
+                        </table>
+                    <% } else { %>
+                        <div class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+                            <h3>Nenhum cliente encontrado</h3>
+                            <p><%= busca ? 'Tente alterar os termos da busca.' : 'Cadastre o primeiro cliente.' %></p>
+                            <% if (!busca) { %>
+                                <a href="/clientes/novo" class="btn btn-primary">Novo Cliente</a>
+                            <% } %>
+                        </div>
+                    <% } %>
+                </div>
+
+                <% if (totalPages > 1) { %>
+                    <div class="card-footer">
+                        <div class="pagination">
+                            <% if (page > 1) { %>
+                                <a href="/clientes?page=<%= page - 1 %>&busca=<%= busca %>">Anterior</a>
+                            <% } %>
+                            <% for (let i = 1; i <= totalPages; i++) { %>
+                                <% if (i === page) { %>
+                                    <span class="active"><%= i %></span>
+                                <% } else if (i === 1 || i === totalPages || (i >= page - 2 && i <= page + 2)) { %>
+                                    <a href="/clientes?page=<%= i %>&busca=<%= busca %>"><%= i %></a>
+                                <% } else if (i === page - 3 || i === page + 3) { %>
+                                    <span>...</span>
+                                <% } %>
+                            <% } %>
+                            <% if (page < totalPages) { %>
+                                <a href="/clientes?page=<%= page + 1 %>&busca=<%= busca %>">Proximo</a>
+                            <% } %>
+                        </div>
+                    </div>
+                <% } %>
+            </div>
+
+        </div>
+    </div>
+</div>
+<script src="/js/app.js"></script>
+</body>
+</html>

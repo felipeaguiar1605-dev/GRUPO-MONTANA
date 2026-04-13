@@ -1,0 +1,25 @@
+{
+  "name": "nevada-montreal-erp",
+  "version": "1.0.0",
+  "description": "ERP - Nevada Embalagens e Montreal Máquinas e Ferramentas",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "db:init": "node database/init.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "connect-sqlite3": "^0.9.15",
+    "dotenv": "^16.4.7",
+    "ejs": "^3.1.10",
+    "express": "^4.21.1",
+    "express-session": "^1.18.1",
+    "bcryptjs": "^2.4.3",
+    "multer": "^1.4.5-lts.1",
+    "moment": "^2.30.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.7"
+  }
+}

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Selecionar Empresa - ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="empresa-select-page">
+        <div style="text-align: center;">
+            <h1 style="color: white; margin-bottom: 8px; font-size: 28px;">Selecione a Empresa</h1>
+            <p style="color: #9ca3af; margin-bottom: 32px;">Escolha qual empresa deseja acessar</p>
+            <div class="empresa-cards">
+                <% empresas.forEach(function(emp) { %>
+                    <form method="POST" action="/selecionar-empresa" style="display:inline;">
+                        <input type="hidden" name="empresa_id" value="<%= emp.id %>">
+                        <button type="submit" class="empresa-card <%= emp.nome_fantasia.toLowerCase().includes('nevada') ? 'nevada' : 'montreal' %>" style="border:3px solid transparent;">
+                            <div class="icon">
+                                <% if (emp.nome_fantasia.toLowerCase().includes('nevada')) { %>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="32" height="32"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
+                                <% } else { %>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="32" height="32"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+                                <% } %>
+                            </div>
+                            <h3><%= emp.nome_fantasia %></h3>
+                            <p><%= emp.tipo === 'atacado' ? 'Atacado' : emp.tipo === 'varejo' ? 'Varejo' : 'Atacado & Varejo' %></p>
+                        </button>
+                    </form>
+                <% }); %>
+            </div>
+            <a href="/logout" style="color: #9ca3af; font-size: 13px; margin-top: 24px; display: inline-block;">Sair</a>
+        </div>
+    </div>
+</body>
+</html>

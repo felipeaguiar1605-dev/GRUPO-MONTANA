@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Relatorio de Vendas - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <div class="breadcrumb">
+                <a href="/relatorios">Relatorios</a> <span>/</span> <span>Vendas</span>
+            </div>
+
+            <div class="page-header">
+                <h1>Relatorio de Vendas</h1>
+                <a href="/relatorios" class="btn btn-secondary">Voltar</a>
+            </div>
+
+            <!-- Filtros -->
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-body">
+                    <form method="GET" action="/relatorios/vendas" class="filters">
+                        <div class="form-group" style="margin-bottom:0; min-width:140px;">
+                            <label>Data Inicio</label>
+                            <input type="date" name="data_inicio" class="form-control" value="<%= filtros.data_inicio %>">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; min-width:140px;">
+                            <label>Data Fim</label>
+                            <input type="date" name="data_fim" class="form-control" value="<%= filtros.data_fim %>">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; min-width:130px;">
+                            <label>Agrupar por</label>
+                            <select name="agrupar" class="form-control">
+                                <option value="dia" <%= filtros.agrupar === 'dia' ? 'selected' : '' %>>Dia</option>
+                                <option value="mes" <%= filtros.agrupar === 'mes' ? 'selected' : '' %>>Mes</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; align-self:flex-end;">
+                            <button type="submit" class="btn btn-primary">Gerar</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Resumo -->
+            <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                <div class="stat-card">
+                    <div class="stat-icon green">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Total de Vendas</h4>
+                        <div class="stat-value"><%= formatMoney(totalVendas.total) %></div>
+                        <div class="stat-change"><%= totalVendas.count %> venda(s)</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon blue">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Ticket Medio</h4>
+                        <div class="stat-value"><%= formatMoney(ticketMedio) %></div>
+                        <div class="stat-change">por venda</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon cyan">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Media Diaria</h4>
+                        <div class="stat-value"><%= formatMoney(vendasAgrupadas.length > 0 ? totalVendas.total / vendasAgrupadas.length : 0) %></div>
+                        <div class="stat-change"><%= vendasAgrupadas.length %> periodo(s)</div>
+                    </div>
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+
+                <!-- Por Forma de Pagamento -->
+                <div class="card">
+                    <div class="card-header"><h3>Por Forma de Pagamento</h3></div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Forma</th>
+                                    <th>Qtd</th>
+                                    <th>Total</th>
+                                    <th>%</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <% if (porFormaPagamento.length === 0) { %>
+                                    <tr><td colspan="4" style="text-align:center; color:var(--gray-400); padding:24px;">Sem dados</td></tr>
+                                <% } else { %>
+                                    <% porFormaPagamento.forEach(function(f) { %>
+                                        <tr>
+                                            <td><strong><%= f.forma_pagamento || 'N/A' %></strong></td>
+                                            <td><%= f.count %></td>
+                                            <td><%= formatMoney(f.total) %></td>
+                                            <td><%= totalVendas.total > 0 ? ((f.total / totalVendas.total) * 100).toFixed(1) : '0.0' %>%</td>
+                                        </tr>
+                                    <% }); %>
+                                <% } %>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Por Vendedor -->
+                <div class="card">
+                    <div class="card-header"><h3>Por Vendedor</h3></div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Vendedor</th>
+                                    <th>Qtd</th>
+                                    <th>Total</th>
+                                    <th>%</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <% if (porVendedor.length === 0) { %>
+                                    <tr><td colspan="4" style="text-align:center; color:var(--gray-400); padding:24px;">Sem dados</td></tr>
+                                <% } else { %>
+                                    <% porVendedor.forEach(function(v) { %>
+                                        <tr>
+                                            <td><strong><%= v.vendedor_nome || 'Sem vendedor' %></strong></td>
+                                            <td><%= v.count %></td>
+                                            <td><%= formatMoney(v.total) %></td>
+                                            <td><%= totalVendas.total > 0 ? ((v.total / totalVendas.total) * 100).toFixed(1) : '0.0' %>%</td>
+                                        </tr>
+                                    <% }); %>
+                                <% } %>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Vendas Agrupadas -->
+            <div class="card">
+                <div class="card-header"><h3>Vendas por <%= filtros.agrupar === 'mes' ? 'Mes' : 'Dia' %></h3></div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Periodo</th>
+                                <th>Quantidade</th>
+                                <th>Total</th>
+                                <th>Ticket Medio</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% if (vendasAgrupadas.length === 0) { %>
+                                <tr><td colspan="4" style="text-align:center; color:var(--gray-400); padding:24px;">Sem dados no periodo</td></tr>
+                            <% } else { %>
+                                <% vendasAgrupadas.forEach(function(v) { %>
+                                    <tr>
+                                        <td><strong><%= filtros.agrupar === 'mes' ? v.periodo : moment(v.periodo).format('DD/MM/YYYY') %></strong></td>
+                                        <td><%= v.count %></td>
+                                        <td><strong><%= formatMoney(v.total) %></strong></td>
+                                        <td><%= formatMoney(v.count > 0 ? v.total / v.count : 0) %></td>
+                                    </tr>
+                                <% }); %>
+                            <% } %>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+<script src="/js/app.js"></script>
+</body>
+</html>

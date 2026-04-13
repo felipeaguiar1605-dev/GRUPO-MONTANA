@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contas a Pagar - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <% if (typeof mensagem !== 'undefined' && mensagem) { %>
+                <div class="alert alert-success" data-dismiss><%= mensagem %></div>
+            <% } %>
+            <% if (typeof erro !== 'undefined' && erro) { %>
+                <div class="alert alert-danger" data-dismiss><%= erro %></div>
+            <% } %>
+
+            <div class="breadcrumb">
+                <a href="/financeiro">Financeiro</a> <span>/</span> <span>Contas a Pagar</span>
+            </div>
+
+            <div class="page-header">
+                <h1>Contas a Pagar</h1>
+                <a href="/financeiro/pagar/nova" class="btn btn-primary">+ Nova Conta</a>
+            </div>
+
+            <!-- Filtros -->
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-body">
+                    <form method="GET" action="/financeiro/pagar" class="filters">
+                        <div class="form-group" style="margin-bottom:0; min-width:130px;">
+                            <label>Status</label>
+                            <select name="status" class="form-control">
+                                <option value="">Todos</option>
+                                <option value="pendente" <%= filtros.status === 'pendente' ? 'selected' : '' %>>Pendente</option>
+                                <option value="paga" <%= filtros.status === 'paga' ? 'selected' : '' %>>Paga</option>
+                                <option value="vencida" <%= filtros.status === 'vencida' ? 'selected' : '' %>>Vencida</option>
+                                <option value="cancelada" <%= filtros.status === 'cancelada' ? 'selected' : '' %>>Cancelada</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; min-width:180px;">
+                            <label>Fornecedor</label>
+                            <select name="fornecedor_id" class="form-control">
+                                <option value="">Todos</option>
+                                <% fornecedores.forEach(function(f) { %>
+                                    <option value="<%= f.id %>" <%= filtros.fornecedor_id == f.id ? 'selected' : '' %>><%= f.razao_social %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; min-width:140px;">
+                            <label>Vencimento De</label>
+                            <input type="date" name="data_inicio" class="form-control" value="<%= filtros.data_inicio || '' %>">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; min-width:140px;">
+                            <label>Vencimento Ate</label>
+                            <input type="date" name="data_fim" class="form-control" value="<%= filtros.data_fim || '' %>">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; align-self:flex-end;">
+                            <button type="submit" class="btn btn-primary">Filtrar</button>
+                            <a href="/financeiro/pagar" class="btn btn-secondary">Limpar</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Tabela -->
+            <div class="card">
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Descricao</th>
+                                <th>Fornecedor</th>
+                                <th>Valor</th>
+                                <th>Vencimento</th>
+                                <th>Status</th>
+                                <th>Data Pagamento</th>
+                                <th>Acoes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% if (contas.length === 0) { %>
+                                <tr>
+                                    <td colspan="7" style="text-align:center; color:var(--gray-400); padding:32px;">
+                                        Nenhuma conta encontrada
+                                    </td>
+                                </tr>
+                            <% } else { %>
+                                <% contas.forEach(function(c) { %>
+                                    <tr>
+                                        <td>
+                                            <div style="font-weight:500;"><%= c.descricao %></div>
+                                        </td>
+                                        <td><%= c.fornecedor_nome || '-' %></td>
+                                        <td><strong><%= formatMoney(c.valor) %></strong></td>
+                                        <td><%= moment(c.data_vencimento).format('DD/MM/YYYY') %></td>
+                                        <td>
+                                            <% if (c.status === 'paga') { %>
+                                                <span class="badge badge-success">Paga</span>
+                                            <% } else if (c.status === 'vencida') { %>
+                                                <span class="badge badge-danger">Vencida</span>
+                                            <% } else if (c.status === 'cancelada') { %>
+                                                <span class="badge badge-secondary">Cancelada</span>
+                                            <% } else { %>
+                                                <span class="badge badge-warning">Pendente</span>
+                                            <% } %>
+                                        </td>
+                                        <td><%= c.data_pagamento ? moment(c.data_pagamento).format('DD/MM/YYYY') : '-' %></td>
+                                        <td>
+                                            <% if (c.status === 'pendente' || c.status === 'vencida') { %>
+                                                <button type="button" class="btn btn-sm btn-success" onclick="abrirBaixa(<%= c.id %>, <%= c.valor %>)">Baixar</button>
+                                            <% } %>
+                                        </td>
+                                    </tr>
+                                <% }); %>
+                            <% } %>
+                        </tbody>
+                    </table>
+                </div>
+
+                <% if (totalPaginas > 1) { %>
+                    <div class="card-footer">
+                        <div class="pagination">
+                            <% if (pagina > 1) { %>
+                                <a href="/financeiro/pagar?pagina=<%= pagina - 1 %>&status=<%= filtros.status || '' %>&fornecedor_id=<%= filtros.fornecedor_id || '' %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>">&laquo; Anterior</a>
+                            <% } %>
+                            <% for (var i = 1; i <= totalPaginas; i++) { %>
+                                <% if (i === pagina) { %>
+                                    <span class="active"><%= i %></span>
+                                <% } else if (Math.abs(i - pagina) <= 2 || i === 1 || i === totalPaginas) { %>
+                                    <a href="/financeiro/pagar?pagina=<%= i %>&status=<%= filtros.status || '' %>&fornecedor_id=<%= filtros.fornecedor_id || '' %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>"><%= i %></a>
+                                <% } else if (Math.abs(i - pagina) === 3) { %>
+                                    <span>...</span>
+                                <% } %>
+                            <% } %>
+                            <% if (pagina < totalPaginas) { %>
+                                <a href="/financeiro/pagar?pagina=<%= pagina + 1 %>&status=<%= filtros.status || '' %>&fornecedor_id=<%= filtros.fornecedor_id || '' %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>">Proximo &raquo;</a>
+                            <% } %>
+                        </div>
+                    </div>
+                <% } %>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- Modal de Baixa -->
+<div class="modal-overlay" id="modalBaixa">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Registrar Pagamento</h3>
+            <button class="modal-close" onclick="closeModal('modalBaixa')">&times;</button>
+        </div>
+        <form method="POST" id="formBaixa">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Valor Pago</label>
+                    <input type="number" name="valor_pago" id="valorPago" class="form-control" step="0.01" min="0" required>
+                </div>
+                <div class="form-group">
+                    <label>Data do Pagamento</label>
+                    <input type="date" name="data_pagamento" class="form-control" value="<%= new Date().toISOString().split('T')[0] %>">
+                </div>
+                <div class="form-group">
+                    <label>Forma de Pagamento</label>
+                    <select name="forma_pagamento" class="form-control">
+                        <option value="dinheiro">Dinheiro</option>
+                        <option value="pix">PIX</option>
+                        <option value="boleto">Boleto</option>
+                        <option value="cartao_debito">Cartao Debito</option>
+                        <option value="cartao_credito">Cartao Credito</option>
+                        <option value="cheque">Cheque</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('modalBaixa')">Cancelar</button>
+                <button type="submit" class="btn btn-success">Confirmar Pagamento</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+    function abrirBaixa(id, valor) {
+        document.getElementById('formBaixa').action = '/financeiro/pagar/baixa/' + id;
+        document.getElementById('valorPago').value = valor.toFixed(2);
+        openModal('modalBaixa');
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compras - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <% if (typeof mensagem !== 'undefined' && mensagem) { %>
+                <div class="alert alert-success" data-dismiss><%= mensagem %></div>
+            <% } %>
+            <% if (typeof erro !== 'undefined' && erro) { %>
+                <div class="alert alert-danger" data-dismiss><%= erro %></div>
+            <% } %>
+
+            <div class="page-header">
+                <h1>Compras</h1>
+                <a href="/compras/nova" class="btn btn-primary">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    Nova Compra
+                </a>
+            </div>
+
+            <!-- Filtros -->
+            <div class="card" style="margin-bottom: 16px;">
+                <div class="card-body" style="padding: 16px;">
+                    <form method="GET" action="/compras" class="filters">
+                        <div class="form-group" style="margin-bottom: 0; min-width: 180px;">
+                            <label>Fornecedor</label>
+                            <select name="fornecedor_id" class="form-control">
+                                <option value="">Todos</option>
+                                <% fornecedores.forEach(function(f) { %>
+                                    <option value="<%= f.id %>" <%= filtros.fornecedor_id == f.id ? 'selected' : '' %>><%= f.razao_social || f.nome_fantasia %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; min-width: 130px;">
+                            <label>Status</label>
+                            <select name="status" class="form-control">
+                                <option value="">Todos</option>
+                                <option value="cotacao" <%= filtros.status === 'cotacao' ? 'selected' : '' %>>Cotacao</option>
+                                <option value="pedido" <%= filtros.status === 'pedido' ? 'selected' : '' %>>Pedido</option>
+                                <option value="recebida" <%= filtros.status === 'recebida' ? 'selected' : '' %>>Recebida</option>
+                                <option value="cancelada" <%= filtros.status === 'cancelada' ? 'selected' : '' %>>Cancelada</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; min-width: 140px;">
+                            <label>Data Inicio</label>
+                            <input type="date" name="data_inicio" class="form-control" value="<%= filtros.data_inicio || '' %>">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; min-width: 140px;">
+                            <label>Data Fim</label>
+                            <input type="date" name="data_fim" class="form-control" value="<%= filtros.data_fim || '' %>">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; align-self: flex-end;">
+                            <button type="submit" class="btn btn-primary">Filtrar</button>
+                            <a href="/compras" class="btn btn-secondary">Limpar</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Tabela -->
+            <div class="card">
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Numero</th>
+                                <th>Data</th>
+                                <th>Fornecedor</th>
+                                <th>Total</th>
+                                <th>Status</th>
+                                <th>Acoes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% if (compras.length === 0) { %>
+                                <tr>
+                                    <td colspan="6">
+                                        <div class="empty-state">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+                                            <h3>Nenhuma compra encontrada</h3>
+                                            <p>Cadastre sua primeira compra.</p>
+                                            <a href="/compras/nova" class="btn btn-primary">Nova Compra</a>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <% } else { %>
+                                <% compras.forEach(function(c) { %>
+                                    <tr>
+                                        <td><strong><%= c.numero || '#' + c.id %></strong></td>
+                                        <td><%= moment(c.data_compra).format('DD/MM/YYYY') %></td>
+                                        <td><%= c.fornecedor_nome || c.fornecedor_fantasia || '-' %></td>
+                                        <td><strong><%= formatMoney(c.total) %></strong></td>
+                                        <td>
+                                            <% if (c.status === 'cotacao') { %>
+                                                <span class="badge badge-info">Cotacao</span>
+                                            <% } else if (c.status === 'pedido') { %>
+                                                <span class="badge badge-warning">Pedido</span>
+                                            <% } else if (c.status === 'recebida') { %>
+                                                <span class="badge badge-success">Recebida</span>
+                                            <% } else if (c.status === 'cancelada') { %>
+                                                <span class="badge badge-danger">Cancelada</span>
+                                            <% } else { %>
+                                                <span class="badge"><%= c.status %></span>
+                                            <% } %>
+                                        </td>
+                                        <td>
+                                            <div class="actions">
+                                                <a href="/compras/ver/<%= c.id %>" class="btn btn-sm btn-secondary">Ver</a>
+                                                <% if (c.status === 'pedido') { %>
+                                                    <form method="POST" action="/compras/receber/<%= c.id %>" style="display: inline;">
+                                                        <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Confirmar recebimento desta compra?')">Receber</button>
+                                                    </form>
+                                                <% } %>
+                                                <% if (c.status !== 'cancelada' && c.status !== 'recebida') { %>
+                                                    <a href="/compras/cancelar/<%= c.id %>" class="btn btn-sm btn-danger" onclick="return confirm('Cancelar esta compra?')">Cancelar</a>
+                                                <% } %>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <% }); %>
+                            <% } %>
+                        </tbody>
+                    </table>
+                </div>
+
+                <% if (typeof totalPaginas !== 'undefined' && totalPaginas > 1) { %>
+                    <div class="card-footer">
+                        <div class="pagination">
+                            <% if (pagina > 1) { %>
+                                <a href="/compras?pagina=<%= pagina - 1 %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>&fornecedor_id=<%= filtros.fornecedor_id || '' %>&status=<%= filtros.status || '' %>">Anterior</a>
+                            <% } %>
+                            <% for (let i = 1; i <= totalPaginas; i++) { %>
+                                <% if (i === pagina) { %>
+                                    <span class="active"><%= i %></span>
+                                <% } else if (Math.abs(i - pagina) <= 2 || i === 1 || i === totalPaginas) { %>
+                                    <a href="/compras?pagina=<%= i %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>&fornecedor_id=<%= filtros.fornecedor_id || '' %>&status=<%= filtros.status || '' %>"><%= i %></a>
+                                <% } else if (Math.abs(i - pagina) === 3) { %>
+                                    <span>...</span>
+                                <% } %>
+                            <% } %>
+                            <% if (pagina < totalPaginas) { %>
+                                <a href="/compras?pagina=<%= pagina + 1 %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>&fornecedor_id=<%= filtros.fornecedor_id || '' %>&status=<%= filtros.status || '' %>">Proximo</a>
+                            <% } %>
+                        </div>
+                    </div>
+                <% } %>
+            </div>
+
+        </div>
+    </div>
+</div>
+<script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('partials/sidebar') %>
+    <div class="main-content">
+        <%- include('partials/header') %>
+        <div class="page-content">
+
+            <!-- Main stat cards row -->
+            <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+                <!-- Vendas do Mes -->
+                <div class="stat-card">
+                    <div class="stat-icon blue">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
+                            <path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/>
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Vendas do M&ecirc;s</h4>
+                        <div class="stat-value"><%= formatMoney(vendasMesTotal) %></div>
+                        <div class="stat-change"><%= vendasMesCount %> venda<%= vendasMesCount !== 1 ? 's' : '' %> realizada<%= vendasMesCount !== 1 ? 's' : '' %></div>
+                    </div>
+                </div>
+
+                <!-- Compras do Mes -->
+                <div class="stat-card">
+                    <div class="stat-icon yellow">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+                            <line x1="3" y1="6" x2="21" y2="6"/>
+                            <path d="M16 10a4 4 0 01-8 0"/>
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Compras do M&ecirc;s</h4>
+                        <div class="stat-value"><%= formatMoney(comprasMesTotal) %></div>
+                        <div class="stat-change"><%= comprasMesCount %> compra<%= comprasMesCount !== 1 ? 's' : '' %> realizada<%= comprasMesCount !== 1 ? 's' : '' %></div>
+                    </div>
+                </div>
+
+                <!-- Contas a Pagar -->
+                <div class="stat-card">
+                    <div class="stat-icon red">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="12" y1="1" x2="12" y2="23"/>
+                            <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Contas a Pagar</h4>
+                        <div class="stat-value"><%= formatMoney(contasPagarTotal) %></div>
+                        <div class="stat-change"><%= contasPagarCount %> conta<%= contasPagarCount !== 1 ? 's' : '' %> pendente<%= contasPagarCount !== 1 ? 's' : '' %></div>
+                    </div>
+                </div>
+
+                <!-- Contas a Receber -->
+                <div class="stat-card">
+                    <div class="stat-icon green">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+                            <polyline points="17 6 23 6 23 12"/>
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Contas a Receber</h4>
+                        <div class="stat-value"><%= formatMoney(contasReceberTotal) %></div>
+                        <div class="stat-change"><%= contasReceberCount %> conta<%= contasReceberCount !== 1 ? 's' : '' %> pendente<%= contasReceberCount !== 1 ? 's' : '' %></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Secondary stat cards row -->
+            <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                <!-- Total Produtos -->
+                <div class="stat-card">
+                    <div class="stat-icon cyan">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/>
+                            <line x1="7" y1="7" x2="7.01" y2="7"/>
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Total Produtos</h4>
+                        <div class="stat-value"><%= totalProdutos %></div>
+                        <div class="stat-change">produtos cadastrados</div>
+                    </div>
+                </div>
+
+                <!-- Total Clientes -->
+                <div class="stat-card">
+                    <div class="stat-icon blue">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/>
+                            <circle cx="9" cy="7" r="4"/>
+                            <path d="M23 21v-2a4 4 0 00-3-3.87"/>
+                            <path d="M16 3.13a4 4 0 010 7.75"/>
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Total Clientes</h4>
+                        <div class="stat-value"><%= totalClientes %></div>
+                        <div class="stat-change">clientes ativos</div>
+                    </div>
+                </div>
+
+                <!-- Estoque Baixo -->
+                <div class="stat-card">
+                    <div class="stat-icon <%= estoqueBaixo > 0 ? 'red' : 'green' %>">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                            <line x1="12" y1="9" x2="12" y2="13"/>
+                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Estoque Baixo</h4>
+                        <div class="stat-value"><%= estoqueBaixo %></div>
+                        <div class="stat-change">produto<%= estoqueBaixo !== 1 ? 's' : '' %> abaixo do m&iacute;nimo</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom grid: recent sales + top products -->
+            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 24px;">
+
+                <!-- Vendas Recentes -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Vendas Recentes</h3>
+                        <a href="/vendas" class="btn btn-sm btn-secondary">Ver todas</a>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>N&ordm;</th>
+                                    <th>Cliente</th>
+                                    <th>Data</th>
+                                    <th>Valor</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <% if (vendasRecentes.length === 0) { %>
+                                    <tr>
+                                        <td colspan="5" style="text-align: center; color: var(--gray-400); padding: 32px;">
+                                            Nenhuma venda registrada
+                                        </td>
+                                    </tr>
+                                <% } else { %>
+                                    <% vendasRecentes.forEach(function(venda) { %>
+                                        <tr>
+                                            <td><strong>#<%= venda.numero || venda.id %></strong></td>
+                                            <td><%= venda.cliente_nome || 'Consumidor' %></td>
+                                            <td><%= moment(venda.data_venda).format('DD/MM/YYYY HH:mm') %></td>
+                                            <td><strong><%= formatMoney(venda.total) %></strong></td>
+                                            <td>
+                                                <% if (venda.status === 'finalizada') { %>
+                                                    <span class="badge badge-success">Finalizada</span>
+                                                <% } else if (venda.status === 'cancelada') { %>
+                                                    <span class="badge badge-danger">Cancelada</span>
+                                                <% } else if (venda.status === 'devolvida') { %>
+                                                    <span class="badge badge-warning">Devolvida</span>
+                                                <% } else { %>
+                                                    <span class="badge badge-info">Aberta</span>
+                                                <% } %>
+                                            </td>
+                                        </tr>
+                                    <% }); %>
+                                <% } %>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Top Produtos do Mes -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Top Produtos do M&ecirc;s</h3>
+                    </div>
+                    <div class="card-body" style="padding: 0;">
+                        <% if (topProdutos.length === 0) { %>
+                            <div style="text-align: center; color: var(--gray-400); padding: 32px;">
+                                Nenhuma venda no m&ecirc;s
+                            </div>
+                        <% } else { %>
+                            <div style="display: flex; flex-direction: column;">
+                                <% topProdutos.forEach(function(produto, index) { %>
+                                    <div style="display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--gray-100);">
+                                        <div style="width: 28px; height: 28px; border-radius: 50%; background: <%= index < 3 ? 'var(--primary)' : 'var(--gray-200)' %>; color: <%= index < 3 ? 'white' : 'var(--gray-600)' %>; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0;">
+                                            <%= index + 1 %>
+                                        </div>
+                                        <div style="flex: 1; min-width: 0;">
+                                            <div style="font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                                <%= produto.nome %>
+                                            </div>
+                                            <div style="font-size: 12px; color: var(--gray-500);">
+                                                <%= produto.qtd_vendida %> un. &mdash; <%= formatMoney(produto.total_vendido) %>
+                                            </div>
+                                        </div>
+                                    </div>
+                                <% }); %>
+                            </div>
+                        <% } %>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+    </div>
+</div>
+<script src="/js/app.js"></script>
+</body>
+</html>

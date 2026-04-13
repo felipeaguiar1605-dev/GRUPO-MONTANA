@@ -1,0 +1,27 @@
+<header class="top-header">
+    <div style="display: flex; align-items: center; gap: 12px;">
+        <button onclick="toggleSidebar()" style="display:none; background:none; border:none; cursor:pointer; font-size:20px;" class="mobile-menu">&#9776;</button>
+        <span class="page-title"><%= typeof title !== 'undefined' ? title : 'Dashboard' %></span>
+    </div>
+    <div class="header-actions">
+        <% if (empresaAtual) { %>
+        <div class="empresa-switcher">
+            <select onchange="trocarEmpresa(this)">
+                <% if (typeof empresas !== 'undefined' && Array.isArray(empresas)) { %>
+                    <% empresas.forEach(function(emp) { %>
+                        <option value="<%= emp.id %>" <%= empresaAtual.id === emp.id ? 'selected' : '' %>><%= emp.nome_fantasia %></option>
+                    <% }); %>
+                <% } else { %>
+                    <option selected><%= empresaAtual.nome_fantasia %></option>
+                <% } %>
+            </select>
+        </div>
+        <% } %>
+        <div class="user-menu">
+            <% if (usuario) { %>
+                <div class="user-avatar"><%= usuario.nome.charAt(0) %></div>
+                <span><%= usuario.nome %></span>
+            <% } %>
+        </div>
+    </div>
+</header>

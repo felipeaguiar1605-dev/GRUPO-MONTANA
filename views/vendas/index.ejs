@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vendas - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <% if (mensagem) { %>
+                <div class="alert alert-success" data-dismiss><%= mensagem %></div>
+            <% } %>
+            <% if (erro) { %>
+                <div class="alert alert-danger" data-dismiss><%= erro %></div>
+            <% } %>
+
+            <div class="page-header">
+                <h1>Vendas</h1>
+                <a href="/vendas/nova" class="btn btn-primary">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    Nova Venda
+                </a>
+            </div>
+
+            <!-- Filtros -->
+            <div class="card" style="margin-bottom: 16px;">
+                <div class="card-body" style="padding: 16px;">
+                    <form method="GET" action="/vendas" id="filtroForm">
+                        <div class="filters">
+                            <div class="form-group" style="margin-bottom: 0; min-width: 140px;">
+                                <label>Data Inicial</label>
+                                <input type="date" name="date_from" class="form-control" value="<%= filtros.date_from %>">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0; min-width: 140px;">
+                                <label>Data Final</label>
+                                <input type="date" name="date_to" class="form-control" value="<%= filtros.date_to %>">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0; min-width: 140px;">
+                                <label>Status</label>
+                                <select name="status" class="form-control">
+                                    <option value="">Todos</option>
+                                    <option value="finalizada" <%= filtros.status === 'finalizada' ? 'selected' : '' %>>Finalizada</option>
+                                    <option value="aberta" <%= filtros.status === 'aberta' ? 'selected' : '' %>>Aberta</option>
+                                    <option value="cancelada" <%= filtros.status === 'cancelada' ? 'selected' : '' %>>Cancelada</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0; min-width: 160px;">
+                                <label>Vendedor</label>
+                                <select name="vendedor_id" class="form-control">
+                                    <option value="">Todos</option>
+                                    <% vendedores.forEach(function(v) { %>
+                                        <option value="<%= v.id %>" <%= filtros.vendedor_id == v.id ? 'selected' : '' %>><%= v.nome %></option>
+                                    <% }); %>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 180px;">
+                                <label>Buscar</label>
+                                <input type="text" name="search" class="form-control" placeholder="Cliente ou numero..." value="<%= filtros.search %>">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0; align-self: flex-end;">
+                                <button type="submit" class="btn btn-primary">Filtrar</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Tabela de Vendas -->
+            <div class="card">
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Numero</th>
+                                <th>Data</th>
+                                <th>Cliente</th>
+                                <th>Vendedor</th>
+                                <th>Total</th>
+                                <th>Pagamento</th>
+                                <th>Status</th>
+                                <th>Acoes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% if (vendas.length === 0) { %>
+                                <tr>
+                                    <td colspan="8">
+                                        <div class="empty-state">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg>
+                                            <h3>Nenhuma venda encontrada</h3>
+                                            <p>Comece criando uma nova venda.</p>
+                                            <a href="/vendas/nova" class="btn btn-primary">Nova Venda</a>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <% } else { %>
+                                <% vendas.forEach(function(venda) { %>
+                                    <tr>
+                                        <td><strong><%= venda.numero || '#' + venda.id %></strong></td>
+                                        <td><%= moment(venda.data_venda).format('DD/MM/YYYY HH:mm') %></td>
+                                        <td><%= venda.cliente_nome || 'Consumidor' %></td>
+                                        <td><%= venda.vendedor_nome || '-' %></td>
+                                        <td><strong><%= formatMoney(venda.total) %></strong></td>
+                                        <td>
+                                            <% if (venda.forma_pagamento === 'dinheiro') { %>
+                                                Dinheiro
+                                            <% } else if (venda.forma_pagamento === 'pix') { %>
+                                                PIX
+                                            <% } else if (venda.forma_pagamento === 'cartao_debito') { %>
+                                                Debito
+                                            <% } else if (venda.forma_pagamento === 'cartao_credito') { %>
+                                                Credito
+                                            <% } else if (venda.forma_pagamento === 'boleto') { %>
+                                                Boleto
+                                            <% } else if (venda.forma_pagamento === 'prazo') { %>
+                                                A Prazo
+                                            <% } else if (venda.forma_pagamento === 'cheque') { %>
+                                                Cheque
+                                            <% } else { %>
+                                                <%= venda.forma_pagamento %>
+                                            <% } %>
+                                        </td>
+                                        <td>
+                                            <% if (venda.status === 'finalizada') { %>
+                                                <span class="badge badge-success">Finalizada</span>
+                                            <% } else if (venda.status === 'aberta') { %>
+                                                <span class="badge badge-info">Aberta</span>
+                                            <% } else if (venda.status === 'cancelada') { %>
+                                                <span class="badge badge-danger">Cancelada</span>
+                                            <% } else if (venda.status === 'devolvida') { %>
+                                                <span class="badge badge-warning">Devolvida</span>
+                                            <% } else { %>
+                                                <span class="badge badge-secondary"><%= venda.status %></span>
+                                            <% } %>
+                                        </td>
+                                        <td>
+                                            <div class="actions">
+                                                <a href="/vendas/ver/<%= venda.id %>" class="btn btn-sm btn-secondary" title="Ver detalhes">Ver</a>
+                                                <% if (venda.status !== 'cancelada') { %>
+                                                    <a href="#" onclick="confirmarCancelamento('/vendas/cancelar/<%= venda.id %>', '<%= venda.numero || venda.id %>')" class="btn btn-sm btn-danger" title="Cancelar venda">Cancelar</a>
+                                                <% } %>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <% }); %>
+                            <% } %>
+                        </tbody>
+                    </table>
+                </div>
+
+                <% if (pagination.totalPages > 1) { %>
+                    <div class="card-footer">
+                        <div class="pagination">
+                            <% if (pagination.page > 1) { %>
+                                <a href="/vendas?page=<%= pagination.page - 1 %>&date_from=<%= filtros.date_from %>&date_to=<%= filtros.date_to %>&status=<%= filtros.status %>&vendedor_id=<%= filtros.vendedor_id %>&search=<%= filtros.search %>">Anterior</a>
+                            <% } %>
+                            <% for (let i = 1; i <= pagination.totalPages; i++) { %>
+                                <% if (i === pagination.page) { %>
+                                    <span class="active"><%= i %></span>
+                                <% } else if (Math.abs(i - pagination.page) <= 2 || i === 1 || i === pagination.totalPages) { %>
+                                    <a href="/vendas?page=<%= i %>&date_from=<%= filtros.date_from %>&date_to=<%= filtros.date_to %>&status=<%= filtros.status %>&vendedor_id=<%= filtros.vendedor_id %>&search=<%= filtros.search %>"><%= i %></a>
+                                <% } else if (Math.abs(i - pagination.page) === 3) { %>
+                                    <span>...</span>
+                                <% } %>
+                            <% } %>
+                            <% if (pagination.page < pagination.totalPages) { %>
+                                <a href="/vendas?page=<%= pagination.page + 1 %>&date_from=<%= filtros.date_from %>&date_to=<%= filtros.date_to %>&status=<%= filtros.status %>&vendedor_id=<%= filtros.vendedor_id %>&search=<%= filtros.search %>">Proximo</a>
+                            <% } %>
+                        </div>
+                        <div style="text-align: center; font-size: 12px; color: var(--gray-500); margin-top: 8px;">
+                            Mostrando pagina <%= pagination.page %> de <%= pagination.totalPages %> (<%= pagination.totalRows %> registro<%= pagination.totalRows !== 1 ? 's' : '' %>)
+                        </div>
+                    </div>
+                <% } %>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+function confirmarCancelamento(url, numero) {
+    if (confirm('Tem certeza que deseja cancelar a venda "' + numero + '"? Esta acao ira reverter o estoque e cancelar comissoes e contas a receber.')) {
+        window.location.href = url;
+    }
+}
+</script>
+</body>
+</html>

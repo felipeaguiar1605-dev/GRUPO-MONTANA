@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Relatorio de Estoque - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <div class="breadcrumb">
+                <a href="/relatorios">Relatorios</a> <span>/</span> <span>Estoque</span>
+            </div>
+
+            <div class="page-header">
+                <h1>Relatorio de Estoque</h1>
+                <a href="/relatorios" class="btn btn-secondary">Voltar</a>
+            </div>
+
+            <!-- Resumo -->
+            <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                <div class="stat-card">
+                    <div class="stat-icon cyan">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Total de Itens</h4>
+                        <div class="stat-value"><%= valorEstoque.total_itens %></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon blue">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Valor (Custo)</h4>
+                        <div class="stat-value"><%= formatMoney(valorEstoque.valor_custo) %></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon green">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Valor (Venda)</h4>
+                        <div class="stat-value"><%= formatMoney(valorEstoque.valor_venda) %></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Itens Abaixo do Minimo -->
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-header">
+                    <h3>Itens Abaixo do Estoque Minimo</h3>
+                    <span class="badge badge-danger"><%= abaixoMinimo.length %> iten(s)</span>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Codigo</th>
+                                <th>Produto</th>
+                                <th>Categoria</th>
+                                <th>Quantidade</th>
+                                <th>Est. Minimo</th>
+                                <th>Faltam</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% if (abaixoMinimo.length === 0) { %>
+                                <tr>
+                                    <td colspan="6" style="text-align:center; color:var(--success); padding:24px;">
+                                        Todos os itens estao acima do estoque minimo
+                                    </td>
+                                </tr>
+                            <% } else { %>
+                                <% abaixoMinimo.forEach(function(p) { %>
+                                    <tr style="background:var(--danger-light);">
+                                        <td><%= p.codigo || '-' %></td>
+                                        <td><strong><%= p.nome %></strong></td>
+                                        <td><%= p.categoria_nome || '-' %></td>
+                                        <td><strong style="color:var(--danger);"><%= p.quantidade %></strong></td>
+                                        <td><%= p.estoque_minimo %></td>
+                                        <td><strong style="color:var(--danger);"><%= (p.estoque_minimo - p.quantidade).toFixed(2) %></strong></td>
+                                    </tr>
+                                <% }); %>
+                            <% } %>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Itens sem Movimentacao -->
+            <div class="card">
+                <div class="card-header">
+                    <h3>Itens sem Movimentacao (30 dias)</h3>
+                    <span class="badge badge-warning"><%= semMovimento.length %> iten(s)</span>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Codigo</th>
+                                <th>Produto</th>
+                                <th>Categoria</th>
+                                <th>Quantidade</th>
+                                <th>Valor Custo</th>
+                                <th>Ultima Movimentacao</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% if (semMovimento.length === 0) { %>
+                                <tr>
+                                    <td colspan="6" style="text-align:center; color:var(--success); padding:24px;">
+                                        Todos os itens tiveram movimentacao nos ultimos 30 dias
+                                    </td>
+                                </tr>
+                            <% } else { %>
+                                <% semMovimento.forEach(function(p) { %>
+                                    <tr>
+                                        <td><%= p.codigo || '-' %></td>
+                                        <td><strong><%= p.nome %></strong></td>
+                                        <td><%= p.categoria_nome || '-' %></td>
+                                        <td><%= p.quantidade %></td>
+                                        <td><%= formatMoney(p.preco_custo) %></td>
+                                        <td><%= p.ultima_movimentacao ? moment(p.ultima_movimentacao).format('DD/MM/YYYY') : 'Nunca' %></td>
+                                    </tr>
+                                <% }); %>
+                            <% } %>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+<script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fornecedores - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <% if (msg) { %>
+                <div class="alert alert-success" data-dismiss>
+                    <%= msg %>
+                </div>
+            <% } %>
+
+            <div class="page-header">
+                <h1>Fornecedores</h1>
+                <a href="/fornecedores/novo" class="btn btn-primary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    Novo Fornecedor
+                </a>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Lista de Fornecedores (<%= total %>)</h3>
+                    <form method="GET" action="/fornecedores" id="formBusca" class="filters" style="margin-bottom:0;">
+                        <div class="search-input">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            <input type="text" name="busca" placeholder="Buscar por razao social, nome fantasia ou CNPJ..." value="<%= busca %>" class="form-control" onkeyup="searchDebounce(this, 'formBusca')">
+                        </div>
+                    </form>
+                </div>
+                <div class="table-container">
+                    <% if (fornecedores.length > 0) { %>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Razao Social</th>
+                                    <th>Nome Fantasia</th>
+                                    <th>CNPJ</th>
+                                    <th>Telefone</th>
+                                    <th>Cidade</th>
+                                    <th>Status</th>
+                                    <th>Acoes</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <% fornecedores.forEach(function(f) { %>
+                                    <tr>
+                                        <td><strong><%= f.razao_social %></strong></td>
+                                        <td><%= f.nome_fantasia || '-' %></td>
+                                        <td><%= f.cnpj || '-' %></td>
+                                        <td><%= f.telefone || '-' %></td>
+                                        <td><%= f.cidade || '-' %></td>
+                                        <td>
+                                            <% if (f.ativo) { %>
+                                                <span class="badge badge-success">Ativo</span>
+                                            <% } else { %>
+                                                <span class="badge badge-danger">Inativo</span>
+                                            <% } %>
+                                        </td>
+                                        <td>
+                                            <div class="actions">
+                                                <a href="/fornecedores/editar/<%= f.id %>" class="btn btn-sm btn-secondary">Editar</a>
+                                                <% if (f.ativo) { %>
+                                                    <button onclick="confirmarExclusao('/fornecedores/excluir/<%= f.id %>', '<%= f.razao_social %>')" class="btn btn-sm btn-danger">Excluir</button>
+                                                <% } %>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <% }); %>
+                            </tbody>
+                        </table>
+                    <% } else { %>
+                        <div class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                            <h3>Nenhum fornecedor encontrado</h3>
+                            <p><%= busca ? 'Tente alterar os termos da busca.' : 'Cadastre o primeiro fornecedor.' %></p>
+                            <% if (!busca) { %>
+                                <a href="/fornecedores/novo" class="btn btn-primary">Novo Fornecedor</a>
+                            <% } %>
+                        </div>
+                    <% } %>
+                </div>
+
+                <% if (totalPages > 1) { %>
+                    <div class="card-footer">
+                        <div class="pagination">
+                            <% if (page > 1) { %>
+                                <a href="/fornecedores?page=<%= page - 1 %>&busca=<%= busca %>">Anterior</a>
+                            <% } %>
+                            <% for (let i = 1; i <= totalPages; i++) { %>
+                                <% if (i === page) { %>
+                                    <span class="active"><%= i %></span>
+                                <% } else if (i === 1 || i === totalPages || (i >= page - 2 && i <= page + 2)) { %>
+                                    <a href="/fornecedores?page=<%= i %>&busca=<%= busca %>"><%= i %></a>
+                                <% } else if (i === page - 3 || i === page + 3) { %>
+                                    <span>...</span>
+                                <% } %>
+                            <% } %>
+                            <% if (page < totalPages) { %>
+                                <a href="/fornecedores?page=<%= page + 1 %>&busca=<%= busca %>">Proximo</a>
+                            <% } %>
+                        </div>
+                    </div>
+                <% } %>
+            </div>
+
+        </div>
+    </div>
+</div>
+<script src="/js/app.js"></script>
+</body>
+</html>

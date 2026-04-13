@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %> - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="app-layout">
+        <%- include('../partials/sidebar') %>
+        <div class="main-content">
+            <%- include('../partials/header') %>
+            <div class="page-content">
+
+                <% if (erro) { %>
+                    <div class="alert alert-danger" data-dismiss><%= erro %></div>
+                <% } %>
+
+                <div class="breadcrumb">
+                    <a href="/produtos">Produtos</a>
+                    <span>/</span>
+                    <span><%= produto ? 'Editar' : 'Novo Produto' %></span>
+                </div>
+
+                <div class="page-header">
+                    <h1><%= produto ? 'Editar Produto' : 'Novo Produto' %></h1>
+                </div>
+
+                <div class="card">
+                    <div class="card-body">
+                        <form method="POST" action="<%= produto ? '/produtos/editar/' + produto.id : '/produtos/novo' %>">
+
+                            <!-- Identificacao -->
+                            <div class="form-row-3">
+                                <div class="form-group">
+                                    <label for="codigo">Codigo</label>
+                                    <input type="text" id="codigo" name="codigo" class="form-control" value="<%= produto ? produto.codigo || '' : '' %>" placeholder="Codigo interno">
+                                </div>
+                                <div class="form-group">
+                                    <label for="codigo_barras">Codigo de Barras</label>
+                                    <input type="text" id="codigo_barras" name="codigo_barras" class="form-control" value="<%= produto ? produto.codigo_barras || '' : '' %>" placeholder="EAN/GTIN">
+                                </div>
+                                <div class="form-group">
+                                    <label for="nome">Nome <span style="color: var(--danger);">*</span></label>
+                                    <input type="text" id="nome" name="nome" class="form-control" value="<%= produto ? produto.nome || '' : '' %>" placeholder="Nome do produto" required>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="descricao">Descricao</label>
+                                <textarea id="descricao" name="descricao" class="form-control" placeholder="Descricao detalhada do produto"><%= produto ? produto.descricao || '' : '' %></textarea>
+                            </div>
+
+                            <!-- Classificacao -->
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="categoria_id">Categoria</label>
+                                    <select id="categoria_id" name="categoria_id" class="form-control">
+                                        <option value="">Selecione uma categoria</option>
+                                        <% categorias.forEach(function(cat) { %>
+                                            <option value="<%= cat.id %>" <%= produto && produto.categoria_id == cat.id ? 'selected' : '' %>><%= cat.nome %></option>
+                                        <% }); %>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="unidade_id">Unidade</label>
+                                    <select id="unidade_id" name="unidade_id" class="form-control">
+                                        <option value="">Selecione uma unidade</option>
+                                        <% unidades.forEach(function(un) { %>
+                                            <option value="<%= un.id %>" <%= produto && produto.unidade_id == un.id ? 'selected' : '' %>><%= un.sigla %> - <%= un.descricao %></option>
+                                        <% }); %>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <!-- Fiscal -->
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="ncm">NCM</label>
+                                    <input type="text" id="ncm" name="ncm" class="form-control" value="<%= produto ? produto.ncm || '' : '' %>" placeholder="Codigo NCM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="cfop_venda">CFOP Venda</label>
+                                    <input type="text" id="cfop_venda" name="cfop_venda" class="form-control" value="<%= produto ? produto.cfop_venda || '' : '' %>" placeholder="Ex: 5102">
+                                </div>
+                            </div>
+
+                            <!-- Precos -->
+                            <div class="form-row-4">
+                                <div class="form-group">
+                                    <label for="preco_custo">Preco de Custo</label>
+                                    <input type="number" id="preco_custo" name="preco_custo" class="form-control" value="<%= produto ? produto.preco_custo || 0 : 0 %>" step="0.01" min="0" onchange="calcularPrecoVenda()">
+                                </div>
+                                <div class="form-group">
+                                    <label for="margem_lucro">Margem de Lucro (%)</label>
+                                    <input type="number" id="margem_lucro" name="margem_lucro" class="form-control" value="<%= produto ? produto.margem_lucro || 0 : 0 %>" step="0.01" min="0" onchange="calcularPrecoVenda()" oninput="calcularPrecoVenda()">
+                                </div>
+                                <div class="form-group">
+                                    <label for="preco_venda">Preco de Venda</label>
+                                    <input type="number" id="preco_venda" name="preco_venda" class="form-control" value="<%= produto ? produto.preco_venda || 0 : 0 %>" step="0.01" min="0">
+                                </div>
+                                <div class="form-group">
+                                    <label for="preco_atacado">Preco Atacado</label>
+                                    <input type="number" id="preco_atacado" name="preco_atacado" class="form-control" value="<%= produto ? produto.preco_atacado || 0 : 0 %>" step="0.01" min="0">
+                                </div>
+                            </div>
+
+                            <!-- Estoque e logistica -->
+                            <div class="form-row-4">
+                                <div class="form-group">
+                                    <label for="estoque_minimo">Estoque Minimo</label>
+                                    <input type="number" id="estoque_minimo" name="estoque_minimo" class="form-control" value="<%= produto ? produto.estoque_minimo || 0 : 0 %>" step="0.01" min="0">
+                                </div>
+                                <div class="form-group">
+                                    <label for="estoque_maximo">Estoque Maximo</label>
+                                    <input type="number" id="estoque_maximo" name="estoque_maximo" class="form-control" value="<%= produto ? produto.estoque_maximo || 0 : 0 %>" step="0.01" min="0">
+                                </div>
+                                <div class="form-group">
+                                    <label for="localizacao">Localizacao</label>
+                                    <input type="text" id="localizacao" name="localizacao" class="form-control" value="<%= produto ? produto.localizacao || '' : '' %>" placeholder="Ex: Prateleira A3">
+                                </div>
+                                <div class="form-group">
+                                    <label for="peso">Peso (kg)</label>
+                                    <input type="number" id="peso" name="peso" class="form-control" value="<%= produto ? produto.peso || 0 : 0 %>" step="0.001" min="0">
+                                </div>
+                            </div>
+
+                            <!-- Status -->
+                            <div class="form-group">
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                    <input type="checkbox" name="ativo" value="1" <%= (!produto || produto.ativo) ? 'checked' : '' %> style="width: 18px; height: 18px;">
+                                    Produto ativo
+                                </label>
+                            </div>
+
+                            <!-- Acoes -->
+                            <div style="display: flex; gap: 12px; margin-top: 24px;">
+                                <button type="submit" class="btn btn-primary">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                    <%= produto ? 'Salvar Alteracoes' : 'Criar Produto' %>
+                                </button>
+                                <a href="/produtos" class="btn btn-secondary">Cancelar</a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+    <script src="/js/app.js"></script>
+    <script>
+        // Auto-calculo de preco de venda ao alterar margem ou custo
+        document.getElementById('margem_lucro').addEventListener('input', calcularPrecoVenda);
+        document.getElementById('preco_custo').addEventListener('input', calcularPrecoVenda);
+
+        function calcularPrecoVenda() {
+            var custo = parseFloat(document.getElementById('preco_custo').value) || 0;
+            var margem = parseFloat(document.getElementById('margem_lucro').value) || 0;
+            var precoVendaInput = document.getElementById('preco_venda');
+            if (custo > 0 && margem > 0) {
+                precoVendaInput.value = (custo * (1 + margem / 100)).toFixed(2);
+            }
+        }
+    </script>
+</body>
+</html>

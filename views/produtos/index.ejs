@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Produtos - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="app-layout">
+        <%- include('../partials/sidebar') %>
+        <div class="main-content">
+            <%- include('../partials/header') %>
+            <div class="page-content">
+
+                <% if (msg) { %>
+                    <div class="alert alert-success" data-dismiss><%= msg %></div>
+                <% } %>
+                <% if (erro) { %>
+                    <div class="alert alert-danger" data-dismiss><%= erro %></div>
+                <% } %>
+
+                <div class="page-header">
+                    <h1>Produtos</h1>
+                    <a href="/produtos/novo" class="btn btn-primary">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        Novo Produto
+                    </a>
+                </div>
+
+                <!-- Filtros -->
+                <form method="GET" action="/produtos" id="formBusca">
+                    <div class="filters">
+                        <div class="search-input">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            <input type="text" name="busca" placeholder="Buscar por nome ou codigo..." value="<%= busca %>" class="form-control" oninput="searchDebounce(this, 'formBusca')">
+                        </div>
+                        <select name="categoria_id" class="form-control" style="width: auto; min-width: 180px;" onchange="document.getElementById('formBusca').submit()">
+                            <option value="">Todas as categorias</option>
+                            <% categorias.forEach(function(cat) { %>
+                                <option value="<%= cat.id %>" <%= categoriaFiltro == cat.id ? 'selected' : '' %>><%= cat.nome %></option>
+                            <% }); %>
+                        </select>
+                        <button type="submit" class="btn btn-secondary">Filtrar</button>
+                    </div>
+                </form>
+
+                <!-- Tabela -->
+                <div class="card">
+                    <% if (produtos.length > 0) { %>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Codigo</th>
+                                        <th>Nome</th>
+                                        <th>Categoria</th>
+                                        <th>Unidade</th>
+                                        <th>Preco Custo</th>
+                                        <th>Preco Venda</th>
+                                        <th>Estoque</th>
+                                        <th>Status</th>
+                                        <th>Acoes</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <% produtos.forEach(function(p) { %>
+                                        <tr>
+                                            <td><%= p.codigo || '-' %></td>
+                                            <td><strong><%= p.nome %></strong></td>
+                                            <td><%= p.categoria_nome || '-' %></td>
+                                            <td><%= p.unidade_sigla || '-' %></td>
+                                            <td><%= formatMoney(p.preco_custo) %></td>
+                                            <td><%= formatMoney(p.preco_venda) %></td>
+                                            <td>
+                                                <% if (p.estoque_minimo > 0 && p.estoque <= p.estoque_minimo) { %>
+                                                    <span style="color: var(--danger); font-weight: 600;"><%= formatNumber(p.estoque) %></span>
+                                                <% } else { %>
+                                                    <%= formatNumber(p.estoque) %>
+                                                <% } %>
+                                            </td>
+                                            <td>
+                                                <% if (p.ativo) { %>
+                                                    <span class="badge badge-success">Ativo</span>
+                                                <% } else { %>
+                                                    <span class="badge badge-danger">Inativo</span>
+                                                <% } %>
+                                            </td>
+                                            <td>
+                                                <div class="actions">
+                                                    <a href="/produtos/editar/<%= p.id %>" class="btn btn-sm btn-secondary" title="Editar">
+                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                                    </a>
+                                                    <% if (p.ativo) { %>
+                                                        <a href="#" onclick="confirmarExclusao('/produtos/excluir/<%= p.id %>', '<%= p.nome %>')" class="btn btn-sm btn-danger" title="Desativar">
+                                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                                                        </a>
+                                                    <% } else { %>
+                                                        <a href="/produtos/ativar/<%= p.id %>" class="btn btn-sm btn-success" title="Reativar">
+                                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg>
+                                                        </a>
+                                                    <% } %>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    <% }); %>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Paginacao -->
+                        <% if (totalPaginas > 1) { %>
+                            <div class="card-footer">
+                                <div style="display: flex; align-items: center; justify-content: space-between;">
+                                    <span style="font-size: 13px; color: var(--gray-500);">
+                                        Mostrando <%= ((pagina - 1) * 20) + 1 %> a <%= Math.min(pagina * 20, total) %> de <%= total %> produtos
+                                    </span>
+                                    <div class="pagination">
+                                        <% if (pagina > 1) { %>
+                                            <a href="/produtos?pagina=<%= pagina - 1 %>&busca=<%= busca %>&categoria_id=<%= categoriaFiltro %>">Anterior</a>
+                                        <% } %>
+                                        <% for (let i = 1; i <= totalPaginas; i++) { %>
+                                            <% if (i === pagina) { %>
+                                                <span class="active"><%= i %></span>
+                                            <% } else if (Math.abs(i - pagina) <= 2 || i === 1 || i === totalPaginas) { %>
+                                                <a href="/produtos?pagina=<%= i %>&busca=<%= busca %>&categoria_id=<%= categoriaFiltro %>"><%= i %></a>
+                                            <% } else if (Math.abs(i - pagina) === 3) { %>
+                                                <span>...</span>
+                                            <% } %>
+                                        <% } %>
+                                        <% if (pagina < totalPaginas) { %>
+                                            <a href="/produtos?pagina=<%= pagina + 1 %>&busca=<%= busca %>&categoria_id=<%= categoriaFiltro %>">Proximo</a>
+                                        <% } %>
+                                    </div>
+                                </div>
+                            </div>
+                        <% } %>
+
+                    <% } else { %>
+                        <div class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                            <h3>Nenhum produto encontrado</h3>
+                            <% if (busca || categoriaFiltro) { %>
+                                <p>Tente alterar os filtros de busca.</p>
+                                <a href="/produtos" class="btn btn-secondary">Limpar filtros</a>
+                            <% } else { %>
+                                <p>Comece cadastrando seu primeiro produto.</p>
+                                <a href="/produtos/novo" class="btn btn-primary">Novo Produto</a>
+                            <% } %>
+                        </div>
+                    <% } %>
+                </div>
+
+            </div>
+        </div>
+    </div>
+    <script src="/js/app.js"></script>
+</body>
+</html>

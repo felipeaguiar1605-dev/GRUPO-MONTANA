@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %> - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <div class="breadcrumb">
+                <a href="/fornecedores">Fornecedores</a>
+                <span>/</span>
+                <span><%= title %></span>
+            </div>
+
+            <div class="page-header">
+                <h1><%= title %></h1>
+            </div>
+
+            <% if (erro) { %>
+                <div class="alert alert-danger">
+                    <%= erro %>
+                </div>
+            <% } %>
+
+            <div class="card">
+                <div class="card-body">
+                    <form method="POST" action="/fornecedores/<%= fornecedor.id ? 'editar/' + fornecedor.id : 'novo' %>">
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="razao_social">Razao Social *</label>
+                                <input type="text" name="razao_social" id="razao_social" class="form-control" value="<%= fornecedor.razao_social || '' %>" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="nome_fantasia">Nome Fantasia</label>
+                                <input type="text" name="nome_fantasia" id="nome_fantasia" class="form-control" value="<%= fornecedor.nome_fantasia || '' %>">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="cnpj">CNPJ</label>
+                                <input type="text" name="cnpj" id="cnpj" class="form-control" value="<%= fornecedor.cnpj || '' %>" maxlength="18" onkeyup="maskCpfCnpj(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="inscricao_estadual">Inscricao Estadual</label>
+                                <input type="text" name="inscricao_estadual" id="inscricao_estadual" class="form-control" value="<%= fornecedor.inscricao_estadual || '' %>">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="contato">Pessoa de Contato</label>
+                                <input type="text" name="contato" id="contato" class="form-control" value="<%= fornecedor.contato || '' %>">
+                            </div>
+                            <div class="form-group">
+                                <label for="email">Email</label>
+                                <input type="email" name="email" id="email" class="form-control" value="<%= fornecedor.email || '' %>">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="telefone">Telefone</label>
+                                <input type="text" name="telefone" id="telefone" class="form-control" value="<%= fornecedor.telefone || '' %>" maxlength="15" onkeyup="maskTelefone(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="celular">Celular</label>
+                                <input type="text" name="celular" id="celular" class="form-control" value="<%= fornecedor.celular || '' %>" maxlength="15" onkeyup="maskTelefone(this)">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="endereco">Endereco</label>
+                                <input type="text" name="endereco" id="endereco" class="form-control" value="<%= fornecedor.endereco || '' %>">
+                            </div>
+                            <div class="form-group">
+                                <label for="numero">Numero</label>
+                                <input type="text" name="numero" id="numero" class="form-control" value="<%= fornecedor.numero || '' %>">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="complemento">Complemento</label>
+                                <input type="text" name="complemento" id="complemento" class="form-control" value="<%= fornecedor.complemento || '' %>">
+                            </div>
+                            <div class="form-group">
+                                <label for="bairro">Bairro</label>
+                                <input type="text" name="bairro" id="bairro" class="form-control" value="<%= fornecedor.bairro || '' %>">
+                            </div>
+                        </div>
+
+                        <div class="form-row-3">
+                            <div class="form-group">
+                                <label for="cidade">Cidade</label>
+                                <input type="text" name="cidade" id="cidade" class="form-control" value="<%= fornecedor.cidade || '' %>">
+                            </div>
+                            <div class="form-group">
+                                <label for="estado">Estado</label>
+                                <select name="estado" id="estado" class="form-control">
+                                    <option value="">Selecione...</option>
+                                    <% const estados = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO']; %>
+                                    <% estados.forEach(function(uf) { %>
+                                        <option value="<%= uf %>" <%= (fornecedor.estado || '') === uf ? 'selected' : '' %>><%= uf %></option>
+                                    <% }); %>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="cep">CEP</label>
+                                <input type="text" name="cep" id="cep" class="form-control" value="<%= fornecedor.cep || '' %>" maxlength="9" onkeyup="maskCep(this)">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="prazo_entrega">Prazo de Entrega (dias)</label>
+                                <input type="number" name="prazo_entrega" id="prazo_entrega" class="form-control" value="<%= fornecedor.prazo_entrega || 0 %>" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="condicao_pagamento">Condicao de Pagamento</label>
+                                <input type="text" name="condicao_pagamento" id="condicao_pagamento" class="form-control" value="<%= fornecedor.condicao_pagamento || '' %>" placeholder="Ex: 30/60/90 dias">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="observacoes">Observacoes</label>
+                            <textarea name="observacoes" id="observacoes" class="form-control" rows="3"><%= fornecedor.observacoes || '' %></textarea>
+                        </div>
+
+                        <div class="btn-group" style="margin-top: 20px;">
+                            <button type="submit" class="btn btn-primary">
+                                <%= fornecedor.id ? 'Salvar Alteracoes' : 'Cadastrar Fornecedor' %>
+                            </button>
+                            <a href="/fornecedores" class="btn btn-secondary">Cancelar</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+<script src="/js/app.js"></script>
+</body>
+</html>

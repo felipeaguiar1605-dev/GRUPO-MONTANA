@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Categorias - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="app-layout">
+        <%- include('../partials/sidebar') %>
+        <div class="main-content">
+            <%- include('../partials/header') %>
+            <div class="page-content">
+
+                <% if (msg) { %>
+                    <div class="alert alert-success" data-dismiss><%= msg %></div>
+                <% } %>
+                <% if (erro) { %>
+                    <div class="alert alert-danger" data-dismiss><%= erro %></div>
+                <% } %>
+
+                <div class="page-header">
+                    <h1>Categorias</h1>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 24px;">
+
+                    <!-- Formulario para nova categoria -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Nova Categoria</h3>
+                        </div>
+                        <div class="card-body">
+                            <form method="POST" action="/categorias/novo">
+                                <div class="form-group">
+                                    <label for="nome">Nome <span style="color: var(--danger);">*</span></label>
+                                    <input type="text" id="nome" name="nome" class="form-control" placeholder="Nome da categoria" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="descricao">Descricao</label>
+                                    <textarea id="descricao" name="descricao" class="form-control" placeholder="Descricao opcional" rows="3"></textarea>
+                                </div>
+                                <button type="submit" class="btn btn-primary btn-block">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                    Adicionar Categoria
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Lista de categorias -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Categorias Cadastradas</h3>
+                            <span class="badge badge-secondary"><%= categorias.length %> categorias</span>
+                        </div>
+                        <% if (categorias.length > 0) { %>
+                            <div class="table-container">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Nome</th>
+                                            <th>Descricao</th>
+                                            <th>Produtos</th>
+                                            <th>Status</th>
+                                            <th>Acoes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <% categorias.forEach(function(cat) { %>
+                                            <tr id="cat-row-<%= cat.id %>">
+                                                <td>
+                                                    <strong class="cat-nome-<%= cat.id %>"><%= cat.nome %></strong>
+                                                </td>
+                                                <td>
+                                                    <span class="cat-desc-<%= cat.id %>"><%= cat.descricao || '-' %></span>
+                                                </td>
+                                                <td>
+                                                    <span class="badge badge-info"><%= cat.total_produtos %></span>
+                                                </td>
+                                                <td>
+                                                    <% if (cat.ativa) { %>
+                                                        <span class="badge badge-success">Ativa</span>
+                                                    <% } else { %>
+                                                        <span class="badge badge-danger">Inativa</span>
+                                                    <% } %>
+                                                </td>
+                                                <td>
+                                                    <div class="actions">
+                                                        <button type="button" class="btn btn-sm btn-secondary" onclick="editarCategoria(<%= cat.id %>, '<%= cat.nome.replace(/'/g, "\\'") %>', '<%= (cat.descricao || '').replace(/'/g, "\\'") %>')" title="Editar">
+                                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                                        </button>
+                                                        <a href="#" onclick="confirmarExclusao('/categorias/excluir/<%= cat.id %>', '<%= cat.nome.replace(/'/g, "\\'") %>')" class="btn btn-sm btn-danger" title="Excluir">
+                                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                                                        </a>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        <% }); %>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <% } else { %>
+                            <div class="empty-state">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                                <h3>Nenhuma categoria cadastrada</h3>
+                                <p>Use o formulario ao lado para adicionar a primeira categoria.</p>
+                            </div>
+                        <% } %>
+                    </div>
+
+                </div>
+
+                <!-- Modal de edicao -->
+                <div class="modal-overlay" id="modalEditar">
+                    <div class="modal">
+                        <div class="modal-header">
+                            <h3>Editar Categoria</h3>
+                            <button class="modal-close" onclick="closeModal('modalEditar')">&times;</button>
+                        </div>
+                        <form method="POST" id="formEditar" action="">
+                            <div class="modal-body">
+                                <div class="form-group">
+                                    <label for="edit_nome">Nome <span style="color: var(--danger);">*</span></label>
+                                    <input type="text" id="edit_nome" name="nome" class="form-control" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="edit_descricao">Descricao</label>
+                                    <textarea id="edit_descricao" name="descricao" class="form-control" rows="3"></textarea>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" onclick="closeModal('modalEditar')">Cancelar</button>
+                                <button type="submit" class="btn btn-primary">Salvar</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+    <script src="/js/app.js"></script>
+    <script>
+        function editarCategoria(id, nome, descricao) {
+            document.getElementById('formEditar').action = '/categorias/editar/' + id;
+            document.getElementById('edit_nome').value = nome;
+            document.getElementById('edit_descricao').value = descricao === '-' ? '' : descricao;
+            openModal('modalEditar');
+        }
+    </script>
+</body>
+</html>

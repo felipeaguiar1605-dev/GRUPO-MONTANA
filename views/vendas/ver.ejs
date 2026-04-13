@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Venda <%= venda.numero %> - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <% if (typeof mensagem !== 'undefined' && mensagem) { %>
+                <div class="alert alert-success" data-dismiss><%= mensagem %></div>
+            <% } %>
+            <% if (typeof erro !== 'undefined' && erro) { %>
+                <div class="alert alert-danger" data-dismiss><%= erro %></div>
+            <% } %>
+
+            <div class="breadcrumb">
+                <a href="/vendas">Vendas</a> <span>/</span> <span><%= venda.numero %></span>
+            </div>
+
+            <div class="page-header">
+                <div>
+                    <h1>Venda <%= venda.numero %></h1>
+                    <div style="margin-top: 4px;">
+                        <% if (venda.status === 'finalizada') { %>
+                            <span class="badge badge-success">Finalizada</span>
+                        <% } else if (venda.status === 'aberta') { %>
+                            <span class="badge badge-info">Aberta</span>
+                        <% } else if (venda.status === 'cancelada') { %>
+                            <span class="badge badge-danger">Cancelada</span>
+                        <% } else if (venda.status === 'devolvida') { %>
+                            <span class="badge badge-warning">Devolvida</span>
+                        <% } %>
+                    </div>
+                </div>
+                <div class="btn-group">
+                    <a href="/vendas" class="btn btn-secondary">Voltar</a>
+                    <% if (venda.status === 'finalizada') { %>
+                        <a href="#" onclick="confirmarCancelamento()" class="btn btn-danger">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                            Cancelar Venda
+                        </a>
+                    <% } %>
+                </div>
+            </div>
+
+            <!-- Info Cards -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                <div class="card">
+                    <div class="card-body">
+                        <div style="font-size: 12px; color: var(--gray-500); text-transform: uppercase; font-weight: 600; margin-bottom: 8px;">Informacoes</div>
+                        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
+                            <div><strong>Data:</strong> <%= moment(venda.data_venda).format('DD/MM/YYYY HH:mm') %></div>
+                            <div><strong>Tipo:</strong> <%= venda.tipo === 'atacado' ? 'Atacado' : 'Varejo' %></div>
+                            <div><strong>Pagamento:</strong>
+                                <% if (venda.forma_pagamento === 'dinheiro') { %>Dinheiro<% } %>
+                                <% if (venda.forma_pagamento === 'pix') { %>PIX<% } %>
+                                <% if (venda.forma_pagamento === 'cartao_debito') { %>Cartao Debito<% } %>
+                                <% if (venda.forma_pagamento === 'cartao_credito') { %>Cartao Credito<% } %>
+                                <% if (venda.forma_pagamento === 'boleto') { %>Boleto<% } %>
+                                <% if (venda.forma_pagamento === 'prazo') { %>A Prazo (<%= venda.parcelas %>x)<% } %>
+                                <% if (venda.forma_pagamento === 'cheque') { %>Cheque<% } %>
+                            </div>
+                            <% if (venda.usuario_nome) { %>
+                                <div><strong>Operador:</strong> <%= venda.usuario_nome %></div>
+                            <% } %>
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-body">
+                        <div style="font-size: 12px; color: var(--gray-500); text-transform: uppercase; font-weight: 600; margin-bottom: 8px;">Cliente</div>
+                        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
+                            <div><strong>Nome:</strong> <%= venda.cliente_nome || 'Consumidor Final' %></div>
+                            <% if (venda.cliente_cpf_cnpj) { %>
+                                <div><strong>CPF/CNPJ:</strong> <%= venda.cliente_cpf_cnpj %></div>
+                            <% } %>
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-body">
+                        <div style="font-size: 12px; color: var(--gray-500); text-transform: uppercase; font-weight: 600; margin-bottom: 8px;">Vendedor</div>
+                        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
+                            <% if (venda.vendedor_nome) { %>
+                                <div><strong>Nome:</strong> <%= venda.vendedor_nome %></div>
+                                <% if (typeof comissao !== 'undefined' && comissao) { %>
+                                    <div><strong>Comissao:</strong> <%= comissao.percentual %>% = <%= formatMoney(comissao.valor) %></div>
+                                    <div><strong>Status:</strong>
+                                        <% if (comissao.status === 'pendente') { %>
+                                            <span class="badge badge-warning">Pendente</span>
+                                        <% } else if (comissao.status === 'paga') { %>
+                                            <span class="badge badge-success">Paga</span>
+                                        <% } else { %>
+                                            <span class="badge badge-danger">Cancelada</span>
+                                        <% } %>
+                                    </div>
+                                <% } %>
+                            <% } else { %>
+                                <div style="color: var(--gray-400);">Sem vendedor vinculado</div>
+                            <% } %>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Itens da Venda -->
+            <div class="card" style="margin-bottom: 16px;">
+                <div class="card-header">
+                    <h3>Itens da Venda</h3>
+                    <span style="font-size: 13px; color: var(--gray-500);"><%= itens.length %> ite<%= itens.length !== 1 ? 'ns' : 'm' %></span>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Codigo</th>
+                                <th>Produto</th>
+                                <th style="text-align: right;">Qtd</th>
+                                <th style="text-align: right;">Preco Unit.</th>
+                                <th style="text-align: right;">Desconto</th>
+                                <th style="text-align: right;">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% itens.forEach(function(item, idx) { %>
+                                <tr>
+                                    <td><%= idx + 1 %></td>
+                                    <td><%= item.produto_codigo || '-' %></td>
+                                    <td><strong><%= item.produto_nome %></strong></td>
+                                    <td style="text-align: right;"><%= formatNumber(item.quantidade) %></td>
+                                    <td style="text-align: right;"><%= formatMoney(item.preco_unitario) %></td>
+                                    <td style="text-align: right;"><%= formatMoney(item.desconto) %></td>
+                                    <td style="text-align: right;"><strong><%= formatMoney(item.total) %></strong></td>
+                                </tr>
+                            <% }); %>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Totais -->
+            <div class="card">
+                <div class="card-body">
+                    <div style="max-width: 400px; margin-left: auto;">
+                        <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px;">
+                            <span style="color: var(--gray-600);">Subtotal:</span>
+                            <span><%= formatMoney(venda.subtotal) %></span>
+                        </div>
+                        <% if (venda.desconto_percentual > 0 || venda.desconto_valor > 0) { %>
+                            <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; color: var(--danger);">
+                                <span>Desconto:</span>
+                                <span>- <%= formatMoney(venda.desconto_valor) %></span>
+                            </div>
+                        <% } %>
+                        <hr style="border: none; border-top: 2px solid var(--gray-200); margin: 4px 0;">
+                        <div style="display: flex; justify-content: space-between; padding: 8px 0;">
+                            <span style="font-weight: 700; font-size: 18px; color: var(--dark);">Total:</span>
+                            <span style="font-weight: 700; font-size: 24px; color: var(--primary);"><%= formatMoney(venda.total) %></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <% if (venda.observacoes) { %>
+                <div class="card" style="margin-top: 16px;">
+                    <div class="card-header">
+                        <h3>Observacoes</h3>
+                    </div>
+                    <div class="card-body">
+                        <p style="color: var(--gray-600); white-space: pre-wrap;"><%= venda.observacoes %></p>
+                    </div>
+                </div>
+            <% } %>
+
+        </div>
+    </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+function confirmarCancelamento() {
+    if (confirm('Tem certeza que deseja cancelar esta venda? O estoque sera revertido, comissoes canceladas e contas a receber canceladas.')) {
+        window.location.href = '/vendas/cancelar/<%= venda.id %>';
+    }
+}
+</script>
+</body>
+</html>

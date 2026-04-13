@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fluxo de Caixa - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <div class="breadcrumb">
+                <a href="/financeiro">Financeiro</a> <span>/</span> <span>Fluxo de Caixa</span>
+            </div>
+
+            <div class="page-header">
+                <h1>Fluxo de Caixa</h1>
+                <a href="/financeiro" class="btn btn-secondary">Voltar</a>
+            </div>
+
+            <!-- Resumo -->
+            <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                <div class="stat-card">
+                    <div class="stat-icon green">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Total Entradas</h4>
+                        <div class="stat-value" style="color:var(--success);"><%= formatMoney(totais.total_entradas) %></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon red">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Total Saidas</h4>
+                        <div class="stat-value" style="color:var(--danger);"><%= formatMoney(totais.total_saidas) %></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon <%= (totais.total_entradas - totais.total_saidas) >= 0 ? 'blue' : 'red' %>">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Saldo</h4>
+                        <div class="stat-value"><%= formatMoney(totais.total_entradas - totais.total_saidas) %></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filtros -->
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-body">
+                    <form method="GET" action="/financeiro/fluxo" class="filters">
+                        <div class="form-group" style="margin-bottom:0; min-width:140px;">
+                            <label>Data Inicio</label>
+                            <input type="date" name="data_inicio" class="form-control" value="<%= filtros.data_inicio || '' %>">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; min-width:140px;">
+                            <label>Data Fim</label>
+                            <input type="date" name="data_fim" class="form-control" value="<%= filtros.data_fim || '' %>">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; min-width:130px;">
+                            <label>Tipo</label>
+                            <select name="tipo" class="form-control">
+                                <option value="">Todos</option>
+                                <option value="entrada" <%= filtros.tipo === 'entrada' ? 'selected' : '' %>>Entrada</option>
+                                <option value="saida" <%= filtros.tipo === 'saida' ? 'selected' : '' %>>Saida</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; align-self:flex-end;">
+                            <button type="submit" class="btn btn-primary">Filtrar</button>
+                            <a href="/financeiro/fluxo" class="btn btn-secondary">Limpar</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Tabela -->
+            <div class="card">
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Data</th>
+                                <th>Tipo</th>
+                                <th>Categoria</th>
+                                <th>Descricao</th>
+                                <th>Valor</th>
+                                <th>Forma Pgto</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% if (movimentos.length === 0) { %>
+                                <tr>
+                                    <td colspan="6" style="text-align:center; color:var(--gray-400); padding:32px;">
+                                        Nenhum movimento encontrado
+                                    </td>
+                                </tr>
+                            <% } else { %>
+                                <% movimentos.forEach(function(m) { %>
+                                    <tr>
+                                        <td><%= moment(m.data_movimento).format('DD/MM/YYYY') %></td>
+                                        <td>
+                                            <% if (m.tipo === 'entrada') { %>
+                                                <span class="badge badge-success">Entrada</span>
+                                            <% } else { %>
+                                                <span class="badge badge-danger">Saida</span>
+                                            <% } %>
+                                        </td>
+                                        <td><%= m.categoria || '-' %></td>
+                                        <td><%= m.descricao %></td>
+                                        <td>
+                                            <strong style="color: <%= m.tipo === 'entrada' ? 'var(--success)' : 'var(--danger)' %>;">
+                                                <%= m.tipo === 'entrada' ? '+' : '-' %> <%= formatMoney(m.valor) %>
+                                            </strong>
+                                        </td>
+                                        <td><%= m.forma_pagamento || '-' %></td>
+                                    </tr>
+                                <% }); %>
+                            <% } %>
+                        </tbody>
+                        <% if (movimentos.length > 0) { %>
+                            <tfoot>
+                                <tr style="background:var(--gray-50); font-weight:700;">
+                                    <td colspan="4" style="text-align:right; padding:12px 16px;">Totais:</td>
+                                    <td colspan="2" style="padding:12px 16px;">
+                                        <div style="color:var(--success);">+ <%= formatMoney(totais.total_entradas) %></div>
+                                        <div style="color:var(--danger);">- <%= formatMoney(totais.total_saidas) %></div>
+                                        <div style="border-top:1px solid var(--gray-300); margin-top:4px; padding-top:4px;">
+                                            = <%= formatMoney(totais.total_entradas - totais.total_saidas) %>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tfoot>
+                        <% } %>
+                    </table>
+                </div>
+
+                <% if (totalPages > 1) { %>
+                    <div class="card-footer">
+                        <div class="pagination">
+                            <% if (page > 1) { %>
+                                <a href="/financeiro/fluxo?page=<%= page - 1 %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>&tipo=<%= filtros.tipo || '' %>">&laquo; Anterior</a>
+                            <% } %>
+                            <% for (let i = 1; i <= totalPages; i++) { %>
+                                <% if (i === page) { %>
+                                    <span class="active"><%= i %></span>
+                                <% } else { %>
+                                    <a href="/financeiro/fluxo?page=<%= i %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>&tipo=<%= filtros.tipo || '' %>"><%= i %></a>
+                                <% } %>
+                            <% } %>
+                            <% if (page < totalPages) { %>
+                                <a href="/financeiro/fluxo?page=<%= page + 1 %>&data_inicio=<%= filtros.data_inicio || '' %>&data_fim=<%= filtros.data_fim || '' %>&tipo=<%= filtros.tipo || '' %>">Proximo &raquo;</a>
+                            <% } %>
+                        </div>
+                    </div>
+                <% } %>
+            </div>
+
+            <div style="margin-top:12px; font-size:13px; color:var(--gray-500);">
+                Mostrando <%= movimentos.length %> de <%= total %> movimento(s)
+            </div>
+
+        </div>
+    </div>
+</div>
+<script src="/js/app.js"></script>
+</body>
+</html>

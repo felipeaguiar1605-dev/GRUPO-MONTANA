@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estoque - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <% if (typeof mensagem !== 'undefined' && mensagem) { %>
+                <div class="alert alert-success" data-dismiss><%= mensagem %></div>
+            <% } %>
+            <% if (typeof erro !== 'undefined' && erro) { %>
+                <div class="alert alert-danger" data-dismiss><%= erro %></div>
+            <% } %>
+
+            <div class="page-header">
+                <h1>Estoque</h1>
+                <div class="btn-group">
+                    <a href="/estoque/movimentacoes" class="btn btn-secondary">Movimentacoes</a>
+                    <a href="/estoque/ajuste" class="btn btn-warning">Ajuste</a>
+                </div>
+            </div>
+
+            <!-- Resumo -->
+            <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                <div class="stat-card">
+                    <div class="stat-icon cyan">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Total de Itens</h4>
+                        <div class="stat-value"><%= formatNumber(resumo.total_itens) %></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon <%= resumo.abaixo_minimo > 0 ? 'red' : 'green' %>">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Abaixo do Minimo</h4>
+                        <div class="stat-value" style="color: var(--danger);"><%= resumo.abaixo_minimo %></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon blue">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <h4>Valor em Estoque</h4>
+                        <div class="stat-value"><%= formatMoney(resumo.valor_total) %></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Busca -->
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-body" style="padding:12px 20px;">
+                    <form method="GET" action="/estoque" id="searchForm" class="filters">
+                        <div class="search-input" style="flex:1;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            <input type="text" name="busca" placeholder="Buscar por nome ou codigo..." value="<%= busca %>" oninput="searchDebounce(this, 'searchForm')">
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Tabela de Estoque -->
+            <div class="card">
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Codigo</th>
+                                <th>Nome</th>
+                                <th>Categoria</th>
+                                <th>Quantidade</th>
+                                <th>Est. Minimo</th>
+                                <th>Est. Maximo</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <% if (produtos.length === 0) { %>
+                                <tr>
+                                    <td colspan="7" style="text-align:center; color:var(--gray-400); padding:32px;">
+                                        Nenhum produto encontrado
+                                    </td>
+                                </tr>
+                            <% } else { %>
+                                <% produtos.forEach(function(p) { %>
+                                    <%
+                                        var statusClass = 'badge-success';
+                                        var statusText = 'OK';
+                                        if (p.estoque_minimo > 0 && p.quantidade <= p.estoque_minimo) {
+                                            statusClass = 'badge-danger';
+                                            statusText = 'Baixo';
+                                        } else if (p.estoque_maximo > 0 && p.quantidade >= p.estoque_maximo) {
+                                            statusClass = 'badge-warning';
+                                            statusText = 'Excesso';
+                                        }
+                                        var qtdColor = (p.estoque_minimo > 0 && p.quantidade <= p.estoque_minimo) ? 'var(--danger)' : 'var(--success)';
+                                    %>
+                                    <tr style="<%= statusText === 'Baixo' ? 'background: var(--danger-light);' : '' %>">
+                                        <td><%= p.codigo || '-' %></td>
+                                        <td><strong><%= p.nome %></strong></td>
+                                        <td><%= p.categoria_nome || '-' %></td>
+                                        <td><strong style="font-size:16px; color:<%= qtdColor %>;"><%= p.quantidade %></strong></td>
+                                        <td><%= p.estoque_minimo %></td>
+                                        <td><%= p.estoque_maximo %></td>
+                                        <td><span class="badge <%= statusClass %>"><%= statusText %></span></td>
+                                    </tr>
+                                <% }); %>
+                            <% } %>
+                        </tbody>
+                    </table>
+                </div>
+
+                <% if (totalPaginas > 1) { %>
+                    <div class="card-footer">
+                        <div class="pagination">
+                            <% if (pagina > 1) { %>
+                                <a href="/estoque?pagina=<%= pagina - 1 %>&busca=<%= busca %>">&laquo; Anterior</a>
+                            <% } %>
+                            <% for (var i = 1; i <= totalPaginas; i++) { %>
+                                <% if (i === pagina) { %>
+                                    <span class="active"><%= i %></span>
+                                <% } else if (Math.abs(i - pagina) <= 2 || i === 1 || i === totalPaginas) { %>
+                                    <a href="/estoque?pagina=<%= i %>&busca=<%= busca %>"><%= i %></a>
+                                <% } else if (Math.abs(i - pagina) === 3) { %>
+                                    <span>...</span>
+                                <% } %>
+                            <% } %>
+                            <% if (pagina < totalPaginas) { %>
+                                <a href="/estoque?pagina=<%= pagina + 1 %>&busca=<%= busca %>">Proximo &raquo;</a>
+                            <% } %>
+                        </div>
+                    </div>
+                <% } %>
+            </div>
+
+        </div>
+    </div>
+</div>
+<script src="/js/app.js"></script>
+</body>
+</html>

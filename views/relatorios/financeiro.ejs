@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Relatorio Financeiro - Nevada & Montreal ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <%- include('../partials/sidebar') %>
+    <div class="main-content">
+        <%- include('../partials/header') %>
+        <div class="page-content">
+
+            <div class="breadcrumb">
+                <a href="/relatorios">Relatorios</a> <span>/</span> <span>Financeiro</span>
+            </div>
+
+            <div class="page-header">
+                <h1>Relatorio Financeiro</h1>
+                <a href="/relatorios" class="btn btn-secondary">Voltar</a>
+            </div>
+
+            <!-- Filtros -->
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-body">
+                    <form method="GET" action="/relatorios/financeiro" class="filters">
+                        <div class="form-group" style="margin-bottom:0; min-width:140px;">
+                            <label>Data Inicio</label>
+                            <input type="date" name="data_inicio" class="form-control" value="<%= filtros.data_inicio %>">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; min-width:140px;">
+                            <label>Data Fim</label>
+                            <input type="date" name="data_fim" class="form-control" value="<%= filtros.data_fim %>">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0; align-self:flex-end;">
+                            <button type="submit" class="btn btn-primary">Gerar</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- DRE Simplificado -->
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+
+                <!-- Receitas -->
+                <div class="card">
+                    <div class="card-header" style="background:var(--success-light);">
+                        <h3 style="color:var(--success);">Receitas</h3>
+                        <strong style="color:var(--success); font-size:18px;"><%= formatMoney(totalReceitas) %></strong>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Categoria</th>
+                                    <th>Valor</th>
+                                    <th>%</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <% if (receitas.length === 0) { %>
+                                    <tr><td colspan="3" style="text-align:center; color:var(--gray-400); padding:24px;">Sem receitas no periodo</td></tr>
+                                <% } else { %>
+                                    <% receitas.forEach(function(r) { %>
+                                        <tr>
+                                            <td><strong><%= r.categoria || 'Outros' %></strong></td>
+                                            <td><%= formatMoney(r.total) %></td>
+                                            <td><%= totalReceitas > 0 ? ((r.total / totalReceitas) * 100).toFixed(1) : '0.0' %>%</td>
+                                        </tr>
+                                    <% }); %>
+                                <% } %>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Despesas -->
+                <div class="card">
+                    <div class="card-header" style="background:var(--danger-light);">
+                        <h3 style="color:var(--danger);">Despesas</h3>
+                        <strong style="color:var(--danger); font-size:18px;"><%= formatMoney(totalDespesas) %></strong>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Categoria</th>
+                                    <th>Valor</th>
+                                    <th>%</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <% if (despesas.length === 0) { %>
+                                    <tr><td colspan="3" style="text-align:center; color:var(--gray-400); padding:24px;">Sem despesas no periodo</td></tr>
+                                <% } else { %>
+                                    <% despesas.forEach(function(d) { %>
+                                        <tr>
+                                            <td><strong><%= d.categoria || 'Outros' %></strong></td>
+                                            <td><%= formatMoney(d.total) %></td>
+                                            <td><%= totalDespesas > 0 ? ((d.total / totalDespesas) * 100).toFixed(1) : '0.0' %>%</td>
+                                        </tr>
+                                    <% }); %>
+                                <% } %>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Resultado -->
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-body" style="text-align:center; padding:24px;">
+                    <h3 style="color:var(--gray-500); font-size:14px; text-transform:uppercase; margin-bottom:8px;">Resultado do Periodo</h3>
+                    <div style="font-size:36px; font-weight:700; color:<%= resultado >= 0 ? 'var(--success)' : 'var(--danger)' %>;">
+                        <%= formatMoney(resultado) %>
+                    </div>
+                    <div style="font-size:14px; color:var(--gray-500); margin-top:4px;">
+                        <%= resultado >= 0 ? 'Lucro' : 'Prejuizo' %> no periodo
+                    </div>
+                </div>
+            </div>
+
+            <!-- Projecao -->
+            <div class="card">
+                <div class="card-header"><h3>Projecao de Fluxo (Proximos 30 dias)</h3></div>
+                <div class="card-body">
+                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:24px; text-align:center;">
+                        <div>
+                            <div style="font-size:12px; color:var(--gray-500); text-transform:uppercase; margin-bottom:4px;">A Receber</div>
+                            <div style="font-size:24px; font-weight:700; color:var(--success);"><%= formatMoney(projecaoReceber) %></div>
+                        </div>
+                        <div>
+                            <div style="font-size:12px; color:var(--gray-500); text-transform:uppercase; margin-bottom:4px;">A Pagar</div>
+                            <div style="font-size:24px; font-weight:700; color:var(--danger);"><%= formatMoney(projecaoPagar) %></div>
+                        </div>
+                        <div>
+                            <div style="font-size:12px; color:var(--gray-500); text-transform:uppercase; margin-bottom:4px;">Saldo Projetado</div>
+                            <div style="font-size:24px; font-weight:700; color:<%= (projecaoReceber - projecaoPagar) >= 0 ? 'var(--success)' : 'var(--danger)' %>;">
+                                <%= formatMoney(projecaoReceber - projecaoPagar) %>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+<script src="/js/app.js"></script>
+</body>
+</html>
