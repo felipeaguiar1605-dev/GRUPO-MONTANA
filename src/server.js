@@ -114,6 +114,15 @@ app.use('/api/volus',        require('./routes/volus'));
 // ─── Módulo Jurídico ─────────────────────────────────────────
 app.use('/api/juridico',     require('./routes/juridico'));
 
+// ─── Diagnóstico Noturno ──────────────────────────────────────
+app.get('/api/diagnostico/ultimo', (req, res) => {
+  const diagFile = path.join(__dirname, '..', 'data', 'diagnostico_noturno.json');
+  if (!fs.existsSync(diagFile)) return res.json({ ok: false, msg: 'Nenhum diagnóstico executado ainda' });
+  try {
+    res.json({ ok: true, ...JSON.parse(fs.readFileSync(diagFile, 'utf8')) });
+  } catch(e) { res.json({ ok: false, msg: 'Erro: ' + e.message }); }
+});
+
 // ─── Módulo Usuários (gestão de acesso) ─────────────────────────
 app.use('/api/usuarios',     require('./routes/usuarios').router);
 
@@ -258,151 +267,59 @@ try {
           receita_liquida REAL DEFAULT 0,
           despesas_total REAL DEFAULT 0,
           resultado REAL DEFAULT 0,
+          qtd_nfs
           qtd_nfs INTEGER DEFAULT 0,
+          pis_a_pagar REAL DEFAULT 0,
+          cofins_a_pagar REAL DEFAULT 0,
+          irpj_estimado REAL DEFAULT 0,
+          csll_estimado REAL DEFAULT 0,
           gerado_em TEXT DEFAULT (datetime('now','localtime')),
           obs TEXT
         )`).run();
 
-        const receita  = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) total, COUNT(*) qtd FROM notas_fiscais WHERE data_emissao BETWEEN ? AND ?`).get(from, to);
+        const receita  = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) total, COALESCE(SUM(retencao),0) ret, COUNT(*) qtd, COALESCE(SUM(pis),0) pis, COALESCE(SUM(cofins),0) cofins FROM notas_fiscais WHERE data_emissao BETWEEN ? AND ?`).get(from, to);
         const despesas = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) total FROM despesas WHERE data_iso BETWEEN ? AND ?`).get(from, to);
-        const retencoes = db.prepare(`SELECT COALESCE(SUM(retencao),0) total FROM notas_fiscais WHERE data_emissao BETWEEN ? AND ?`).get(from, to);
 
-        const receita_bruta = receita.total || 0;
-        const ret  = retencoes.total || 0;
-        const desp = despesas.total || 0;
+        const recBruta  = receita.total || 0;
+        const retencoes = receita.ret || 0;
+        const recLiq    = recBruta - retencoes;
+        const resultado = recLiq - (despesas.total || 0);
+        const pisAPagar = Math.max(+(recBruta * 0.0165 - (receita.pis || 0)).toFixed(2), 0);
+        const cofinsAPagar = Math.max(+(recBruta * 0.076 - (receita.cofins || 0)).toFixed(2), 0);
+        // IRPJ estimado: 15% sobre lucro presumido (8% da receita bruta de serviços)
+        const lucroPresumido = recBruta * 0.32; // 32% para serviços de vigilância/prestação
+        const irpjEstimado = Math.max(+(lucroPresumido * 0.15).toFixed(2), 0);
+        const csllEstimado = Math.max(+(recBruta * 0.32 * 0.09).toFixed(2), 0);
 
         db.prepare(`INSERT OR REPLACE INTO apuracao_mensal
-          (competencia, receita_bruta, retencoes, receita_liquida, despesas_total, resultado, qtd_nfs)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`)
-          .run(comp, receita_bruta, ret, receita_bruta - ret, desp, (receita_bruta - ret) - desp, receita.qtd);
+          (competencia, receita_bruta, retencoes, receita_liquida, despesas_total,
+           resultado, qtd_nfs, pis_a_pagar, cofins_a_pagar, irpj_estimado, csll_estimado)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(comp, recBruta, retencoes, recLiq, despesas.total || 0,
+               resultado, receita.qtd || 0, pisAPagar, cofinsAPagar, irpjEstimado, csllEstimado);
 
-        console.log(`[APURAÇÃO] ${key} ${comp}: Receita R$${receita_bruta.toFixed(2)} | Despesas R$${desp.toFixed(2)} | Resultado R$${((receita_bruta - ret) - desp).toFixed(2)}`);
-      } catch(e) {
-        console.error(`[APURAÇÃO] Erro ${key}:`, e.message);
-      }
-    }
-  }, { timezone: 'America/Araguaina' });
-  console.log('  📊 Cron de apuração mensal configurado: dia 1° às 06:00 (America/Araguaina)');
+        console.log(`  ✅ Apuração [${key}] ${comp}: receita=${recBruta.toFixed(2)} resultado=${resultado.toFixed(2)}`);
 
-  // ── Conciliação automática mensal — dia 5 às 05:00 ────────
-  cron.schedule('0 5 5 * *', async () => {
-    console.log('[CRON] Iniciando conciliação automática mensal...');
-    const { getDb, COMPANIES } = require('./db');
-
-    for (const [key] of Object.entries(COMPANIES)) {
-      try {
-        const db = getDb(key);
-
-        // 1. Sync BB (se configurado)
-        try {
-          const bbCfg = db.prepare(`SELECT chave,valor FROM configuracoes WHERE chave LIKE 'bb_%'`).all();
-          const hasBB = bbCfg.some(r => r.chave === 'bb_client_id' && r.valor);
-          if (hasBB) {
-            const hoje  = new Date();
-            const fim   = hoje.toISOString().split('T')[0];
-            const ini   = new Date(hoje.setDate(hoje.getDate() - 45)).toISOString().split('T')[0];
-            await fetch(`http://127.0.0.1:${PORT}/api/bb/sync`, {
-              method: 'POST',
-              headers: { 'Content-Type':'application/json', 'X-Company': key,
-                         'Authorization': 'Bearer ' + (process.env.JWT_SECRET || 'montana') },
-              body: JSON.stringify({ dataInicio: ini, dataFim: fim }),
-            }).then(r => r.json()).then(r => {
-              console.log(`  [BB-SYNC] ${key}: ${r.imported || 0} importados`);
-            });
-          }
-        } catch(eBB) { console.error(`  [BB-SYNC] ${key}:`, eBB.message); }
-
-        // 2. Matching NF × extrato (algoritmo simplificado inline)
-        let matched = 0;
-        const ha90 = new Date(Date.now() - 90 * 86400000).toISOString().split('T')[0];
-        const creditos = db.prepare(`
-          SELECT id, credito FROM extratos
-          WHERE credito > 0 AND status_conciliacao='PENDENTE'
-            AND data_iso >= ? AND historico NOT LIKE '%Saldo%'
-        `).all(ha90);
-
-        const matchStmt = db.prepare(`
-          SELECT id FROM notas_fiscais
-          WHERE status_conciliacao='PENDENTE'
-            AND valor_liquido BETWEEN ? AND ?
-            AND data_emissao >= ?
-          ORDER BY ABS(valor_liquido - ?) LIMIT 1
-        `);
-        const updExt = db.prepare(`UPDATE extratos SET status_conciliacao='CONCILIADO', obs=? WHERE id=?`);
-        const updNf  = db.prepare(`UPDATE notas_fiscais SET status_conciliacao='CONCILIADO' WHERE id=?`);
-
-        db.transaction(() => {
-          for (const cr of creditos) {
-            const low = cr.credito * 0.94, high = cr.credito * 1.06;
-            const nf  = matchStmt.get(low, high, ha90, cr.credito);
-            if (nf) { updExt.run('auto-conciliado', cr.id); updNf.run(nf.id); matched++; }
-          }
-        })();
-
-        // 3. Relatório de pendências por email
-        const pendentes = db.prepare(`SELECT COUNT(*) cnt FROM extratos WHERE status_conciliacao='PENDENTE' AND credito>0`).get();
-        const nfsPend   = db.prepare(`SELECT COUNT(*) cnt, COALESCE(SUM(valor_liquido),0) total FROM notas_fiscais WHERE status_conciliacao='PENDENTE' AND data_emissao>='2024-01-01'`).get();
-        console.log(`  [CONCIL] ${key}: ${matched} novos matches | ${pendentes.cnt} extratos pendentes | ${nfsPend.cnt} NFs pendentes (R$${nfsPend.total.toFixed(2)})`);
-
-        // Envia email com resultado se SMTP configurado
+        // ── Alerta de reajuste por email ─────────────────────────
         try {
           const { enviarAlertasEmpresa } = require('./routes/notificacoes');
-          await enviarAlertasEmpresa(db, COMPANIES[key]);
-        } catch(_) {}
-
-      } catch(e) { console.error(`  [CONCIL] Erro ${key}:`, e.message); }
-    }
-  }, { timezone: 'America/Araguaina' });
-  console.log('  🤖 Cron de conciliação automática: dia 5 de cada mês às 05:00 (America/Araguaina)');
-
-  // ── Backup automático diário às 02:00 ──────────────────────
-  const fs = require('fs');
-  const backupDir = path.join(__dirname, '..', 'backups');
-  if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
-
-  function fazerBackup() {
-    const data = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-    let total = 0;
-    for (const [key, company] of Object.entries(COMPANIES)) {
-      try {
-        const src = path.join(__dirname, '..', company.dbPath);
-        if (!fs.existsSync(src)) continue;
-        const dest = path.join(backupDir, `${key}_${data}.db`);
-        fs.copyFileSync(src, dest);
-        total++;
-        // Remove backups com mais de 30 dias
-        const prefix = `${key}_`;
-        fs.readdirSync(backupDir)
-          .filter(f => f.startsWith(prefix) && f.endsWith('.db') && f !== path.basename(dest))
-          .forEach(f => {
-            const age = (Date.now() - fs.statSync(path.join(backupDir, f)).mtimeMs) / 86400000;
-            if (age > 30) fs.unlinkSync(path.join(backupDir, f));
-          });
-      } catch(e) {
-        console.error(`  ⚠ Backup [${key}]:`, e.message);
+          await enviarAlertasEmpresa(db, COMPANIES[key], { incluirReajustes: true });
+        } catch(eAlerta) {
+          console.warn(`  ⚠ Alerta reajuste [${key}]:`, eAlerta.message);
+        }
+      } catch (e) {
+        console.error(`  ⚠ Apuração mensal [${key}]:`, e.message);
       }
     }
-    console.log(`  💾 Backup concluído: ${total} banco(s) → backups/${data}`);
-  }
+  });
+  console.log('  ⏰ Cron apuração mensal configurado: dia 1 às 06:00 (America/Araguaina)');
 
-  cron.schedule('0 2 * * *', fazerBackup, { timezone: 'America/Araguaina' });
-  console.log('  💾 Cron de backup configurado: todo dia 02:00 (America/Araguaina)');
-} catch(e) {
+} catch (e) {
   console.warn('  ⚠ node-cron não disponível:', e.message);
 }
 
-app.listen(PORT, () => {
-  console.log(`
-  ╔══════════════════════════════════════════════════════════╗
-  ║  Montana Multi-Empresa — Sistema Unificado               ║
-  ║  Conciliação Financeira + Boletins de Medição            ║
-  ║  Servidor: http://localhost:${PORT}                         ║
-  ║                                                          ║
-  ║  🏢 Assessoria  (14.092.519) → data/assessoria/          ║
-  ║  🔒 Segurança   (19.200.109) → data/seguranca/           ║
-  ║  🛡️  Porto do Vau (41.034.574) → data/portodovau/        ║
-  ║  🐎 Mustang     (26.600.137) → data/mustang/             ║
-  ║  🔐 Auth JWT ativo (admin/montana2026)                   ║
-  ╚══════════════════════════════════════════════════════════╝
-  `);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n  🚀 Montana Unificado rodando em http://0.0.0.0:${PORT}`);
+  console.log(`  Empresas: ${Object.keys(COMPANIES).join(', ')}`);
+  console.log(`  Ambiente: ${process.env.NODE_ENV || 'development'}\n`);
 });
