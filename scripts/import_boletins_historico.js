@@ -8,7 +8,7 @@
  * Uso: node scripts/import_boletins_historico.js [--dry-run]
  */
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
-const XLSX  = require('xlsx');
+const ExcelJS = require('exceljs');
 const fs    = require('fs');
 const path  = require('path');
 const { getDb } = require('../src/db');
@@ -75,33 +75,33 @@ function parsePastaMes(pasta) {
 // Extrai o maior valor numérico de um arquivo Excel
 // (heurística: total do boletim costuma ser o maior valor único)
 // ──────────────────────────────────────────────────────────────
-function extrairTotalExcel(filePath) {
+async function extrairTotalExcel(filePath) {
   try {
-    const wb = XLSX.readFile(filePath, { type: 'file', cellNF: false, cellText: false });
-    const ws  = wb.Sheets[wb.SheetNames[0]];
-    const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(filePath);
+    const ws = wb.worksheets[0];
+    if (!ws) return null;
 
-    let maxVal  = 0;
+    let maxVal = 0;
     let totalLabel = null; // valor próximo de "TOTAL"
 
-    for (let r = 0; r < data.length; r++) {
-      const row = data[r];
-      if (!Array.isArray(row)) continue;
-
+    ws.eachRow((row) => {
+      const values = row.values; // ExcelJS: index 0 é vazio
       // Verifica se alguma célula da linha contém "TOTAL"
-      const rowStr = row.join(' ').toUpperCase();
+      const rowStr = values.map(v => v != null ? String(v) : '').join(' ').toUpperCase();
       const hasTotalLabel = rowStr.includes('TOTAL') &&
         !rowStr.includes('SUBTOTAL') &&
         !rowStr.includes('VALOR TOTAL MENSAL') === false; // permite "VALOR TOTAL"
 
-      for (let c = 0; c < row.length; c++) {
-        const v = row[c];
+      for (let c = 1; c < values.length; c++) {
+        let v = values[c];
+        if (v && typeof v === 'object' && v.result !== undefined) v = v.result; // fórmulas
         if (typeof v === 'number' && v > 1000 && v < 99_000_000) {
           if (v > maxVal) maxVal = v;
           if (hasTotalLabel && v > (totalLabel || 0)) totalLabel = v;
         }
       }
-    }
+    });
 
     // Prefere o valor perto do label TOTAL; fallback: maior valor
     const result = totalLabel || maxVal;
@@ -179,78 +179,82 @@ function compStr(ano, mes) {
   return `${ano}-${String(mes).padStart(2,'0')}`;
 }
 
-let totalInserido = 0, totalSkip = 0, totalErro = 0;
-const erros = [];
+async function main() {
+  let totalInserido = 0, totalSkip = 0, totalErro = 0;
+  const erros = [];
 
-for (const contrato of CONTRATOS) {
-  const pastaContrato = path.join(contrato.base, contrato.pasta);
-  const arquivos = coletarArquivos(pastaContrato);
+  for (const contrato of CONTRATOS) {
+    const pastaContrato = path.join(contrato.base, contrato.pasta);
+    const arquivos = coletarArquivos(pastaContrato);
 
-  console.log(`\n📂 ${contrato.nome} (id=${contrato.id}) — ${arquivos.length} arquivo(s)`);
+    console.log(`\n📂 ${contrato.nome} (id=${contrato.id}) — ${arquivos.length} arquivo(s)`);
 
-  for (const arq of arquivos) {
-    const competencias = inferirCompetencia(arq);
-    if (!competencias.length) {
-      erros.push(`  ⚠️  Sem data: ${path.basename(arq)}`);
-      totalErro++;
-      continue;
-    }
-
-    const total = extrairTotalExcel(arq);
-    if (!total) {
-      erros.push(`  ⚠️  Sem valor: ${path.basename(arq)}`);
-      totalErro++;
-      continue;
-    }
-
-    for (const { ano, mes } of competencias) {
-      const comp = compStr(ano, mes);
-
-      // Pula 2026 — já inserido
-      if (ano === 2026) { totalSkip++; continue; }
-
-      const already = existsStmt.get(contrato.id, comp);
-      if (already) { totalSkip++; continue; }
-
-      const isAtual = ano === 2026;
-      const status  = isAtual ? 'pendente' : 'aprovado';
-
-      if (!DRY_RUN) {
-        insStmt.run(
-          contrato.id, comp,
-          ultimoDia(ano, mes),
-          primeiroDia(ano, mes),
-          ultimoDia(ano, mes),
-          status, total
-        );
+    for (const arq of arquivos) {
+      const competencias = inferirCompetencia(arq);
+      if (!competencias.length) {
+        erros.push(`  ⚠️  Sem data: ${path.basename(arq)}`);
+        totalErro++;
+        continue;
       }
-      console.log(`  ✅ ${comp} — R$ ${total.toLocaleString('pt-BR',{minimumFractionDigits:2})} [${path.basename(arq)}]`);
-      totalInserido++;
+
+      const total = await extrairTotalExcel(arq);
+      if (!total) {
+        erros.push(`  ⚠️  Sem valor: ${path.basename(arq)}`);
+        totalErro++;
+        continue;
+      }
+
+      for (const { ano, mes } of competencias) {
+        const comp = compStr(ano, mes);
+
+        // Pula 2026 — já inserido
+        if (ano === 2026) { totalSkip++; continue; }
+
+        const already = existsStmt.get(contrato.id, comp);
+        if (already) { totalSkip++; continue; }
+
+        const isAtual = ano === 2026;
+        const status  = isAtual ? 'pendente' : 'aprovado';
+
+        if (!DRY_RUN) {
+          insStmt.run(
+            contrato.id, comp,
+            ultimoDia(ano, mes),
+            primeiroDia(ano, mes),
+            ultimoDia(ano, mes),
+            status, total
+          );
+        }
+        console.log(`  ✅ ${comp} — R$ ${total.toLocaleString('pt-BR',{minimumFractionDigits:2})} [${path.basename(arq)}]`);
+        totalInserido++;
+      }
     }
+  }
+
+  if (erros.length) {
+    console.log('\n⚠️  Arquivos sem dados:');
+    erros.forEach(e => console.log(e));
+  }
+
+  const totBol = db.prepare('SELECT COUNT(*) n FROM bol_boletins').get().n;
+  console.log(`\n${'═'.repeat(55)}`);
+  console.log(`✅ Concluído — Inseridos: ${totalInserido} | Já existiam/2026: ${totalSkip} | Sem dados: ${totalErro}`);
+  console.log(`📊 Total bol_boletins no banco: ${totBol}`);
+
+  // Resumo por contrato e ano
+  console.log('\nResumo por contrato:');
+  const resumo = db.prepare(`
+    SELECT bc.nome, substr(b.competencia,1,4) ano, COUNT(*) qtd, SUM(b.total_geral) total
+    FROM bol_boletins b
+    JOIN bol_contratos bc ON bc.id = b.contrato_id
+    GROUP BY bc.nome, ano
+    ORDER BY bc.nome, ano
+  `).all();
+  let lastNome = '';
+  for (const r of resumo) {
+    if (r.nome !== lastNome) { console.log(`\n  ${r.nome}`); lastNome = r.nome; }
+    console.log(`    ${r.ano}: ${r.qtd} mês(es) — R$ ${Number(r.total).toLocaleString('pt-BR',{minimumFractionDigits:2})}`);
   }
 }
 
-if (erros.length) {
-  console.log('\n⚠️  Arquivos sem dados:');
-  erros.forEach(e => console.log(e));
-}
-
-const totBol = db.prepare('SELECT COUNT(*) n FROM bol_boletins').get().n;
-console.log(`\n${'═'.repeat(55)}`);
-console.log(`✅ Concluído — Inseridos: ${totalInserido} | Já existiam/2026: ${totalSkip} | Sem dados: ${totalErro}`);
-console.log(`📊 Total bol_boletins no banco: ${totBol}`);
-
-// Resumo por contrato e ano
-console.log('\nResumo por contrato:');
-const resumo = db.prepare(`
-  SELECT bc.nome, substr(b.competencia,1,4) ano, COUNT(*) qtd, SUM(b.total_geral) total
-  FROM bol_boletins b
-  JOIN bol_contratos bc ON bc.id = b.contrato_id
-  GROUP BY bc.nome, ano
-  ORDER BY bc.nome, ano
-`).all();
-let lastNome = '';
-for (const r of resumo) {
-  if (r.nome !== lastNome) { console.log(`\n  ${r.nome}`); lastNome = r.nome; }
-  console.log(`    ${r.ano}: ${r.qtd} mês(es) — R$ ${Number(r.total).toLocaleString('pt-BR',{minimumFractionDigits:2})}`);
-}
+main().catch(e => { console.error('Erro fatal:', e); process.exit(1); });

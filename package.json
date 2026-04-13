@@ -29,7 +29,6 @@
     "nodemailer": "^8.0.5",
     "pdf-parse": "^2.4.5",
     "pdfkit": "^0.15.0",
-    "xlsx": "^0.18.5",
     "xml-crypto": "^6.1.2"
   }
 }
