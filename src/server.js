@@ -105,8 +105,21 @@ app.use('/api/drive',        require('./routes/drive'));
 // ─── Módulo Estoque (equipamentos, EPIs, consumíveis) ───────────
 app.use('/api/estoque',      require('./routes/estoque'));
 
+// ─── Módulo Sync Banco do Brasil ────────────────────────────────
+app.use('/api/bb',           require('./routes/bb-sync'));
+
+// ─── Módulo Volus (Vale Alimentação / Benefícios) ────────────
+app.use('/api/volus',        require('./routes/volus'));
+
 // ─── Módulo Usuários (gestão de acesso) ─────────────────────────
 app.use('/api/usuarios',     require('./routes/usuarios').router);
+
+// ─── Módulo Alertas WhatsApp ─────────────────────────────────────
+try {
+  app.use('/api/whatsapp', require('./routes/whatsapp'));
+} catch(e) {
+  console.warn('  ⚠ WhatsApp module indisponível (permissão/arquivo):', e.message);
+}
 
 // ─── Consolidado multi-empresa (visão geral das 4 empresas) ────
 app.get('/api/consolidado', require('./auth').authMiddleware, (req, res) => {
@@ -197,6 +210,18 @@ try {
         if (resultado.enviado) {
           console.log(`  📧 Alertas enviados [${key}] (${resultado.total} alertas)`);
         }
+        // Tentar enviar WhatsApp também
+        try {
+          const wppCfg = db.prepare("SELECT chave,valor FROM configuracoes WHERE chave LIKE 'whatsapp_%'").all();
+          if (wppCfg.length > 0 && globalThis.fetch) {
+            globalThis.fetch(`http://127.0.0.1:${PORT}/api/whatsapp/enviar-alertas`, {
+              method: 'POST',
+              headers: { 'X-Company': key, 'Authorization': 'Bearer ' + (process.env.JWT_SECRET || 'montana') }
+            }).then(r => r.json()).then(r => {
+              if (r.enviado) console.log(`  💬 WhatsApp alertas enviados [${key}]`);
+            }).catch(e2 => console.error(`  ⚠ WhatsApp cron [${key}]:`, e2.message));
+          }
+        } catch(e3) {}
       } catch (e) {
         console.error(`  ⚠ Cron alerta [${key}]:`, e.message);
       }
@@ -255,6 +280,77 @@ try {
     }
   }, { timezone: 'America/Araguaina' });
   console.log('  📊 Cron de apuração mensal configurado: dia 1° às 06:00 (America/Araguaina)');
+
+  // ── Conciliação automática mensal — dia 5 às 05:00 ────────
+  cron.schedule('0 5 5 * *', async () => {
+    console.log('[CRON] Iniciando conciliação automática mensal...');
+    const { getDb, COMPANIES } = require('./db');
+
+    for (const [key] of Object.entries(COMPANIES)) {
+      try {
+        const db = getDb(key);
+
+        // 1. Sync BB (se configurado)
+        try {
+          const bbCfg = db.prepare(`SELECT chave,valor FROM configuracoes WHERE chave LIKE 'bb_%'`).all();
+          const hasBB = bbCfg.some(r => r.chave === 'bb_client_id' && r.valor);
+          if (hasBB) {
+            const hoje  = new Date();
+            const fim   = hoje.toISOString().split('T')[0];
+            const ini   = new Date(hoje.setDate(hoje.getDate() - 45)).toISOString().split('T')[0];
+            await fetch(`http://127.0.0.1:${PORT}/api/bb/sync`, {
+              method: 'POST',
+              headers: { 'Content-Type':'application/json', 'X-Company': key,
+                         'Authorization': 'Bearer ' + (process.env.JWT_SECRET || 'montana') },
+              body: JSON.stringify({ dataInicio: ini, dataFim: fim }),
+            }).then(r => r.json()).then(r => {
+              console.log(`  [BB-SYNC] ${key}: ${r.imported || 0} importados`);
+            });
+          }
+        } catch(eBB) { console.error(`  [BB-SYNC] ${key}:`, eBB.message); }
+
+        // 2. Matching NF × extrato (algoritmo simplificado inline)
+        let matched = 0;
+        const ha90 = new Date(Date.now() - 90 * 86400000).toISOString().split('T')[0];
+        const creditos = db.prepare(`
+          SELECT id, credito FROM extratos
+          WHERE credito > 0 AND status_conciliacao='PENDENTE'
+            AND data_iso >= ? AND historico NOT LIKE '%Saldo%'
+        `).all(ha90);
+
+        const matchStmt = db.prepare(`
+          SELECT id FROM notas_fiscais
+          WHERE status_conciliacao='PENDENTE'
+            AND valor_liquido BETWEEN ? AND ?
+            AND data_emissao >= ?
+          ORDER BY ABS(valor_liquido - ?) LIMIT 1
+        `);
+        const updExt = db.prepare(`UPDATE extratos SET status_conciliacao='CONCILIADO', obs=? WHERE id=?`);
+        const updNf  = db.prepare(`UPDATE notas_fiscais SET status_conciliacao='CONCILIADO' WHERE id=?`);
+
+        db.transaction(() => {
+          for (const cr of creditos) {
+            const low = cr.credito * 0.94, high = cr.credito * 1.06;
+            const nf  = matchStmt.get(low, high, ha90, cr.credito);
+            if (nf) { updExt.run('auto-conciliado', cr.id); updNf.run(nf.id); matched++; }
+          }
+        })();
+
+        // 3. Relatório de pendências por email
+        const pendentes = db.prepare(`SELECT COUNT(*) cnt FROM extratos WHERE status_conciliacao='PENDENTE' AND credito>0`).get();
+        const nfsPend   = db.prepare(`SELECT COUNT(*) cnt, COALESCE(SUM(valor_liquido),0) total FROM notas_fiscais WHERE status_conciliacao='PENDENTE' AND data_emissao>='2024-01-01'`).get();
+        console.log(`  [CONCIL] ${key}: ${matched} novos matches | ${pendentes.cnt} extratos pendentes | ${nfsPend.cnt} NFs pendentes (R$${nfsPend.total.toFixed(2)})`);
+
+        // Envia email com resultado se SMTP configurado
+        try {
+          const { enviarAlertasEmpresa } = require('./routes/notificacoes');
+          await enviarAlertasEmpresa(db, COMPANIES[key]);
+        } catch(_) {}
+
+      } catch(e) { console.error(`  [CONCIL] Erro ${key}:`, e.message); }
+    }
+  }, { timezone: 'America/Araguaina' });
+  console.log('  🤖 Cron de conciliação automática: dia 5 de cada mês às 05:00 (America/Araguaina)');
 
   // ── Backup automático diário às 02:00 ──────────────────────
   const fs = require('fs');

@@ -550,6 +550,22 @@ router.get('/dashboard', (req, res) => {
 });
 
 // ─── EXTRATOS ────────────────────────────────────────────────────
+// Meses disponíveis no banco para o período selecionado (para botões dinâmicos)
+router.get('/extratos/meses', (req, res) => {
+  try {
+    const { from, to } = req.query;
+    let where = '1=1';
+    const params = {};
+    if (from) { where += ' AND data_iso >= @from'; params.from = from; }
+    if (to)   { where += ' AND data_iso <= @to';   params.to   = to;   }
+    const MES_ORDER = ['JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DEZ'];
+    const rows = req.db.prepare(`SELECT DISTINCT mes FROM extratos WHERE ${where} AND length(mes)=3`).all(params);
+    const meses = rows.map(r => r.mes).filter(m => MES_ORDER.includes(m))
+      .sort((a,b) => MES_ORDER.indexOf(a) - MES_ORDER.indexOf(b));
+    res.json({ meses });
+  } catch(e) { errRes(res, e); }
+});
+
 router.get('/extratos', (req, res) => {
   try {
   const { from, to, status, mes, posto, page = 1, limit = 100 } = req.query;
@@ -2437,6 +2453,183 @@ router.post('/import/ofx', (req, res, next) => getUpload(req).single('file')(req
     res.json({ ok: true, imported, skipped, total: txs.length, message: msg });
   } catch (err) {
     if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── IMPORTAÇÃO EXTRATO PDF (BB / BRB / IA fallback) ─────────────────────────
+//
+// Estratégias em ordem:
+//  1. Parser Banco do Brasil (app mobile — DD/MM/AAAA HISTORICO VALOR)
+//  2. Parser BRB (tabela com colunas Débito / Crédito)
+//  3. Fallback IA: envia texto extraído para Claude Haiku e pede JSON
+//
+router.post('/import/pdf-extrato', (req, res, next) => getUpload(req).single('file')(req, res, next), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Arquivo PDF não enviado' });
+    const extErr = validarExtensao(req.file.originalname, ['pdf']);
+    if (extErr) { fs.unlinkSync(req.file.path); return res.status(400).json({ error: extErr }); }
+
+    const pdfParse = require('pdf-parse');
+    const buffer   = fs.readFileSync(req.file.path);
+    const pdfData  = await pdfParse(buffer);
+    const texto    = pdfData.text || '';
+    fs.unlinkSync(req.file.path);
+
+    if (!texto.trim()) return res.status(400).json({ error: 'Não foi possível extrair texto do PDF. Tente um PDF gerado pelo app (não escaneado).' });
+
+    // ── Helpers ──────────────────────────────────────────────────
+    const MESES = ['','JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DEZ'];
+    function parseDatePDF(str) {
+      // DD/MM/AAAA  ou  DD/MM/AA
+      const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+      if (!m) return null;
+      let [, d, mo, y] = m;
+      if (y.length === 2) y = '20' + y;
+      return { iso: `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`, mes: MESES[parseInt(mo)] || mo };
+    }
+    function parseValBR(str) {
+      if (!str) return 0;
+      return parseFloat(str.replace(/\./g,'').replace(',','.')) || 0;
+    }
+
+    // ── Parser BB (Banco do Brasil) ───────────────────────────────
+    // Linha típica BB app: "04/04/2026  PIX RECEBIDO - FULANO  1.500,00" ou "-1.500,00"
+    // BB internet banking: "04/04/2026  PIX RECEBIDO    +1.500,00"
+    function parseBB(txt) {
+      const txs = [];
+      const linhas = txt.split('\n');
+      const re = /^(\d{2}\/\d{2}\/\d{2,4})\s+(.+?)\s+([-+]?\d{1,3}(?:\.\d{3})*,\d{2})\s*$/;
+      for (const linha of linhas) {
+        const m = linha.trim().match(re);
+        if (!m) continue;
+        const dt = parseDatePDF(m[1]);
+        if (!dt) continue;
+        const historico = m[2].trim();
+        const raw = m[3].replace('+','');
+        const valor = parseValBR(raw);
+        if (!valor) continue;
+        // ignora linhas de saldo
+        if (/saldo/i.test(historico)) continue;
+        const negativo = raw.startsWith('-') || /pagamento|debito|transferência enviada|pix enviado|tarifa|compra|saida/i.test(historico);
+        txs.push({ data: dt, historico, debito: negativo ? Math.abs(valor) : 0, credito: negativo ? 0 : Math.abs(valor) });
+      }
+      return txs;
+    }
+
+    // ── Parser BRB ────────────────────────────────────────────────
+    // BRB tem colunas separadas: Data | Histórico | Débito | Crédito | Saldo
+    // Linha típica: "04/04/2026  PIX RECEBIDO NOME          234,56       1.000,00"
+    // ou          : "04/04/2026  PIX RECEBIDO NOME                  500,00  1.500,00"
+    function parseBRB(txt) {
+      const txs = [];
+      const linhas = txt.split('\n');
+      // Linha BRB: DATA  HIST  [DEBITO]  [CREDITO]  SALDO
+      const re = /^(\d{2}\/\d{2}\/\d{2,4})\s+(.+?)\s{2,}([\d.,]+|-)\s+([\d.,]+|-)\s+[\d.,]+\s*$/;
+      for (const linha of linhas) {
+        const m = linha.trim().match(re);
+        if (!m) continue;
+        const dt = parseDatePDF(m[1]);
+        if (!dt) continue;
+        const historico = m[2].trim();
+        if (/saldo/i.test(historico)) continue;
+        const deb = m[3] === '-' ? 0 : parseValBR(m[3]);
+        const cred = m[4] === '-' ? 0 : parseValBR(m[4]);
+        if (!deb && !cred) continue;
+        txs.push({ data: dt, historico, debito: deb, credito: cred });
+      }
+      return txs;
+    }
+
+    // ── Tentar parsers ────────────────────────────────────────────
+    let txs = [];
+    let banco = 'desconhecido';
+
+    // Detecta banco pelo cabeçalho do PDF
+    const isBB  = /banco do brasil|extrato bb|bb\.com\.br/i.test(texto.substring(0, 500));
+    const isBRB = /brb|banco de bras.lia/i.test(texto.substring(0, 500));
+
+    if (isBB || (!isBRB)) { txs = parseBB(texto); if (txs.length) banco = 'BB'; }
+    if (!txs.length)       { txs = parseBRB(texto); if (txs.length) banco = 'BRB'; }
+
+    // ── Fallback IA (Claude Haiku) ────────────────────────────────
+    if (!txs.length && process.env.ANTHROPIC_API_KEY) {
+      banco = 'IA';
+      try {
+        const Anthropic = require('@anthropic-ai/sdk');
+        const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
+        // Envia apenas os primeiros 6000 chars para economizar tokens
+        const amostra = texto.substring(0, 6000);
+        const msg = await client.messages.create({
+          model: 'claude-haiku-4-5',
+          max_tokens: 2048,
+          messages: [{
+            role: 'user',
+            content: `Você é um parser de extratos bancários brasileiros. Extraia TODAS as transações do texto abaixo e retorne APENAS um JSON array, sem explicações:
+[{"data":"DD/MM/AAAA","historico":"descrição","debito":0.00,"credito":0.00}]
+
+Regras:
+- data: formato DD/MM/AAAA obrigatório
+- debito: valor numérico (saída de dinheiro), 0 se não houver
+- credito: valor numérico (entrada de dinheiro), 0 se não houver
+- Ignore linhas de saldo, cabeçalhos, totais
+- Use ponto como separador decimal
+
+Texto do extrato:
+${amostra}`,
+          }],
+        });
+        const resposta = msg.content[0]?.text || '[]';
+        const match    = resposta.match(/\[[\s\S]*\]/);
+        if (match) {
+          const parsed = JSON.parse(match[0]);
+          txs = parsed.map(t => {
+            const dt = parseDatePDF(t.data);
+            return dt ? { data: dt, historico: t.historico || '', debito: parseFloat(t.debito)||0, credito: parseFloat(t.credito)||0 } : null;
+          }).filter(Boolean);
+        }
+      } catch (iaErr) {
+        console.error('[PDF] Fallback IA falhou:', iaErr.message);
+      }
+    }
+
+    if (!txs.length) {
+      return res.status(400).json({
+        error: 'Não foi possível identificar transações no PDF. Formatos suportados: BB app, BRB. Alternativa: exporte como OFX pelo internet banking.'
+      });
+    }
+
+    // ── Inserir no banco ──────────────────────────────────────────
+    const ins = req.db.prepare(`
+      INSERT OR IGNORE INTO extratos (mes, data, data_iso, tipo, historico, debito, credito, status_conciliacao)
+      VALUES (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito, 'PENDENTE')
+    `);
+    let imported = 0, skipped = 0;
+    req.db.transaction(() => {
+      for (const t of txs) {
+        const r = ins.run({
+          mes:      t.data.mes,
+          data:     t.data.iso.split('-').reverse().join('/'), // DD/MM/AAAA
+          data_iso: t.data.iso,
+          tipo:     t.credito > 0 ? 'C' : 'D',
+          historico: t.historico,
+          debito:    t.debito,
+          credito:   t.credito,
+        });
+        if (r.changes > 0) imported++; else skipped++;
+      }
+    })();
+
+    dashCacheInvalidate(req.companyKey);
+    req.db.prepare("INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('pdf-extrato', @arquivo, @registros)")
+      .run({ arquivo: req.file?.originalname || 'extrato.pdf', registros: imported });
+    audit(req, 'IMPORT', 'extratos', '', `PDF ${banco} — ${imported} importados, ${skipped} ignorados`);
+
+    res.json({ ok: true, imported, skipped, total: txs.length, banco, message: `${imported} lançamentos importados do PDF (${banco})` + (skipped > 0 ? ` · ${skipped} duplicados ignorados` : '') });
+
+  } catch (err) {
+    if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    console.error('[PDF extrato] erro:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -4643,6 +4836,177 @@ router.get('/consolidado/resumo', (req, res) => {
   }), {});
 
   res.json({ empresas: resultado, totais, periodo: { from: dateFrom, to: dateTo } });
+});
+
+// ─── Cobertura de Postos ──────────────────────────────────────────────────────
+router.get('/relatorios/cobertura-postos', (req, res) => {
+  const db = req.db;
+  const { from, to } = req.query;
+  const ano = new Date().getFullYear();
+  const mes = String(new Date().getMonth() + 1).padStart(2,'0');
+  const dateFrom = from || `${ano}-${mes}-01`;
+  const dateTo   = to   || `${ano}-${mes}-31`;
+  const comp     = dateFrom.substring(0,7);
+
+  // Verificar se tabelas de boletins e ponto existem
+  const tblBol = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bol_postos'").get();
+  if (!tblBol) return res.json({ postos: [], message: 'Sem dados de postos' });
+
+  try {
+    // Postos contratados
+    const postos = db.prepare(`
+      SELECT p.id, p.descricao, p.tipo_posto, p.qtd_funcionarios,
+             bc.contrato_ref, bc.orgao,
+             COALESCE(bb.valor_total, 0) valor_boletim,
+             bb.status as status_boletim,
+             bb.id as boletim_id
+      FROM bol_postos p
+      JOIN bol_contratos bc ON p.contrato_id = bc.id
+      LEFT JOIN bol_boletins bb ON bb.contrato_id = bc.id
+        AND substr(bb.competencia,1,7) = ?
+      ORDER BY bc.orgao, p.descricao
+    `).all(comp);
+
+    // Para cada posto, verificar registros de ponto (se existirem)
+    const tblPonto = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='ponto_registros'").get();
+
+    const resultado = postos.map(p => {
+      let dias_cobertos = 0;
+      let funcionarios_escalados = 0;
+
+      if (tblPonto) {
+        try {
+          // Funcionários com lotação no posto
+          const funcs = db.prepare(`
+            SELECT COUNT(DISTINCT func_id) c FROM ponto_registros
+            WHERE data_iso BETWEEN ? AND ? AND lotacao LIKE ?
+          `).get(dateFrom, dateTo, `%${p.descricao?.substring(0,10)||''}%`);
+          funcionarios_escalados = funcs?.c || 0;
+        } catch(e) {}
+      }
+
+      const qtd_esperada = p.qtd_funcionarios || 1;
+      const cobertura_pct = qtd_esperada > 0
+        ? Math.min(100, Math.round(funcionarios_escalados / qtd_esperada * 100))
+        : 0;
+
+      return {
+        ...p,
+        funcionarios_escalados,
+        qtd_esperada,
+        cobertura_pct,
+        status_cobertura: cobertura_pct >= 90 ? 'OK' : cobertura_pct >= 60 ? 'PARCIAL' : 'CRÍTICO'
+      };
+    });
+
+    const total_postos = resultado.length;
+    const postos_ok = resultado.filter(p => p.status_cobertura === 'OK').length;
+    const postos_criticos = resultado.filter(p => p.status_cobertura === 'CRÍTICO').length;
+
+    res.json({
+      postos: resultado,
+      competencia: comp,
+      resumo: { total_postos, postos_ok, postos_criticos, postos_parciais: total_postos - postos_ok - postos_criticos }
+    });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── EPI / Uniformes ─────────────────────────────────────────────────────────
+
+// Middleware: garante que tabelas EPI existem
+router.use('/epi', (req, res, next) => {
+  try {
+    req.db.prepare(`CREATE TABLE IF NOT EXISTS epi_itens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      funcionario_id INTEGER,
+      nome_item TEXT NOT NULL,
+      tipo TEXT DEFAULT 'EPI',
+      data_entrega TEXT,
+      data_devolucao TEXT,
+      valor REAL DEFAULT 0,
+      tamanho TEXT,
+      quantidade INTEGER DEFAULT 1,
+      status TEXT DEFAULT 'ATIVO',
+      obs TEXT,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      updated_at TEXT DEFAULT (datetime('now','localtime'))
+    )`).run();
+    req.db.prepare(`CREATE TABLE IF NOT EXISTS epi_estoque (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome_item TEXT NOT NULL,
+      tipo TEXT DEFAULT 'EPI',
+      quantidade_total INTEGER DEFAULT 0,
+      quantidade_disponivel INTEGER DEFAULT 0,
+      valor_unitario REAL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    )`).run();
+  } catch(e) {}
+  next();
+});
+
+// GET /epi/funcionario/:id — EPIs entregues ao funcionário
+router.get('/epi/funcionario/:id', (req, res) => {
+  const itens = req.db.prepare(`
+    SELECT e.*, f.nome as func_nome FROM epi_itens e
+    LEFT JOIN rh_funcionarios f ON e.funcionario_id = f.id
+    WHERE e.funcionario_id=? ORDER BY e.data_entrega DESC
+  `).all(req.params.id);
+  const total_valor = itens.reduce((s,i) => s + (i.valor||0) * (i.quantidade||1), 0);
+  res.json({ data: itens, total_valor });
+});
+
+// GET /epi/estoque — estoque atual
+router.get('/epi/estoque', (req, res) => {
+  const itens = req.db.prepare('SELECT * FROM epi_estoque ORDER BY tipo, nome_item').all();
+  res.json({ data: itens });
+});
+
+// POST /epi/entregar — registrar entrega de EPI
+router.post('/epi/entregar', (req, res) => {
+  const { funcionario_id, nome_item, tipo, valor, quantidade, tamanho, obs } = req.body;
+  if (!funcionario_id || !nome_item) return res.status(400).json({ error: 'funcionario_id e nome_item obrigatórios' });
+  const info = req.db.prepare(`INSERT INTO epi_itens
+    (funcionario_id, nome_item, tipo, data_entrega, valor, quantidade, tamanho, status, obs)
+    VALUES (?, ?, ?, date('now','localtime'), ?, ?, ?, 'ATIVO', ?)`)
+    .run(funcionario_id, nome_item, tipo||'EPI', valor||0, quantidade||1, tamanho||'', obs||'');
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+
+// PATCH /epi/:id/devolver
+router.patch('/epi/:id/devolver', (req, res) => {
+  req.db.prepare(`UPDATE epi_itens SET status='DEVOLVIDO', data_devolucao=date('now','localtime'), updated_at=datetime('now') WHERE id=?`).run(req.params.id);
+  res.json({ ok: true });
+});
+
+// GET /epi/relatorio — relatório geral de EPIs
+router.get('/epi/relatorio', (req, res) => {
+  const db = req.db;
+  try {
+    db.prepare(`CREATE TABLE IF NOT EXISTS epi_itens (id INTEGER PRIMARY KEY AUTOINCREMENT, funcionario_id INTEGER, nome_item TEXT NOT NULL, tipo TEXT DEFAULT 'EPI', data_entrega TEXT, data_devolucao TEXT, valor REAL DEFAULT 0, tamanho TEXT, quantidade INTEGER DEFAULT 1, status TEXT DEFAULT 'ATIVO', obs TEXT, created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`).run();
+  } catch(e) {}
+
+  const por_item = db.prepare(`
+    SELECT nome_item, tipo,
+           COUNT(*) total_entregas,
+           SUM(CASE WHEN status='ATIVO' THEN 1 ELSE 0 END) em_uso,
+           SUM(CASE WHEN status='DEVOLVIDO' THEN 1 ELSE 0 END) devolvidos,
+           COALESCE(SUM(valor * quantidade),0) custo_total
+    FROM epi_itens GROUP BY nome_item, tipo ORDER BY custo_total DESC
+  `).all();
+
+  const por_funcionario = db.prepare(`
+    SELECT f.nome, f.lotacao, COUNT(e.id) qtd_itens,
+           COALESCE(SUM(e.valor * e.quantidade),0) custo_total
+    FROM epi_itens e
+    JOIN rh_funcionarios f ON e.funcionario_id = f.id
+    WHERE e.status='ATIVO'
+    GROUP BY e.funcionario_id ORDER BY custo_total DESC LIMIT 20
+  `).all();
+
+  const total_custo = por_item.reduce((s,i) => s + i.custo_total, 0);
+  res.json({ por_item, por_funcionario, total_custo });
 });
 
 module.exports = router;

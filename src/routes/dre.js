@@ -302,4 +302,98 @@ router.get('/pdf', (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── GET /api/dre/contratos — DRE detalhado por contrato ─────────────────────
+router.get('/contratos', (req, res) => {
+  const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
+  const p = { from: dateFrom, to: dateTo };
+
+  // Receita por contrato (NFs pagas no período)
+  const receitaContratos = req.db.prepare(`
+    SELECT
+      COALESCE(NULLIF(TRIM(contrato_ref),''), 'SEM CONTRATO') as contrato,
+      tomador,
+      COUNT(*) qtd_nfs,
+      COALESCE(SUM(valor_bruto),0)   receita_bruta,
+      COALESCE(SUM(valor_liquido),0) receita_liquida,
+      COALESCE(SUM(retencao),0)      retencoes,
+      COALESCE(SUM(inss),0)          inss,
+      COALESCE(SUM(ir),0)            irrf
+    FROM notas_fiscais
+    WHERE data_emissao >= @from AND data_emissao <= @to
+      AND status_conciliacao != 'CANCELADA'
+    GROUP BY COALESCE(NULLIF(TRIM(contrato_ref),''), 'SEM CONTRATO'), tomador
+    ORDER BY receita_bruta DESC
+  `).all(p);
+
+  // Folha estimada por contrato: salario_base × nº meses no período × funcionários ativos
+  // rh_funcionarios.contrato_ref é a fonte correta
+  const meses = Math.max(1, Math.round(
+    (new Date(dateTo) - new Date(dateFrom)) / (30 * 86400000)
+  ));
+  const folhaContratos = req.db.prepare(`
+    SELECT
+      COALESCE(NULLIF(TRIM(contrato_ref),''), 'SEM CONTRATO') as contrato,
+      COALESCE(SUM(salario_base),0) * @meses AS folha_total
+    FROM rh_funcionarios
+    WHERE status='ATIVO'
+    GROUP BY contrato
+  `).all({ meses });
+  const folhaMap = {};
+  folhaContratos.forEach(r => { folhaMap[r.contrato] = r.folha_total; });
+
+  // VA Volus por contrato (se tabela existir)
+  let vaMap = {};
+  try {
+    const vaContratos = req.db.prepare(`
+      SELECT
+        COALESCE(NULLIF(TRIM(contrato_ref),''), departamento) as contrato,
+        COALESCE(SUM(valor_total),0) va_total
+      FROM volus_pedidos
+      WHERE competencia >= substr(@from,1,7) AND competencia <= substr(@to,1,7)
+      GROUP BY contrato
+    `).all(p);
+    vaContratos.forEach(r => { vaMap[r.contrato] = r.va_total; });
+  } catch (_) {}
+
+  // Monta resultado por contrato
+  const r = v => +((v || 0).toFixed(2));
+  const contratos = receitaContratos.map(c => {
+    const folha = folhaMap[c.contrato] || 0;
+    const va    = vaMap[c.contrato] || 0;
+    const custosDir = folha + va;
+    const lucroBruto = c.receita_liquida - custosDir;
+    const margemBruta = c.receita_bruta > 0 ? +((lucroBruto / c.receita_bruta) * 100).toFixed(1) : 0;
+    return {
+      contrato:        c.contrato,
+      tomador:         c.tomador,
+      qtd_nfs:         c.qtd_nfs,
+      receita_bruta:   r(c.receita_bruta),
+      retencoes:       r(c.retencoes),
+      receita_liquida: r(c.receita_liquida),
+      folha:           r(folha),
+      va_volus:        r(va),
+      custos_diretos:  r(custosDir),
+      lucro_bruto:     r(lucroBruto),
+      margem_bruta_pct: margemBruta,
+    };
+  });
+
+  // Totais consolidados
+  const totais = contratos.reduce((acc, c) => {
+    acc.receita_bruta   += c.receita_bruta;
+    acc.retencoes       += c.retencoes;
+    acc.receita_liquida += c.receita_liquida;
+    acc.folha           += c.folha;
+    acc.va_volus        += c.va_volus;
+    acc.custos_diretos  += c.custos_diretos;
+    acc.lucro_bruto     += c.lucro_bruto;
+    return acc;
+  }, { receita_bruta: 0, retencoes: 0, receita_liquida: 0, folha: 0, va_volus: 0, custos_diretos: 0, lucro_bruto: 0 });
+  totais.margem_bruta_pct = totais.receita_bruta > 0
+    ? +((totais.lucro_bruto / totais.receita_bruta) * 100).toFixed(1) : 0;
+  Object.keys(totais).forEach(k => { if (typeof totais[k] === 'number' && k !== 'margem_bruta_pct') totais[k] = r(totais[k]); });
+
+  res.json({ periodo, contratos, totais });
+});
+
 module.exports = router;

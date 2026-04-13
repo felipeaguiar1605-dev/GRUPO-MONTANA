@@ -22,6 +22,8 @@ async function loadBoletinsTab() {
   if (_bolView === 'lista') renderBolLista();
   // Margem por posto (app-extras.js)
   if (typeof loadMargemPorPosto === 'function') loadMargemPorPosto();
+  // Cobertura de postos (app-extras.js)
+  if (typeof loadCoberturaPosots === 'function') loadCoberturaPosots();
 }
 
 // ─── CONTRATOS ────────────────────────────────────────────────

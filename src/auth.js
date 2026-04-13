@@ -20,6 +20,9 @@ function authMiddleware(req, res, next) {
   if (req.path === '/auth/login') return next();
   // Health check público (não expõe dados)
   if (req.path === '/health') return next();
+  // OAuth Drive: popup não envia Bearer, autenticação verificada internamente via query param
+  if (req.path === '/drive/auth') return next();
+  if (req.path === '/drive/callback') return next();
 
   const authHeader = req.headers['authorization'];
   if (!authHeader || !authHeader.startsWith('Bearer ')) {

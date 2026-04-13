@@ -12,7 +12,7 @@ const companyMw  = require('../companyMiddleware');
 const router = express.Router();
 router.use(companyMw);
 
-const MODELO = 'claude-haiku-4-5-20251001';
+const MODELO = 'claude-haiku-4-5';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -54,17 +54,49 @@ router.get('/preview', (req, res) => {
   const em5  = new Date(Date.now() +  5 * 86400000).toISOString().split('T')[0];
   const ha30 = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
 
+  const ha60 = new Date(Date.now() - 60 * 86400000).toISOString().split('T')[0];
+
   const certidoes  = req.db.prepare(`SELECT tipo,numero,data_validade FROM certidoes WHERE data_validade<=@em15 AND data_validade>=@hoje ORDER BY data_validade`).all({ em15, hoje });
   const contratos  = req.db.prepare(`SELECT numContrato,contrato,vigencia_fim FROM contratos WHERE vigencia_fim<=@em30 AND vigencia_fim>=@hoje ORDER BY vigencia_fim`).all({ em30, hoje });
   const pagAtras   = req.db.prepare(`SELECT COUNT(*) n FROM despesas WHERE status='PENDENTE' AND data_iso<=@ha30`).get({ ha30 });
   const licitacoes = req.db.prepare(`SELECT orgao,numero_edital,data_abertura FROM licitacoes WHERE data_abertura>=@hoje AND data_abertura<=@em5 AND status IN ('em análise','proposta enviada') ORDER BY data_abertura`).all({ hoje, em5 });
+
+  // NFs sem pagamento há > 60 dias
+  let nfsSemPagamento = [];
+  try {
+    nfsSemPagamento = req.db.prepare(`
+      SELECT tomador, COUNT(*) cnt, COALESCE(SUM(valor_liquido),0) total,
+             MIN(data_emissao) mais_antiga
+      FROM notas_fiscais
+      WHERE status_conciliacao='PENDENTE'
+        AND data_emissao <= @ha60 AND data_emissao != ''
+        AND data_emissao >= '2024-01-01'
+      GROUP BY tomador ORDER BY total DESC LIMIT 10
+    `).all({ ha60 });
+  } catch(_) {}
+
+  // Conta vinculada com saldo baixo (< 10% do valor mensal do contrato)
+  let contasVinculadasAlerta = [];
+  try {
+    contasVinculadasAlerta = req.db.prepare(`
+      SELECT cv.convenente, cv.conta_vinculada, cv.saldo, cv.data_referencia,
+             c.valor_mensal_bruto
+      FROM conta_vinculada_saldos cv
+      LEFT JOIN contratos c ON UPPER(cv.convenente) LIKE '%' || UPPER(SUBSTR(c.contrato,1,6)) || '%'
+      WHERE cv.data_referencia = (SELECT MAX(data_referencia) FROM conta_vinculada_saldos WHERE conta_vinculada=cv.conta_vinculada)
+        AND c.valor_mensal_bruto > 0
+        AND cv.saldo < c.valor_mensal_bruto * 0.1
+    `).all();
+  } catch(_) {}
 
   res.json({
     certidoes,
     contratos,
     pagamentos_atrasados: pagAtras.n,
     licitacoes,
-    tem_alertas: certidoes.length + contratos.length + pagAtras.n + licitacoes.length > 0
+    nfs_sem_pagamento: nfsSemPagamento,
+    contas_vinculadas_alerta: contasVinculadasAlerta,
+    tem_alertas: certidoes.length + contratos.length + pagAtras.n + licitacoes.length + nfsSemPagamento.length > 0
   });
 });
 
@@ -195,12 +227,24 @@ async function enviarAlertasEmpresa(db, company) {
   const em5  = new Date(Date.now() +  5 * 86400000).toISOString().split('T')[0];
   const ha30 = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
 
+  const ha60 = new Date(Date.now() - 60 * 86400000).toISOString().split('T')[0];
+
   const certidoes  = db.prepare(`SELECT tipo,numero,data_validade FROM certidoes WHERE data_validade<=? AND data_validade>=? ORDER BY data_validade`).all(em15, hoje);
   const contratos  = db.prepare(`SELECT numContrato,contrato,vigencia_fim FROM contratos WHERE vigencia_fim<=? AND vigencia_fim>=? ORDER BY vigencia_fim`).all(em30, hoje);
   const pagAtras   = db.prepare(`SELECT COUNT(*) n FROM despesas WHERE status='PENDENTE' AND data_iso<=?`).get(ha30);
   const licitacoes = db.prepare(`SELECT orgao,numero_edital,data_abertura FROM licitacoes WHERE data_abertura>=? AND data_abertura<=? AND status IN ('em análise','proposta enviada') ORDER BY data_abertura`).all(hoje, em5);
 
-  const totalAlertas = certidoes.length + contratos.length + pagAtras.n + licitacoes.length;
+  let nfsSemPagamento = [];
+  try {
+    nfsSemPagamento = db.prepare(`
+      SELECT tomador, COUNT(*) cnt, COALESCE(SUM(valor_liquido),0) total, MIN(data_emissao) mais_antiga
+      FROM notas_fiscais
+      WHERE status_conciliacao='PENDENTE' AND data_emissao<=? AND data_emissao!='' AND data_emissao>='2024-01-01'
+      GROUP BY tomador ORDER BY total DESC LIMIT 10
+    `).all(ha60);
+  } catch(_) {}
+
+  const totalAlertas = certidoes.length + contratos.length + pagAtras.n + licitacoes.length + nfsSemPagamento.length;
   if (totalAlertas === 0) return { enviado: false, total: 0, motivo: 'sem alertas' };
 
   // Monta corpo HTML
@@ -229,6 +273,14 @@ async function enviarAlertasEmpresa(db, company) {
   if (licitacoes.length) {
     corpo += `<h3 style="color:#0369a1">🏛️ Licitações abrindo em 5 dias (${licitacoes.length})</h3><ul>`;
     licitacoes.forEach(l => { corpo += `<li><strong>${l.orgao}</strong> — Ed. ${l.numero_edital} — ${l.data_abertura}</li>`; });
+    corpo += '</ul>';
+  }
+  if (nfsSemPagamento.length) {
+    const totalNfVal = nfsSemPagamento.reduce((s,n) => s + n.total, 0);
+    corpo += `<h3 style="color:#b45309">🧾 NFs sem pagamento há +60 dias (R$ ${totalNfVal.toLocaleString('pt-BR',{minimumFractionDigits:2})})</h3><ul>`;
+    nfsSemPagamento.forEach(n => {
+      corpo += `<li><strong>${n.tomador}</strong> — ${n.cnt} NF(s) — R$ ${n.total.toLocaleString('pt-BR',{minimumFractionDigits:2})} — desde ${n.mais_antiga}</li>`;
+    });
     corpo += '</ul>';
   }
   corpo += `</div></div>`;

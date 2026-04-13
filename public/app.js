@@ -12,6 +12,7 @@ function switchCompany(key) {
   currentCompany = key;
   localStorage.setItem('montana_company', key);
   _contratos = []; // forçar reload dos contratos ao trocar empresa
+  _extMes = ''; _extMesManual = false; _extMesesDisponiveis = []; _extPage = 1; // resetar filtro mês ao trocar empresa
   applyCompanyTheme();
   loadDashboard();
 }
@@ -44,6 +45,7 @@ let _contratosEmpresa='';
 let _vinculacoes={};
 let _extPage=1, _pagPage=1, _nfsPage=1;
 let _extMes='';
+let _extMesManual=false; // true quando o usuário clicou manualmente num mês (inclusive "Todos")
 const PAGE_SIZE=100;
 
 // ─── Helpers ─────────────────────────────────────────────────────
@@ -516,19 +518,51 @@ async function _loadDashPonto() {
 }
 
 // ─── Extratos ────────────────────────────────────────────────────
+// Meses do ano corrente disponíveis no banco (carregados 1x por loadExtratos)
+let _extMesesDisponiveis = [];
+
 function renderExtFilters(){
+  const MES_LABEL = {JAN:'Jan',FEV:'Fev',MAR:'Mar',ABR:'Abr',MAI:'Mai',JUN:'Jun',
+                     JUL:'Jul',AGO:'Ago',SET:'Set',OUT:'Out',NOV:'Nov',DEZ:'Dez'};
+  const MES_ORDER = ['JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DEZ'];
+  const ano = (_from||'2026').substring(0,4);
+
+  // Botões dinâmicos baseados nos meses disponíveis no banco
+  const mesesBtn = _extMesesDisponiveis.length
+    ? _extMesesDisponiveis
+    : MES_ORDER.filter(m => ['JAN','FEV','MAR'].includes(m)); // fallback inicial
+
+  const btnStyle = (ativo) =>
+    `padding:4px 12px;border-radius:6px;border:1px solid ${ativo?'#1d4ed8':'#e2e8f0'};background:${ativo?'#dbeafe':'#fff'};color:${ativo?'#1d4ed8':'#64748b'};font-size:11px;font-weight:700;cursor:pointer`;
+
+  const botoesHtml = mesesBtn
+    .sort((a,b) => MES_ORDER.indexOf(a) - MES_ORDER.indexOf(b))
+    .map(m => `<button onclick="_extMes='${m}';_extMesManual=true;_extPage=1;loadExtratos()" style="${btnStyle(_extMes===m)}">${MES_LABEL[m]||m}/${ano}</button>`)
+    .join('');
+
   document.getElementById('ext-filters').innerHTML=`
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <label style="font-size:11px;font-weight:700;color:#64748b">FILTRAR MÊS:</label>
-      <button onclick="_extMes='';_extPage=1;loadExtratos()" style="padding:4px 12px;border-radius:6px;border:1px solid ${!_extMes?'#1d4ed8':'#e2e8f0'};background:${!_extMes?'#dbeafe':'#fff'};color:${!_extMes?'#1d4ed8':'#64748b'};font-size:11px;font-weight:700;cursor:pointer">Todos</button>
-      <button onclick="_extMes='JAN';_extPage=1;loadExtratos()" style="padding:4px 12px;border-radius:6px;border:1px solid ${_extMes==='JAN'?'#1d4ed8':'#e2e8f0'};background:${_extMes==='JAN'?'#dbeafe':'#fff'};color:${_extMes==='JAN'?'#1d4ed8':'#64748b'};font-size:11px;font-weight:700;cursor:pointer">Jan/2026</button>
-      <button onclick="_extMes='FEV';_extPage=1;loadExtratos()" style="padding:4px 12px;border-radius:6px;border:1px solid ${_extMes==='FEV'?'#1d4ed8':'#e2e8f0'};background:${_extMes==='FEV'?'#dbeafe':'#fff'};color:${_extMes==='FEV'?'#1d4ed8':'#64748b'};font-size:11px;font-weight:700;cursor:pointer">Fev/2026</button>
-      <button onclick="_extMes='MAR';_extPage=1;loadExtratos()" style="padding:4px 12px;border-radius:6px;border:1px solid ${_extMes==='MAR'?'#1d4ed8':'#e2e8f0'};background:${_extMes==='MAR'?'#dbeafe':'#fff'};color:${_extMes==='MAR'?'#1d4ed8':'#64748b'};font-size:11px;font-weight:700;cursor:pointer">Mar/2026</button>
+      <button onclick="_extMes='';_extMesManual=true;_extPage=1;loadExtratos()" style="${btnStyle(!_extMes)}">Todos</button>
+      ${botoesHtml}
       <span style="margin-left:12px;font-size:10px;color:#94a3b8" id="ext-mes-info"></span>
     </div>`;
 }
 
 async function loadExtratos(){
+  // Buscar meses disponíveis no banco (para botões dinâmicos)
+  let mesesUrl=`/extratos/meses?`;
+  if(_from) mesesUrl+='from='+_from+'&';
+  if(_to)   mesesUrl+='to='+_to;
+  const mesesData = await api(mesesUrl).catch(()=>({meses:[]}));
+  if(mesesData.meses && mesesData.meses.length) {
+    _extMesesDisponiveis = mesesData.meses;
+    // Auto-seleciona o mês mais recente se o usuário não escolheu manualmente
+    if(!_extMesManual && !_extMes) {
+      _extMes = _extMesesDisponiveis[_extMesesDisponiveis.length - 1];
+    }
+  }
+
   renderExtFilters();
   let url=`/extratos?page=${_extPage}&limit=${PAGE_SIZE}`;
   if(_from) url+='&from='+_from;
@@ -2302,6 +2336,32 @@ async function importOFX(input) {
     if (r.status === 403) { alert('⛔ IMPORTAÇÃO BLOQUEADA\n\n' + (d.error||'Arquivo inválido.')); toast(d.error||'Bloqueado','error'); }
     else if (d.ok) { toast(d.message); loadDashboard(); loadImportHist(); }
     else toast(d.error||'Erro','error');
+  } catch(err) { toast('Erro: ' + err.message, 'error'); }
+  finally { hideLoading(); }
+  input.value = '';
+}
+
+// ─── Importação PDF de Extrato (BB / BRB / IA fallback) ─────────
+async function importPDFExtrato(input) {
+  if (!input.files[0]) return;
+  const file = input.files[0];
+  if (!file.name.toLowerCase().endsWith('.pdf')) { toast('Selecione um arquivo PDF','error'); input.value=''; return; }
+  const fd = new FormData();
+  fd.append('file', file);
+  showLoading('Lendo PDF: ' + file.name + '… (pode levar alguns segundos)');
+  try {
+    const token = getToken();
+    const headers = { 'X-Company': currentCompany };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const r = await fetch('/api/import/pdf-extrato', { method: 'POST', body: fd, headers });
+    const d = await r.json();
+    if (d.ok) {
+      const bancoLabel = { BB:'Banco do Brasil', BRB:'BRB', IA:'IA (Claude)' }[d.banco] || d.banco;
+      toast(`✅ ${d.imported} lançamentos importados via ${bancoLabel}` + (d.skipped ? ` · ${d.skipped} duplicados` : ''));
+      loadDashboard(); loadImportHist();
+    } else {
+      toast(d.error || 'Erro ao processar PDF', 'error');
+    }
   } catch(err) { toast('Erro: ' + err.message, 'error'); }
   finally { hideLoading(); }
   input.value = '';

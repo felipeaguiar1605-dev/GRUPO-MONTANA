@@ -586,4 +586,144 @@ router.post('/folha/:id/importar-excel', (req, res, next) => {
   });
 });
 
+// ─── Holerite Digital ─────────────────────────────────────────────────────────
+
+// GET /rh/holerite/:funcionario_id/:competencia — dados JSON
+router.get('/holerite/:funcionario_id/:competencia', (req, res) => {
+  const db = req.db;
+  const { funcionario_id, competencia } = req.params; // competencia = YYYY-MM
+
+  const func = db.prepare('SELECT * FROM rh_funcionarios WHERE id=?').get(funcionario_id);
+  if (!func) return res.status(404).json({ error: 'Funcionário não encontrado' });
+
+  const folha = db.prepare(`
+    SELECT fi.* FROM rh_folha_itens fi
+    JOIN rh_folha f ON fi.folha_id = f.id
+    WHERE f.funcionario_id=? AND substr(f.competencia,1,7)=?
+    ORDER BY fi.tipo, fi.descricao
+  `).all(funcionario_id, competencia.substring(0,7));
+
+  const proventos = folha.filter(i => i.tipo === 'provento' || i.tipo === 'P' || i.tipo === 'PROVENTO');
+  const descontos = folha.filter(i => i.tipo === 'desconto' || i.tipo === 'D' || i.tipo === 'DESCONTO');
+  const total_proventos = proventos.reduce((s,i) => s + (i.valor||0), 0);
+  const total_descontos = descontos.reduce((s,i) => s + (i.valor||0), 0);
+  const liquido = total_proventos - total_descontos;
+
+  res.json({
+    funcionario: func,
+    competencia: competencia.substring(0,7),
+    itens: folha,
+    proventos,
+    descontos,
+    total_proventos,
+    total_descontos,
+    liquido
+  });
+});
+
+// GET /rh/holerite-html/:funcionario_id/:competencia — retorna HTML para impressão (sem auth obrigatório)
+router.get('/holerite-html/:funcionario_id/:competencia', (req, res) => {
+  const db = req.db;
+  const { funcionario_id, competencia } = req.params;
+  const company = req.company;
+
+  const func = db.prepare('SELECT * FROM rh_funcionarios WHERE id=?').get(funcionario_id);
+  if (!func) return res.status(404).send('<h1>Funcionário não encontrado</h1>');
+
+  const folha = db.prepare(`
+    SELECT fi.* FROM rh_folha_itens fi
+    JOIN rh_folha f ON fi.folha_id = f.id
+    WHERE f.funcionario_id=? AND substr(f.competencia,1,7)=?
+    ORDER BY fi.tipo, fi.descricao
+  `).all(funcionario_id, competencia.substring(0,7));
+
+  const proventos = folha.filter(i => i.tipo === 'provento' || i.tipo === 'P' || i.tipo === 'PROVENTO');
+  const descontos = folha.filter(i => i.tipo === 'desconto' || i.tipo === 'D' || i.tipo === 'DESCONTO');
+  const total_prov = proventos.reduce((s,i) => s + (i.valor||0), 0);
+  const total_desc = descontos.reduce((s,i) => s + (i.valor||0), 0);
+  const liquido = total_prov - total_desc;
+  const brl = v => 'R$ ' + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const [ano, mes] = competencia.split('-');
+  const mesesNome = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><title>Holerite ${func.nome} — ${competencia}</title>
+<style>
+  body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:20px;color:#1e293b}
+  .header{background:#1e293b;color:#fff;padding:12px 16px;border-radius:6px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+  .header h2{margin:0;font-size:14px}
+  .header p{margin:2px 0;font-size:10px;opacity:.8}
+  .func-info{display:grid;grid-template-columns:1fr 1fr;gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px;margin-bottom:12px}
+  .func-info div{display:flex;flex-direction:column;gap:2px}
+  .func-info label{font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase}
+  .func-info span{font-size:11px;font-weight:600}
+  table{width:100%;border-collapse:collapse;margin-bottom:8px}
+  th{background:#f1f5f9;padding:6px 8px;text-align:left;font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;border-bottom:1px solid #e2e8f0}
+  td{padding:5px 8px;border-bottom:1px solid #f1f5f9;font-size:10px}
+  .total-row{background:#f8fafc;font-weight:700}
+  .liquido{background:#1e293b;color:#fff;padding:12px 16px;border-radius:6px;display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+  .liquido span{font-size:18px;font-weight:800}
+  @media print{body{padding:10px}.no-print{display:none}}
+</style>
+</head>
+<body>
+<div class="no-print" style="margin-bottom:12px">
+  <button onclick="window.print()" style="padding:8px 16px;background:#1e293b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px">Imprimir / Salvar PDF</button>
+  <button onclick="window.close()" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;font-size:12px;margin-left:8px">Fechar</button>
+</div>
+
+<div class="header">
+  <div><h2>${company?.nome || 'Montana'}</h2><p>CNPJ: ${company?.cnpj || ''}</p></div>
+  <div style="text-align:right"><p style="font-size:13px;font-weight:700">CONTRACHEQUE</p><p>${mesesNome[parseInt(mes)||0]}/${ano}</p></div>
+</div>
+
+<div class="func-info">
+  <div><label>Nome</label><span>${func.nome}</span></div>
+  <div><label>Matrícula</label><span>${func.matricula||func.id}</span></div>
+  <div><label>Cargo</label><span>${func.cargo||func.cargo_nome||'—'}</span></div>
+  <div><label>Lotação</label><span>${func.lotacao||'—'}</span></div>
+  <div><label>Admissão</label><span>${func.data_admissao||'—'}</span></div>
+  <div><label>Salário Base</label><span>${brl(func.salario_base)}</span></div>
+</div>
+
+<table>
+  <thead><tr><th>Código</th><th>Descrição</th><th>Referência</th><th style="text-align:right">Proventos</th><th style="text-align:right">Descontos</th></tr></thead>
+  <tbody>
+    ${folha.map(i => `<tr>
+      <td>${i.codigo||'—'}</td>
+      <td>${i.descricao}</td>
+      <td style="text-align:center">${i.referencia||'—'}</td>
+      <td style="text-align:right;color:#059669">${(i.tipo==='provento'||i.tipo==='P'||i.tipo==='PROVENTO') ? brl(i.valor) : ''}</td>
+      <td style="text-align:right;color:#dc2626">${(i.tipo==='desconto'||i.tipo==='D'||i.tipo==='DESCONTO') ? brl(i.valor) : ''}</td>
+    </tr>`).join('')}
+    <tr class="total-row">
+      <td colspan="3" style="text-align:right;font-size:10px">TOTAIS:</td>
+      <td style="text-align:right;color:#059669">${brl(total_prov)}</td>
+      <td style="text-align:right;color:#dc2626">${brl(total_desc)}</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="liquido">
+  <div><strong>VALOR LÍQUIDO A RECEBER</strong></div>
+  <span>${brl(liquido)}</span>
+</div>
+
+<div style="margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:20px;font-size:10px">
+  <div style="border-top:1px solid #1e293b;padding-top:6px;text-align:center">
+    <p style="margin:0">Assinatura do Empregado</p>
+    <p style="margin:2px 0;color:#64748b">${func.nome}</p>
+  </div>
+  <div style="border-top:1px solid #1e293b;padding-top:6px;text-align:center">
+    <p style="margin:0">Assinatura do Empregador</p>
+    <p style="margin:2px 0;color:#64748b">${company?.nome||'Montana'}</p>
+  </div>
+</div>
+</body></html>`;
+
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(html);
+});
+
 module.exports = router;

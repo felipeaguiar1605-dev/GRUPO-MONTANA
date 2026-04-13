@@ -13,7 +13,7 @@ const express   = require('express');
 const companyMw = require('../companyMiddleware');
 
 const router = express.Router();
-router.use(companyMw);
+// companyMw aplicado apenas nas rotas que precisam de DB (não em /auth e /callback do OAuth)
 
 // ─── Helpers OAuth ─────────────────────────────────────────────────────────────
 
@@ -66,7 +66,7 @@ async function getDriveClient(db) {
 
 // ─── GET /status ──────────────────────────────────────────────────────────────
 
-router.get('/status', (req, res) => {
+router.get('/status', companyMw, (req, res) => {
   const db = req.db;
   const driveConfigurado = isDriveConfigurado();
 
@@ -84,15 +84,36 @@ router.get('/status', (req, res) => {
 });
 
 // ─── GET /auth ────────────────────────────────────────────────────────────────
+// Aceita token JWT e company via query params (popup não envia headers)
 
 router.get('/auth', (req, res) => {
   if (!isDriveConfigurado()) {
     return res.status(503).json({ error: 'Google Drive não configurado no servidor' });
   }
+
+  // Verifica JWT passado via query param (popup não pode enviar header Authorization)
+  const token   = req.query.token || req.headers['authorization']?.replace('Bearer ', '');
+  const company = req.query.company || req.headers['x-company'];
+
+  if (!token || !company) {
+    return res.status(401).send('Token e empresa obrigatórios');
+  }
+
+  try {
+    const jwt = require('jsonwebtoken');
+    jwt.verify(token, process.env.JWT_SECRET);
+  } catch {
+    return res.status(401).send('Token inválido');
+  }
+
   const oauth2 = getOAuth2Client();
+  // Codifica company no state para recuperar no callback
+  const state = Buffer.from(JSON.stringify({ company, token })).toString('base64');
+
   const url = oauth2.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
+    state,
     scope: [
       'https://www.googleapis.com/auth/drive.readonly',
       'https://www.googleapis.com/auth/drive.metadata.readonly',
@@ -104,11 +125,22 @@ router.get('/auth', (req, res) => {
 // ─── GET /callback ────────────────────────────────────────────────────────────
 
 router.get('/callback', async (req, res) => {
-  const { code, error } = req.query;
+  const { code, error, state } = req.query;
   if (error) return res.status(400).send(`Erro OAuth: ${error}`);
   if (!code)  return res.status(400).send('Código OAuth ausente');
 
-  const db = req.db;
+  // Recupera company do state
+  let companyKey = null;
+  try {
+    const decoded = JSON.parse(Buffer.from(state || '', 'base64').toString('utf8'));
+    companyKey = decoded.company;
+  } catch (_) {}
+
+  // Fallback: usa req.db se company não veio no state
+  let db = req.db;
+  if (!db && companyKey) {
+    try { db = require('../db').getDb(companyKey); } catch (_) {}
+  }
   if (!db) return res.status(400).send('Empresa não identificada');
 
   try {
@@ -124,7 +156,7 @@ router.get('/callback', async (req, res) => {
 
 // ─── DELETE /desconectar ──────────────────────────────────────────────────────
 
-router.delete('/desconectar', (req, res) => {
+router.delete('/desconectar', companyMw, (req, res) => {
   const db = req.db;
   if (!db) return res.status(400).json({ error: 'Empresa não identificada' });
   removeTokens(db);
@@ -133,7 +165,7 @@ router.delete('/desconectar', (req, res) => {
 
 // ─── POST /buscar ─────────────────────────────────────────────────────────────
 
-router.post('/buscar', async (req, res) => {
+router.post('/buscar', companyMw, async (req, res) => {
   const db = req.db;
   if (!db) return res.status(400).json({ error: 'Empresa não identificada' });
 
@@ -183,7 +215,7 @@ router.post('/buscar', async (req, res) => {
         const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
         const lista = arquivos.map((a, i) => `${i+1}. ${a.nome} (${a.modificado})`).join('\n');
         const msg = await client.messages.create({
-          model: 'claude-haiku-4-5-20251001',
+          model: 'claude-haiku-4-5',
           max_tokens: 512,
           messages: [{
             role: 'user',
@@ -208,7 +240,7 @@ router.post('/buscar', async (req, res) => {
 
 // ─── GET /sugestoes ───────────────────────────────────────────────────────────
 
-router.get('/sugestoes', async (req, res) => {
+router.get('/sugestoes', companyMw, async (req, res) => {
   const db = req.db;
   if (!db) return res.status(400).json({ error: 'Empresa não identificada' });
 
@@ -249,7 +281,7 @@ router.get('/sugestoes', async (req, res) => {
     const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
 
     const msg = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-haiku-4-5',
       max_tokens: 800,
       messages: [{
         role: 'user',

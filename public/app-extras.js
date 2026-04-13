@@ -12,7 +12,7 @@
     if (id === 'dre')         { loadDRE(); loadApuracaoMensal(); }
     if (id === 'margem')      loadMargem();
     if (id === 'reajuste')    loadReajustes();
-    if (id === 'rh')          loadRH();
+    if (id === 'rh')          { loadRH(); loadEPIRelatorio(); }
     if (id === 'auditoria')   loadAuditoria();
     if (id === 'retencoes')        loadRetencoes();
     if (id === 'conta-vinculada') loadContaVinculada();
@@ -2274,7 +2274,9 @@ function filtrarFuncionarios() {
         <button onclick="demitirFuncionario(${f.id},'${f.nome.replace(/'/g, "\\'")}')"
           style="font-size:9px;padding:2px 7px;border:1px solid #fca5a5;border-radius:4px;background:#fef2f2;color:#dc2626;cursor:pointer"
           ${f.status !== 'ATIVO' ? 'disabled' : ''}>Demitir</button>
-        ${f.status === 'ATIVO' ? `<button onclick="verPontoFuncionario(${f.id})" style="font-size:9px;padding:2px 7px;border:1px solid #5eead4;border-radius:4px;background:#ccfbf1;color:#0f766e;cursor:pointer">🕐 Ponto</button>` : ''}
+        ${f.status === 'ATIVO' ? `<button onclick="verPontoFuncionario(${f.id})" style="font-size:9px;padding:2px 7px;border:1px solid #5eead4;border-radius:4px;background:#ccfbf1;color:#0f766e;cursor:pointer">Ponto</button>` : ''}
+        <button onclick="abrirHolerite(${f.id},'${f.nome.replace(/'/g, "\\'")}')" style="font-size:9px;padding:2px 7px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8;cursor:pointer">Holerite</button>
+        <button onclick="abrirEntregaEPI(${f.id},'${f.nome.replace(/'/g, "\\'")}')" style="font-size:9px;padding:2px 7px;border:1px solid #fcd34d;border-radius:4px;background:#fffbeb;color:#d97706;cursor:pointer">EPI</button>
       </td>
     </tr>`;
   }).join('') || '<tr><td colspan="9" style="text-align:center;color:#94a3b8;padding:20px;font-size:11px">Nenhum funcionário encontrado</td></tr>';
@@ -3038,4 +3040,228 @@ async function loadMargemPorPosto() {
         <span style="background:${corMargem(p.margem_pct)}20;color:${corMargem(p.margem_pct)};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">${pct(p.margem_pct)}</span>
       </td>
     </tr>`).join('');
+}
+
+// ─── Cobertura de Postos ──────────────────────────────────────────────────────
+async function loadCoberturaPosots() {
+  const el = document.getElementById('cobertura-body');
+  const kpiEl = document.getElementById('cobertura-kpis');
+  if (!el) return;
+
+  const p = window._globalPeriod || {};
+  const qs = p.from ? `?from=${p.from}&to=${p.to}` : '';
+  const d = await api('/relatorios/cobertura-postos' + qs);
+  if (!d) return;
+  if (d.message) { el.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:20px">${d.message}</td></tr>`; return; }
+
+  const r = d.resumo || {};
+  if (kpiEl) {
+    kpiEl.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px">
+        <div class="kpi" style="border-left:4px solid #3b82f6">
+          <div class="kpi-l">Total de Postos</div>
+          <div class="kpi-v" style="color:#3b82f6">${r.total_postos||0}</div>
+          <div class="kpi-s">competência ${d.competencia}</div>
+        </div>
+        <div class="kpi" style="border-left:4px solid #059669">
+          <div class="kpi-l">Postos Cobertos</div>
+          <div class="kpi-v" style="color:#059669">${r.postos_ok||0}</div>
+          <div class="kpi-s">cobertura &ge; 90%</div>
+        </div>
+        <div class="kpi" style="border-left:4px solid #dc2626">
+          <div class="kpi-l">Postos Críticos</div>
+          <div class="kpi-v" style="color:#dc2626">${r.postos_criticos||0}</div>
+          <div class="kpi-s">cobertura &lt; 60%</div>
+        </div>
+        <div class="kpi" style="border-left:4px solid #d97706">
+          <div class="kpi-l">Postos Parciais</div>
+          <div class="kpi-v" style="color:#d97706">${r.postos_parciais||0}</div>
+          <div class="kpi-s">cobertura 60–90%</div>
+        </div>
+      </div>`;
+  }
+
+  const corStatus = { 'OK':'#059669', 'PARCIAL':'#d97706', 'CRÍTICO':'#dc2626' };
+  el.innerHTML = (d.postos||[]).map(p => `
+    <tr>
+      <td style="font-weight:600">${p.descricao||'—'}</td>
+      <td style="color:#64748b;font-size:11px">${p.orgao||'—'}</td>
+      <td style="text-align:center">${p.qtd_esperada}</td>
+      <td style="text-align:center">${p.funcionarios_escalados}</td>
+      <td style="text-align:center">
+        <div style="background:#e2e8f0;border-radius:4px;height:8px;width:80px;display:inline-block;vertical-align:middle">
+          <div style="background:${corStatus[p.status_cobertura]};height:8px;border-radius:4px;width:${p.cobertura_pct}%"></div>
+        </div>
+        <span style="font-size:11px;margin-left:4px">${p.cobertura_pct}%</span>
+      </td>
+      <td style="text-align:center">
+        <span style="background:${corStatus[p.status_cobertura]}20;color:${corStatus[p.status_cobertura]};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">${p.status_cobertura}</span>
+      </td>
+      <td style="text-align:center;font-size:11px;color:${p.status_boletim==='aprovado'?'#059669':'#d97706'}">${p.status_boletim||'sem boletim'}</td>
+    </tr>`).join('');
+}
+
+// ─── Holerite Digital ─────────────────────────────────────────────────────────
+function abrirHolerite(funcionario_id, nome) {
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;padding:24px;width:360px;max-width:95vw">
+      <h3 style="font-size:15px;font-weight:700;margin-bottom:16px">Holerite — ${nome}</h3>
+      <div style="margin-bottom:16px">
+        <label style="font-size:11px;font-weight:700;color:#64748b;display:block;margin-bottom:4px">COMPETÊNCIA</label>
+        <input type="month" id="hol-comp" value="${new Date().toISOString().substring(0,7)}"
+          style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box">
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button onclick="this.closest('[style*=fixed]').remove()" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;cursor:pointer">Cancelar</button>
+        <button onclick="
+          const comp = document.getElementById('hol-comp').value;
+          if(!comp){alert('Selecione a competência');return;}
+          const company = window._selectedCompany||localStorage.getItem('company')||'assessoria';
+          window.open('/api/rh/holerite-html/${funcionario_id}/'+comp+'?company='+company,'_blank','width=800,height=600');
+          this.closest('[style*=fixed]').remove();
+        " style="padding:8px 16px;background:#1e293b;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">Gerar Holerite</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+// ─── WhatsApp Config ──────────────────────────────────────────────────────────
+async function salvarConfigWhatsApp() {
+  const body = {
+    provider:        document.getElementById('cfg-wpp-provider')?.value,
+    instance_id:     document.getElementById('cfg-wpp-instance')?.value?.trim(),
+    token:           document.getElementById('cfg-wpp-token')?.value,
+    numero_destino:  document.getElementById('cfg-wpp-numero')?.value?.trim(),
+  };
+  const r = await api('/whatsapp/config', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  if (r && r.ok) toast('Configuração WhatsApp salva!');
+  else toast((r && r.error) || 'Erro ao salvar', 'error');
+}
+
+async function testarWhatsApp() {
+  const st = document.getElementById('cfg-wpp-status');
+  if (st) st.textContent = 'Testando...';
+  await salvarConfigWhatsApp();
+  const r = await api('/whatsapp/testar', { method: 'POST' });
+  if (st) st.textContent = (r && r.ok) ? 'Mensagem enviada!' : 'Falha: ' + ((r && r.error)||'erro');
+  if (r && r.ok) toast('WhatsApp: mensagem de teste enviada!');
+  else toast((r && r.error) || 'Falha no WhatsApp', 'error');
+}
+
+// ─── EPI / Uniformes ─────────────────────────────────────────────────────────
+async function loadEPIRelatorio() {
+  const el = document.getElementById('epi-body');
+  const kpiEl = document.getElementById('epi-kpis');
+  if (!el) return;
+
+  const d = await api('/epi/relatorio');
+  if (!d) return;
+
+  const brl = v => 'R$\u00a0' + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+  if (kpiEl) {
+    const totalItens = (d.por_item||[]).reduce((s,i) => s + (i.em_uso||0), 0);
+    kpiEl.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px">
+        <div class="kpi" style="border-left:4px solid #f59e0b">
+          <div class="kpi-l">EPIs em Uso</div>
+          <div class="kpi-v" style="color:#f59e0b">${totalItens}</div>
+          <div class="kpi-s">${(d.por_item||[]).length} tipos diferentes</div>
+        </div>
+        <div class="kpi" style="border-left:4px solid #dc2626">
+          <div class="kpi-l">Custo Total EPIs</div>
+          <div class="kpi-v" style="color:#dc2626">${brl(d.total_custo)}</div>
+          <div class="kpi-s">estoque ativo</div>
+        </div>
+      </div>`;
+  }
+
+  el.innerHTML = (d.por_item||[]).map(i => `
+    <tr>
+      <td style="font-weight:600">${i.nome_item}</td>
+      <td><span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:4px;font-size:10px">${i.tipo}</span></td>
+      <td style="text-align:center">${i.em_uso}</td>
+      <td style="text-align:center;color:#64748b">${i.devolvidos}</td>
+      <td style="text-align:right;color:#dc2626">${brl(i.custo_total)}</td>
+    </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:20px">Nenhum EPI registrado</td></tr>';
+}
+
+function abrirEntregaEPI(funcionario_id, nome_func) {
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center';
+  const itensComuns = ['Colete Balístico','Colete Refletivo','Farda Completa','Crachá','Algema','Lanterna','Cassetete','Boné/Boina','Coturno','Cinto Tático','Rádio Comunicador','Luva','Máscara'];
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;padding:24px;width:420px;max-width:95vw">
+      <h3 style="font-size:15px;font-weight:700;margin-bottom:16px">Entrega de EPI — ${nome_func}</h3>
+      <div style="display:grid;gap:10px">
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;display:block;margin-bottom:4px">ITEM</label>
+          <select id="epi-item" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+            ${itensComuns.map(i => `<option>${i}</option>`).join('')}
+            <option value="">Outro (digitar abaixo)</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;display:block;margin-bottom:4px">ITEM PERSONALIZADO</label>
+          <input id="epi-item-custom" type="text" placeholder="Deixe vazio para usar seleção acima" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#64748b;display:block;margin-bottom:4px">TIPO</label>
+            <select id="epi-tipo" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+              <option value="EPI">EPI</option>
+              <option value="UNIFORME">Uniforme</option>
+              <option value="EQUIPAMENTO">Equipamento</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#64748b;display:block;margin-bottom:4px">VALOR (R$)</label>
+            <input id="epi-valor" type="number" step="0.01" placeholder="0,00" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#64748b;display:block;margin-bottom:4px">TAMANHO</label>
+            <input id="epi-tamanho" type="text" placeholder="M, G, 42..." style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+          </div>
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;display:block;margin-bottom:4px">OBS</label>
+          <input id="epi-obs" type="text" placeholder="Observações..." style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+        <button onclick="this.closest('[style*=fixed]').remove()" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;cursor:pointer">Cancelar</button>
+        <button onclick="registrarEntregaEPI(${funcionario_id})" style="padding:8px 16px;background:#f59e0b;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">Registrar Entrega</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+async function registrarEntregaEPI(funcionario_id) {
+  const itemSel = document.getElementById('epi-item')?.value;
+  const itemCustom = document.getElementById('epi-item-custom')?.value?.trim();
+  const nome_item = itemCustom || itemSel;
+  if (!nome_item) { toast('Selecione ou digite o item', 'error'); return; }
+
+  const r = await api('/epi/entregar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      funcionario_id,
+      nome_item,
+      tipo:     document.getElementById('epi-tipo')?.value,
+      valor:    parseFloat(document.getElementById('epi-valor')?.value||0),
+      tamanho:  document.getElementById('epi-tamanho')?.value,
+      obs:      document.getElementById('epi-obs')?.value,
+    })
+  });
+
+  if (r && r.ok) {
+    toast('EPI registrado com sucesso!');
+    document.querySelector('[style*=fixed]')?.remove();
+    loadEPIRelatorio();
+  } else {
+    toast((r && r.error) || 'Erro ao registrar EPI', 'error');
+  }
 }

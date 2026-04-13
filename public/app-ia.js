@@ -43,7 +43,9 @@ function iaDrivePanel() {
   const painel  = document.getElementById('ia-drive-panel');
   sidebar.style.display = 'none';
   iaAberto = false;
-  painel.style.display = painel.style.display === 'flex' ? 'none' : 'flex';
+  const abrindo = painel.style.display !== 'flex';
+  painel.style.display = abrindo ? 'flex' : 'none';
+  if (abrindo) driveCheckStatus(); // atualiza status ao abrir
 }
 
 async function iaCheckStatus() {
@@ -159,8 +161,11 @@ async function driveCheckStatus() {
 
 function driveConectar() {
   if (!driveConectado) {
-    // Abre fluxo OAuth em popup
-    window.open('/api/drive/auth', 'drive_oauth', 'width=500,height=600');
+    // Passa token e empresa via query params (popup não envia headers)
+    const token   = localStorage.getItem('montana_jwt') || '';
+    const company = currentCompany || localStorage.getItem('montana_company') || 'assessoria';
+    const url = `/api/drive/auth?token=${encodeURIComponent(token)}&company=${encodeURIComponent(company)}`;
+    window.open(url, 'drive_oauth', 'width=500,height=600');
   }
 }
 
@@ -259,3 +264,8 @@ async function driveSugestoes() {
     results.innerHTML = `<div style="padding:12px;font-size:12px;color:#ef4444">Erro: ${e.message}</div>`;
   }
 }
+
+
+// ══════════════════════════════════════════════════════════════════
+//  INTEGRAÇÃO BANCO DO BRASIL
+// ══════════════════════════════════════════════════════════════════
