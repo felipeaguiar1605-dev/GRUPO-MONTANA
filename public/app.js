@@ -89,8 +89,10 @@ async function api(url,opts){
   const headers={'X-Company':currentCompany};
   const token=localStorage.getItem('montana_token');
   if(token) headers['Authorization']='Bearer '+token;
+  if(opts&&opts.body&&typeof opts.body==='string') headers['Content-Type']='application/json';
   if(opts&&opts.headers) Object.assign(headers,opts.headers);
   const r=await fetch('/api'+url,{...opts,headers});
+  if(r.status===401){const d=await r.json().catch(()=>({}));if(typeof clearToken==='function')clearToken();if(typeof showLoginModal==='function')showLoginModal(d.code==='TOKEN_EXPIRED'?'Sessão expirada.':'Autenticação necessária.');throw new Error('Unauthorized');}
   return r.json();
 }
 

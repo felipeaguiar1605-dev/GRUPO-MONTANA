@@ -532,7 +532,7 @@ router.post('/emitir', async (req, res) => {
     if (/certificado|pfx|password|pkcs12/i.test(e.message)) {
       return res.status(501).json({ ok: false, error: e.message });
     }
-    res.status(502).json({ ok: false, error: e.message });
+    res.status(502).json({ ok: false, error: e.message, detail: e.response || null });
   }
 });
 
