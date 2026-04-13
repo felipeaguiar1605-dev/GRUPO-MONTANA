@@ -39,6 +39,16 @@ for (const key of Object.keys(COMPANIES)) {
   try { getDb(key); } catch (e) { console.error(`  ⚠ DB [${key}]:`, e.message); }
 }
 
+// ── Segurança: headers HTTP ───────────────────────────────────────
+app.use((req, res, next) => {
+  // CSP: bloqueia scripts inline injetados (mitigação XSS)
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'");
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));

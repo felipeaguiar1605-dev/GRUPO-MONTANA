@@ -4,8 +4,8 @@
 #  Execute no servidor GCP:
 #    chmod +x setup-ssl.sh && sudo bash setup-ssl.sh
 #
-#  PRÉ-REQUISITO: DNS do domínio deve apontar para este IP
-#    sistema.grupomontanasec.com → 104.196.22.170
+#  PRÉ-REQUISITO: DNS do domínio deve apontar para o IP do servidor
+#    sistema.grupomontanasec.com → <IP_DO_SERVIDOR>
 # ═══════════════════════════════════════════════════════════════════
 set -e
 

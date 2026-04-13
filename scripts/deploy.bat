@@ -8,11 +8,12 @@
 :: ═══════════════════════════════════════════════════════════════════
 
 :: ── CONFIGURAÇÕES ── Ajuste conforme seu servidor ─────────────────
-set GCP_IP=104.196.22.170
+:: IMPORTANTE: Defina GCP_IP como variável de ambiente ou altere aqui
+if "%GCP_IP%"=="" set GCP_IP=SEU_IP_AQUI
 set GCP_USER=diretoria
 set GCP_PATH=/opt/montana/app_unificado
 set LOCAL_PATH=%~dp0..
-set SSH_KEY=%USERPROFILE%\.ssh\id_montana
+if "%SSH_KEY%"=="" set SSH_KEY=%USERPROFILE%\.ssh\id_montana
 :: ──────────────────────────────────────────────────────────────────
 
 echo.

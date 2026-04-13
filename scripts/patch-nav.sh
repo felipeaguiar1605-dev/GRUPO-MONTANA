@@ -270,5 +270,5 @@ pm2 restart montana-app
 echo ""
 echo "═══════════════════════════════════════════"
 echo " ✅ Patch aplicado com sucesso!"
-echo "    Acesse: http://104.196.22.170:3002"
+echo "    Acesse: http://localhost:3002"
 echo "═══════════════════════════════════════════"

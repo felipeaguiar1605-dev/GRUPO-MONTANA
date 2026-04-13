@@ -89,15 +89,15 @@ function renderCertTable(rows) {
     ? `<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:20px">Nenhuma certidão cadastrada. Clique em "+ Nova Certidão" para começar.</td></tr>`
     : rows.map(r => `
       <tr>
-        <td><strong>${r.tipo}</strong></td>
-        <td>${r.numero || '—'}</td>
-        <td>${r.data_emissao || '—'}</td>
-        <td><strong>${r.data_validade || '—'}</strong></td>
+        <td><strong>${esc(r.tipo)}</strong></td>
+        <td>${esc(r.numero) || '—'}</td>
+        <td>${esc(r.data_emissao) || '—'}</td>
+        <td><strong>${esc(r.data_validade) || '—'}</strong></td>
         <td>${certStatusBadge(r.status)}</td>
         <td>${r.arquivo_pdf
-          ? `<a href="/api/certidoes/arquivo/${r.arquivo_pdf}?company=${window.currentCompany}" target="_blank" style="color:#0369a1;font-size:10px">📄 Ver PDF</a>`
+          ? `<a href="/api/certidoes/arquivo/${encodeURIComponent(r.arquivo_pdf)}?company=${window.currentCompany}" target="_blank" style="color:#0369a1;font-size:10px">📄 Ver PDF</a>`
           : '<span style="color:#94a3b8;font-size:10px">—</span>'}</td>
-        <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.observacoes || ''}</td>
+        <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.observacoes) || ''}</td>
         <td>
           <button onclick="editarCertidao(${r.id})" style="background:#dbeafe;color:#1d4ed8;border:none;padding:3px 8px;border-radius:4px;font-size:9px;cursor:pointer;margin-right:4px">✏️</button>
           <button onclick="deletarCertidao(${r.id})" style="background:#fee2e2;color:#dc2626;border:none;padding:3px 8px;border-radius:4px;font-size:9px;cursor:pointer">🗑️</button>
@@ -500,7 +500,7 @@ async function loadOrcamentos() {
   list.innerHTML = data.data.map(r => `
     <div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:6px">
       <div style="flex:1">
-        <div style="font-size:11px;font-weight:700;color:#0f172a">${r.nome}</div>
+        <div style="font-size:11px;font-weight:700;color:#0f172a">${esc(r.nome)}</div>
         <div style="font-size:9px;color:#64748b">${r.tipo_posto} · Salário: ${brl(r.salario_base)}</div>
         <div style="font-size:10px;color:#059669;font-weight:700">${brl(r.preco_mensal)}/mês</div>
       </div>
@@ -681,7 +681,7 @@ async function loadMargem() {
     const wPct = (pct / maxMargem * 100).toFixed(0);
     const label = c.contrato.length > 35 ? c.contrato.substring(0, 35) + '…' : c.contrato;
     return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
-      <div style="font-size:9px;color:#475569;width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${c.contrato}">${label}</div>
+      <div style="font-size:9px;color:#475569;width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(c.contrato)}">${esc(label)}</div>
       <div style="flex:1;height:16px;background:#f1f5f9;border-radius:3px;overflow:hidden">
         <div style="width:${wPct}%;height:100%;background:${cor};border-radius:3px;display:flex;align-items:center;padding-left:4px">
           <span style="font-size:8px;color:#fff;font-weight:700;white-space:nowrap">${c.margem_pct}%</span>
@@ -1245,7 +1245,7 @@ async function loadRetencoes() {
     const esfColor = x.esfera === 'Federal' ? '#1d4ed8' : x.esfera === 'Municipal' ? '#15803d' : '#d97706';
     return `<tr style="${x.status === 'DIVERGENTE' ? 'background:#fef2f2' : x.status === 'ALERTA' ? 'background:#fffbeb' : ''}">
       <td class="mono" style="font-size:10px;font-weight:700;color:#0e7490">NF ${x.numero}</td>
-      <td style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${x.tomador}">${(x.tomador || '').substring(0, 35)}</td>
+      <td style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(x.tomador)}">${esc((x.tomador || '').substring(0, 35))}</td>
       <td><span style="font-size:9px;font-weight:700;color:${esfColor}">${x.esfera}</span></td>
       <td class="r mono" style="font-weight:600">${brl(x.valor_bruto)}</td>
       <td class="r mono" style="color:#dc2626;font-weight:600">${brl(x.retencao_real)}</td>
@@ -2842,7 +2842,7 @@ window.showPrefSub = function(stab, el) {
 
 // ─── Gestão de Usuários (Config) ─────────────────────────────────
 async function criarUsuariosFuncionarios() {
-  if (!confirm('Criar logins automáticos para todos os funcionários ativos?\nSenha inicial: Montana@2026')) return;
+  if (!confirm('Criar logins automáticos para todos os funcionários ativos?\nA senha inicial é a padrão definida no servidor.')) return;
   showLoading('Gerando logins…');
   try {
     const r = await api('/usuarios/criar-funcionarios', { method: 'POST' });
@@ -2867,10 +2867,10 @@ async function criarUsuarioManual() {
   try {
     const r = await api('/usuarios', {
       method: 'POST',
-      body: JSON.stringify({ usuario: login, nome, senha: 'Montana@2026', role, lotacao })
+      body: JSON.stringify({ usuario: login, nome, role, lotacao })
     });
     if (r.id || r.ok) {
-      toast(`✅ Usuário "${login}" criado — senha: Montana@2026`, 'success');
+      toast(`Usuário "${login}" criado com senha padrão do sistema`, 'success');
       document.getElementById('cfg-novo-nome').value = '';
       document.getElementById('cfg-novo-login').value = '';
       if(document.getElementById('cfg-novo-lotacao')) document.getElementById('cfg-novo-lotacao').value = '';
@@ -2923,10 +2923,10 @@ async function loadUsuariosConfig() {
 }
 
 async function resetarSenhaUsuario(id, login) {
-  if (!confirm(`Resetar senha de "${login}" para Montana@2026?`)) return;
+  if (!confirm(`Resetar senha de "${login}" para a senha padrão do sistema?`)) return;
   try {
     const r = await api(`/usuarios/${id}/reset-senha`, { method: 'POST' });
-    toast(r.ok ? `✅ Senha resetada — nova senha: Montana@2026` : (r.error || 'Erro'), r.ok ? 'success' : 'error');
+    toast(r.ok ? `Senha de "${login}" resetada para o padrão do sistema` : (r.error || 'Erro'), r.ok ? 'success' : 'error');
   } catch(e) { toast('Erro: ' + e.message, 'error'); }
 }
 

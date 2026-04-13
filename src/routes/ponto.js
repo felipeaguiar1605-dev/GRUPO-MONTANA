@@ -232,7 +232,7 @@ router.patch('/:id([0-9]+)', (req, res) => {
 
 // ─── Helper: decodifica JWT sem verificar (apenas lê payload) ────────────────
 const jwt = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET || 'montana_seg_secret_2026_!xK9#';
+const { JWT_SECRET } = require('../auth');
 function getUserFromReq(req) {
   try {
     const h = req.headers['authorization'];

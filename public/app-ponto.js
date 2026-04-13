@@ -159,8 +159,8 @@ async function loadPontoRegistros() {
     else if (entrada)         status = '<span style="background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:20px;font-size:9px;font-weight:700">▶ Trabalhando</span>';
 
     return `<tr>
-      <td><strong>${fd.nome}</strong></td>
-      <td style="font-size:10px;color:#64748b">${fd.cargo || '—'}</td>
+      <td><strong>${esc(fd.nome)}</strong></td>
+      <td style="font-size:10px;color:#64748b">${esc(fd.cargo) || '—'}</td>
       <td style="text-align:center">${hora(entrada)}${acoes(entrada)}</td>
       <td style="text-align:center">${hora(intInic)}${acoes(intInic)}</td>
       <td style="text-align:center">${hora(intFim)}${acoes(intFim)}</td>
@@ -357,9 +357,9 @@ async function loadFrequencia() {
   document.getElementById('freq-body').innerHTML = rows.length === 0
     ? `<tr><td colspan="12" style="text-align:center;color:#94a3b8;padding:20px">Nenhum funcionário ativo.</td></tr>`
     : rows.map(r => `<tr>
-        <td><strong>${r.nome}</strong></td>
-        <td style="font-size:10px;color:#64748b">${r.cargo||'—'}</td>
-        <td style="font-size:10px;color:#64748b">${r.lotacao||'—'}</td>
+        <td><strong>${esc(r.nome)}</strong></td>
+        <td style="font-size:10px;color:#64748b">${esc(r.cargo)||'—'}</td>
+        <td style="font-size:10px;color:#64748b">${esc(r.lotacao)||'—'}</td>
         <td style="text-align:center">${r.dias_uteis}</td>
         <td style="text-align:center;font-weight:700;color:${r.dias_trabalhados===r.dias_uteis?'#15803d':'#334155'}">${r.dias_trabalhados}</td>
         <td style="text-align:center;color:${r.dias_falta>0?'#dc2626':'#94a3b8'};font-weight:${r.dias_falta>0?'700':'400'}">${r.dias_falta||'—'}</td>

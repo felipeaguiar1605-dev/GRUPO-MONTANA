@@ -104,8 +104,8 @@ async function estoqueCarregarDashboard() {
       alertasDiv.innerHTML = d.alertas.map(a => `
         <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:8px 10px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
           <div>
-            <div style="font-weight:600;color:#dc2626">${CAT_INFO[a.categoria]?.icon||''} ${a.nome}</div>
-            <div style="font-size:.75rem;color:#6b7280">${a.categoria}</div>
+            <div style="font-weight:600;color:#dc2626">${CAT_INFO[a.categoria]?.icon||''} ${esc(a.nome)}</div>
+            <div style="font-size:.75rem;color:#6b7280">${esc(a.categoria)}</div>
           </div>
           <div style="text-align:right">
             <div style="font-weight:700;color:#dc2626">${a.estoque_atual} ${a.unidade}</div>
@@ -122,8 +122,8 @@ async function estoqueCarregarDashboard() {
       ultimosDiv.innerHTML = d.ultimos_movimentos.map(m => `
         <div style="border-bottom:1px solid #f1f5f9;padding:7px 0;display:flex;justify-content:space-between">
           <div>
-            <span style="font-size:.8rem">${tipoIcon[m.tipo]||''} <strong>${m.item_nome}</strong></span>
-            <div style="font-size:.72rem;color:#6b7280">${m.data_movimento} — ${m.motivo||m.tipo}</div>
+            <span style="font-size:.8rem">${tipoIcon[m.tipo]||''} <strong>${esc(m.item_nome)}</strong></span>
+            <div style="font-size:.72rem;color:#6b7280">${esc(m.data_movimento)} — ${esc(m.motivo||m.tipo)}</div>
           </div>
           <div style="text-align:right;font-size:.82rem;color:${m.tipo==='ENTRADA'?'#16a34a':'#dc2626'};font-weight:600">
             ${m.tipo==='ENTRADA'?'+':'-'}${m.quantidade} ${m.unidade}

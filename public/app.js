@@ -1,3 +1,9 @@
+// ─── Segurança: escape HTML para prevenir XSS ───────────────────
+function esc(str) {
+  if (str == null) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 // ─── Multi-Empresa ───────────────────────────────────────────────
 const COMPANIES_META = {
   assessoria: { nome:'MONTANA ASSESSORIA EMPRESARIAL LTDA',    cnpj:'14.092.519/0001-51', cor:'#0d6efd', icone:'🏢', titulo:'Montana Assessoria — Conciliação v3' },
@@ -414,7 +420,7 @@ async function loadDashboard(){
     const stColor = r.status_conciliacao==='CONCILIADO'?'green':r.status_conciliacao==='PARCIAL'?'blue':'amber';
     return `<tr>
       <td style="font-size:10px;color:#64748b;white-space:nowrap">${r.data||''}</td>
-      <td style="font-size:10px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.historico}">${(r.historico||'').substring(0,50)}</td>
+      <td style="font-size:10px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.historico)}">${esc((r.historico||'').substring(0,50))}</td>
       <td class="r mono green" style="font-weight:600">${brl(r.credito)}</td>
       <td style="font-size:9px;color:#64748b">${r.banco||''}</td>
       <td>${badge(r.status_conciliacao||'PENDENTE', stColor)}</td>
@@ -434,7 +440,7 @@ async function loadDashboard(){
     const stColor = c.status==='ATIVO'||c.status==='ativo'?'green':c.status?'amber':'gray';
     return `<tr>
       <td class="mono" style="font-size:10px;color:#1d4ed8;font-weight:700;white-space:nowrap">${c.numContrato}</td>
-      <td style="font-size:10px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${c.contrato}">${(c.contrato||'').substring(0,40)}</td>
+      <td style="font-size:10px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.contrato)}">${esc((c.contrato||'').substring(0,40))}</td>
       <td class="r mono" style="font-weight:700;color:#15803d">${brl(c.total_pago)}</td>
       <td class="r mono" style="color:#dc2626">${brl(c.despesas_total)}</td>
       <td class="r mono" style="font-weight:700;color:${lucro>=0?'#15803d':'#dc2626'}">${brl(lucro)}</td>
@@ -729,7 +735,7 @@ async function loadNfs(){
     <td class="mono" style="color:#7c3aed;font-weight:600">NF ${r.numero}</td>
     <td style="font-size:10px;color:#64748b">${r.competencia||''}</td>
     <td style="font-size:10px;color:#475569">${r.cidade||''}</td>
-    <td style="font-size:10px;color:#475569">${(r.tomador||'').substring(0,40)}</td>
+    <td style="font-size:10px;color:#475569">${esc((r.tomador||'').substring(0,40))}</td>
     <td class="r mono" style="color:#b45309;font-weight:600">${brl(r.valor_bruto)}</td>
     <td class="r mono green" style="font-weight:600">${brl(r.valor_liquido)}</td>
     <td class="r mono red">${brl(r.retencao)}</td>
@@ -1372,9 +1378,9 @@ async function loadPagamentos(){
   document.getElementById('pag-head').innerHTML=`<tr><th>OB</th><th>Gestão</th><th>Empenho</th><th>Favorecido</th><th>Data Pgto</th><th class="r">Valor Pago</th></tr>`;
   document.getElementById('pag-body').innerHTML=(d.data||[]).map(r=>`<tr>
     <td class="mono" style="color:#1d4ed8;font-weight:600">${r.ob||''}</td>
-    <td style="font-size:10px;color:#475569;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.gestao||''}</td>
-    <td class="mono muted">${r.empenho||''}</td>
-    <td style="font-size:10px;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.favorecido||''}</td>
+    <td style="font-size:10px;color:#475569;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.gestao)}</td>
+    <td class="mono muted">${esc(r.empenho)}</td>
+    <td style="font-size:10px;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.favorecido)}</td>
     <td style="font-size:10px;color:#64748b">${r.data_pagamento||''}</td>
     <td class="r mono green" style="font-weight:700">${brl(r.valor_pago)}</td>
   </tr>`).join('');
@@ -1553,8 +1559,8 @@ async function loadDespData(){
     return `<tr>
     <td style="font-size:10px;color:#64748b;white-space:nowrap">${r.data_despesa||''}</td>
     <td>${despCatBadge(r.categoria)}</td>
-    <td style="font-size:10px;font-weight:600;color:#1d4ed8;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.contrato_vinculado||''}">${cName||'—'}</td>
-    <td style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.descricao||'').replace(/"/g,'&quot;')}">${r.descricao||'—'}</td>
+    <td style="font-size:10px;font-weight:600;color:#1d4ed8;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.contrato_vinculado)}">${esc(cName)||'—'}</td>
+    <td style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.descricao)}">${esc(r.descricao)||'—'}</td>
     <td class="r mono" style="font-weight:600">${brl(r.valor_bruto)}</td>
     <td class="r mono" style="color:#d97706;font-size:10px" title="IRRF ${brl(r.irrf)} · CSLL ${brl(r.csll)} · PIS ${brl(r.pis_retido)} · COFINS ${brl(r.cofins_retido)} · INSS ${brl(r.inss_retido)}">${brl(r.total_retencao)}</td>
     <td class="r mono" style="font-weight:700;color:#15803d">${brl(r.valor_liquido)}</td>
@@ -2010,7 +2016,7 @@ async function loadPrefGestoes(){
   document.getElementById('pref-gestoes-body').innerHTML=(d.data||[]).map(r=>{
     const st = r.status==='ATIVO'?badge('ATIVO','green'):badge(r.status||'—','gray');
     return `<tr>
-      <td style="font-size:10px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.gestao}">${r.gestao}</td>
+      <td style="font-size:10px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.gestao)}">${esc(r.gestao)}</td>
       <td class="mono" style="font-size:10px;color:#7c3aed;font-weight:600">${r.gestao_codigo||''}</td>
       <td class="r mono green" style="font-weight:700">${brl(r.total_pago)}</td>
       <td class="r mono" style="color:#475569">${r.qtd_pagamentos}</td>
@@ -2235,7 +2241,6 @@ function showLoginModal(msg) {
         <div class="login-field"><label>Usuário</label><input type="text" id="login-user" placeholder="admin" autocomplete="username"></div>
         <div class="login-field"><label>Senha</label><input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
         <button class="login-btn" onclick="doLogin()">Entrar</button>
-        <div style="margin-top:12px;text-align:center;font-size:9px;color:#cbd5e1">admin / montana2026 · financeiro / fin2026</div>
       </div>`;
     document.body.appendChild(ov);
   }
@@ -2283,7 +2288,7 @@ function updateUserInfo() {
   }
   if (u) {
     const roleLabel = {admin:'Admin',financeiro:'Financeiro',operacional:'Operacional',visualizador:'Visualizador'}[u.role]||u.role;
-    el.innerHTML = `<span>${u.nome} <small style="opacity:.7">(${roleLabel})</small></span><button onclick="logout()" title="Sair">Sair</button>`;
+    el.innerHTML = `<span>${esc(u.nome)} <small style="opacity:.7">(${esc(roleLabel)})</small></span><button onclick="logout()" title="Sair">Sair</button>`;
     // Exibe aba de usuários somente para admin
     const tabUsu = document.getElementById('tab-usuarios');
     if (tabUsu) tabUsu.style.display = u.role === 'admin' ? 'flex' : 'none';

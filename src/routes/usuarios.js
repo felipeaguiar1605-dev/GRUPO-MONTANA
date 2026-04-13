@@ -18,7 +18,8 @@ const companyMw = require('../companyMiddleware');
 const router = express.Router();
 router.use(companyMw);
 
-const JWT_SECRET = process.env.JWT_SECRET || 'montana_seg_secret_2026_!xK9#';
+const { JWT_SECRET } = require('../auth');
+const SENHA_PADRAO = process.env.SENHA_PADRAO || 'Montana@2026';
 
 // Permissões por role
 const ROLE_PERMISSIONS = {
@@ -116,13 +117,14 @@ router.get('/', soAdmin, (req, res) => {
 
 router.post('/', soAdmin, (req, res) => {
   const { usuario, nome, email = '', senha, role } = req.body;
-  if (!usuario || !nome || !senha || !role) {
-    return res.status(400).json({ error: 'usuario, nome, senha e role são obrigatórios' });
+  if (!usuario || !nome || !role) {
+    return res.status(400).json({ error: 'usuario, nome e role são obrigatórios' });
   }
   if (!ROLE_PERMISSIONS[role]) {
     return res.status(400).json({ error: `Role inválido. Use: ${Object.keys(ROLE_PERMISSIONS).join(', ')}` });
   }
-  if (senha.length < 6) {
+  const senhaFinal = senha || SENHA_PADRAO;
+  if (senhaFinal.length < 6) {
     return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres' });
   }
 
@@ -130,7 +132,7 @@ router.post('/', soAdmin, (req, res) => {
   const existe = req.db.prepare('SELECT id FROM usuarios WHERE usuario = ?').get(usuario);
   if (existe) return res.status(409).json({ error: 'Usuário já existe' });
 
-  const hash = bcrypt.hashSync(senha, 10);
+  const hash = bcrypt.hashSync(senhaFinal, 10);
   const result = req.db.prepare(`
     INSERT INTO usuarios (usuario, nome, email, senha_hash, role, criado_por)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -200,7 +202,7 @@ router.post('/:id/reset-senha', soAdmin, (req, res) => {
   ensureTable(req.db);
   const user = req.db.prepare('SELECT id FROM usuarios WHERE id=?').get(id);
   if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
-  const hash = bcrypt.hashSync('Montana@2026', 10);
+  const hash = bcrypt.hashSync(SENHA_PADRAO, 10);
   req.db.prepare('UPDATE usuarios SET senha_hash=?, updated_at=datetime("now") WHERE id=?').run(hash, id);
   res.json({ ok: true });
 });
@@ -225,7 +227,7 @@ router.post('/criar-funcionarios', soAdmin, (req, res) => {
   }
 
   const empresa = req.company;
-  const senhaHash = bcrypt.hashSync('Montana@2026', 10);
+  const senhaHash = bcrypt.hashSync(SENHA_PADRAO, 10);
   let criados = 0, existentes = 0;
 
   const inserir = req.db.prepare(`
