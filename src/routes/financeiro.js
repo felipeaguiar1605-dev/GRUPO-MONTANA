@@ -273,9 +273,9 @@ router.post('/pagar/baixa/:id', (req, res) => {
 // GET /receber - Lista de contas a receber
 router.get('/receber', (req, res) => {
     const empresaId = req.session.empresaAtual.id;
-    const page = parseInt(req.query.page) || 1;
+    const pagina = parseInt(req.query.pagina) || 1;
     const limit = 20;
-    const offset = (page - 1) * limit;
+    const offset = (pagina - 1) * limit;
 
     const { status, data_inicio, data_fim, cliente_id } = req.query;
 
@@ -300,7 +300,7 @@ router.get('/receber', (req, res) => {
     }
 
     const total = db.prepare(`SELECT COUNT(*) as total FROM contas_receber cr ${where}`).get(...params).total;
-    const totalPages = Math.ceil(total / limit);
+    const totalPaginas = Math.ceil(total / limit);
 
     const contas = db.prepare(`
         SELECT cr.*, c.nome AS cliente_nome
@@ -320,8 +320,8 @@ router.get('/receber', (req, res) => {
         contas,
         clientes,
         filtros: { status, data_inicio, data_fim, cliente_id },
-        page,
-        totalPages,
+        pagina,
+        totalPaginas,
         total,
         msg: req.query.msg || null,
         erro: req.query.erro || null
@@ -456,9 +456,9 @@ router.post('/receber/baixa/:id', (req, res) => {
 // GET /fluxo - Fluxo de caixa
 router.get('/fluxo', (req, res) => {
     const empresaId = req.session.empresaAtual.id;
-    const page = parseInt(req.query.page) || 1;
+    const pagina = parseInt(req.query.pagina) || 1;
     const limit = 20;
-    const offset = (page - 1) * limit;
+    const offset = (pagina - 1) * limit;
 
     const { data_inicio, data_fim, tipo } = req.query;
 
@@ -479,7 +479,7 @@ router.get('/fluxo', (req, res) => {
     }
 
     const total = db.prepare(`SELECT COUNT(*) as total FROM fluxo_caixa fc ${where}`).get(...params).total;
-    const totalPages = Math.ceil(total / limit);
+    const totalPaginas = Math.ceil(total / limit);
 
     const movimentos = db.prepare(`
         SELECT fc.*, u.nome AS usuario_nome
@@ -503,8 +503,8 @@ router.get('/fluxo', (req, res) => {
         movimentos,
         totais,
         filtros: { data_inicio, data_fim, tipo },
-        page,
-        totalPages,
+        pagina,
+        totalPaginas,
         total
     });
 });
