@@ -568,7 +568,7 @@ router.get('/extratos/meses', (req, res) => {
 
 router.get('/extratos', (req, res) => {
   try {
-  const { from, to, status, mes, posto, page = 1, limit = 100 } = req.query;
+  const { from, to, status, mes, posto, page = 1, limit = 100, somente_creditos } = req.query;
   let where = '1=1';
   const params = {};
   if (from) { where += ' AND data_iso >= @from'; params.from = from; }
@@ -576,6 +576,7 @@ router.get('/extratos', (req, res) => {
   if (status) { where += ' AND status_conciliacao = @status'; params.status = status; }
   if (mes) { where += ' AND mes = @mes'; params.mes = mes; }
   if (posto) { where += ' AND posto = @posto'; params.posto = posto; }
+  if (somente_creditos === '1') { where += ' AND credito > 0'; }
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit);

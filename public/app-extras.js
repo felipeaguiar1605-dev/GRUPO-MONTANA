@@ -2571,11 +2571,16 @@ if (_origLoadDashboard) {
   loadDashboard = async function() {
     await _origLoadDashboard();
     try {
-      const d = await api('/extratos?status=PENDENTE&limit=1');
+      // Filtra pelo período global atual e conta apenas créditos (entradas) pendentes
+      const qs = new URLSearchParams({ status: 'PENDENTE', somente_creditos: '1', limit: '1' });
+      if (typeof _from !== 'undefined' && _from) qs.set('from', _from);
+      if (typeof _to   !== 'undefined' && _to)   qs.set('to',   _to);
+      const d = await api('/extratos?' + qs.toString());
       const alertEl = document.getElementById('dash-alerta-sem-nf');
       const textoEl = document.getElementById('dash-alerta-sem-nf-texto');
       if (alertEl && textoEl && d.total > 0) {
-        textoEl.textContent = `${d.total} extrato(s) com crédito PENDENTE sem NF correspondente — conciliação necessária`;
+        const periodo = (typeof _from !== 'undefined' && _from) ? ` no período selecionado` : '';
+        textoEl.textContent = `${d.total} crédito(s) PENDENTE${periodo} sem NF correspondente — conciliação necessária`;
         alertEl.style.display = 'flex';
       } else if (alertEl) {
         alertEl.style.display = 'none';
