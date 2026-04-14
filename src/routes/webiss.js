@@ -467,6 +467,23 @@ router.post('/emitir', async (req, res) => {
     ? `<Cnpj>${rps.tomador.cnpj.replace(/\D/g, '')}</Cnpj>`
     : `<Cpf>${(rps.tomador.cpf || '').replace(/\D/g, '')}</Cpf>`;
 
+  // Endereço do tomador — obrigatório no WebISS Palmas para evitar E289 (país inválido)
+  // ABRASF v2.02 NÃO tem <Pais> em EnderecoType; país é inferido pelo CodigoMunicipio brasileiro
+  const tomEnd = rps.tomador.endereco || {};
+  const tomadorEnderecoXml = `<Endereco>${
+    tomEnd.logradouro    ? `<Endereco>${tomEnd.logradouro}</Endereco>` : ''
+  }${
+    tomEnd.numero        ? `<Numero>${tomEnd.numero}</Numero>` : ''
+  }${
+    tomEnd.complemento   ? `<Complemento>${tomEnd.complemento}</Complemento>` : ''
+  }${
+    tomEnd.bairro        ? `<Bairro>${tomEnd.bairro}</Bairro>` : ''
+  }<CodigoMunicipio>${tomEnd.codigoMunicipio || IBGE_PALMAS}</CodigoMunicipio>${
+    tomEnd.uf            ? `<Uf>${tomEnd.uf}</Uf>` : '<Uf>TO</Uf>'
+  }${
+    tomEnd.cep           ? `<Cep>${tomEnd.cep.replace(/\D/g,'')}</Cep>` : ''
+  }</Endereco>`;
+
   // XML do RPS (elemento que será assinado)
   const rpsXml = `<Rps xmlns="${ABRASF_NS}"><InfDeclaracaoPrestacaoServico Id="${rpsId}">
   <Rps>
@@ -488,7 +505,7 @@ router.post('/emitir', async (req, res) => {
       <ValorInss>${(+(rps.servico.valorInss || 0)).toFixed(2)}</ValorInss>
       <ValorIr>${(+(rps.servico.valorIr || 0)).toFixed(2)}</ValorIr>
       <ValorCsll>${(+(rps.servico.valorCsll || 0)).toFixed(2)}</ValorCsll>
-      <ValorIss>${(+(rps.servico.valorIss || 0)).toFixed(2)}</ValorIss>
+      ${rps.servico.issRetido ? `<ValorIss>${(+(rps.servico.valorIss || 0)).toFixed(2)}</ValorIss>` : ''}
       ${rps.servico.issRetido ? `<Aliquota>${(+(rps.servico.aliquota || 0)).toFixed(4)}</Aliquota>` : ''}
     </Valores>
     <IssRetido>${rps.servico.issRetido ? 1 : 2}</IssRetido>
@@ -508,6 +525,7 @@ router.post('/emitir', async (req, res) => {
       <CpfCnpj>${tomadorDocTag}</CpfCnpj>
     </IdentificacaoTomador>
     <RazaoSocial>${rps.tomador.razaoSocial}</RazaoSocial>
+    ${tomadorEnderecoXml}
     ${rps.tomador.email ? `<Contato><Email>${rps.tomador.email}</Email></Contato>` : ''}
   </Tomador>
   <OptanteSimplesNacional>2</OptanteSimplesNacional>
