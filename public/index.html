@@ -203,6 +203,28 @@
     </div>
   </div>
 
+  <div class="nav-group" id="ng-compras">
+    <div class="nav-group-hdr" onclick="toggleNavGroup('ng-compras')">
+      <span class="ng-icon">🛒</span><span class="ng-label">Compras</span><span class="ng-chevron">▾</span>
+    </div>
+    <div class="nav-group-items" style="display:none">
+      <div class="tab" data-tab="compras" onclick="navGo('compras',this);setTimeout(()=>comprasShowView('dashboard'),50)">📊 Painel Compras</div>
+      <div class="tab" data-tab="compras" onclick="navGo('compras',this);setTimeout(()=>comprasShowView('requisicoes'),50)">📋 Requisições</div>
+      <div class="tab" data-tab="compras" onclick="navGo('compras',this);setTimeout(()=>comprasShowView('nova'),50)">➕ Nova Requisição</div>
+    </div>
+  </div>
+
+  <div class="nav-group" id="ng-supervisor">
+    <div class="nav-group-hdr" onclick="toggleNavGroup('ng-supervisor')">
+      <span class="ng-icon">👷</span><span class="ng-label">Supervisor</span><span class="ng-chevron">▾</span>
+    </div>
+    <div class="nav-group-items" style="display:none">
+      <div class="tab" data-tab="supervisor" onclick="navGo('supervisor',this);setTimeout(()=>supShowView('dashboard'),50)">📊 Painel Supervisor</div>
+      <div class="tab" data-tab="supervisor" onclick="navGo('supervisor',this);setTimeout(()=>supShowView('ocorrencias'),50)">⚠️ Ocorrências</div>
+      <div class="tab" data-tab="supervisor" onclick="navGo('supervisor',this);setTimeout(()=>supShowView('checklist'),50)">✅ Checklist do Dia</div>
+    </div>
+  </div>
+
   <div class="nav-group" id="ng-sistema">
     <div class="nav-group-hdr" onclick="toggleNavGroup('ng-sistema')">
       <span class="ng-icon">⚙️</span><span class="ng-label">Sistema</span><span class="ng-chevron">▾</span>
@@ -359,6 +381,7 @@
 <div id="pg-desp" class="pg">
   <div class="kpis" id="desp-kpis"></div>
   <div id="desp-compensacao"></div>
+  <div id="desp-rateio"></div>
   <div id="desp-form-wrap" style="display:none"></div>
   <div class="toolbar" id="desp-toolbar">
     <span style="font-size:16px">💸</span>
@@ -2543,4 +2566,407 @@
     <div class="tw">
       <table>
         <thead id="oc-head"></thead>
-        <tbody i
+        <tbody id="oc-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Painel: Jornadas -->
+  <div id="ponto-panel-jornadas" style="display:none">
+    <div style="text-align:center;padding:40px;color:#94a3b8;font-size:13px">
+      ⚙️ Configuração de jornadas em desenvolvimento.
+    </div>
+  </div>
+</div><!-- fim pg-ponto -->
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- MÓDULO SETOR DE COMPRAS                                         -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="pg-compras" class="pg">
+  <!-- Sub-tabs -->
+  <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:14px">
+    <button id="compras-tab-dashboard"   onclick="comprasSubTab('dashboard')"   style="padding:7px 16px;font-size:11px;font-weight:600;border:none;border-bottom:2px solid #0d6efd;background:none;color:#0d6efd;cursor:pointer;margin-bottom:-2px">📊 Dashboard</button>
+    <button id="compras-tab-requisicoes" onclick="comprasSubTab('requisicoes')" style="padding:7px 16px;font-size:11px;font-weight:600;border:none;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;margin-bottom:-2px">📋 Requisições</button>
+    <button id="compras-tab-nova"        onclick="comprasSubTab('nova')"        style="padding:7px 16px;font-size:11px;font-weight:600;border:none;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;margin-bottom:-2px">➕ Nova Requisição</button>
+  </div>
+
+  <!-- Painel: Dashboard -->
+  <div id="compras-panel-dashboard">
+    <div class="kpis" id="compras-kpis" style="margin-bottom:14px"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="dash-panel">
+        <div class="dash-panel-title">📋 Requisições Recentes</div>
+        <div class="tw" style="max-height:300px;overflow-y:auto">
+          <table><thead id="compras-rec-head"></thead><tbody id="compras-rec-body"></tbody></table>
+        </div>
+      </div>
+      <div class="dash-panel">
+        <div class="dash-panel-title">📊 Status por Tipo</div>
+        <div id="compras-status-chart" style="padding:10px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Painel: Requisições -->
+  <div id="compras-panel-requisicoes" style="display:none">
+    <div class="toolbar" style="margin-bottom:10px">
+      <span style="font-size:16px">🛒</span>
+      <span class="toolbar-title">REQUISIÇÕES DE COMPRA</span>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select id="compras-filtro-status" onchange="loadComprasRequisicoes()" style="padding:5px 10px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+          <option value="">Todos os status</option>
+          <option value="PENDENTE">Pendente</option>
+          <option value="COTANDO">Cotando</option>
+          <option value="APROVADA">Aprovada</option>
+          <option value="COMPRADA">Comprada</option>
+          <option value="CANCELADA">Cancelada</option>
+        </select>
+        <select id="compras-filtro-prio" onchange="loadComprasRequisicoes()" style="padding:5px 10px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+          <option value="">Todas as prioridades</option>
+          <option value="URGENTE">🔴 Urgente</option>
+          <option value="NORMAL">🟡 Normal</option>
+          <option value="BAIXA">⚪ Baixa</option>
+        </select>
+        <input id="compras-filtro-q" type="text" placeholder="Buscar…" oninput="loadComprasRequisicoes()"
+          style="padding:5px 10px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px;width:180px">
+        <button onclick="comprasSubTab('nova')" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:5px 14px;font-size:11px;border-radius:6px;cursor:pointer;font-weight:700">+ Nova</button>
+      </div>
+    </div>
+    <div class="tw">
+      <table id="tbl-compras">
+        <thead id="compras-head"></thead>
+        <tbody id="compras-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Painel: Nova Requisição -->
+  <div id="compras-panel-nova" style="display:none">
+    <div style="max-width:760px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:24px">
+      <div style="font-weight:800;font-size:15px;color:#0f172a;margin-bottom:18px">🛒 Nova Requisição de Compra</div>
+      <div style="display:grid;gap:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Título *</label>
+            <input id="compras-titulo" type="text" placeholder="Ex: Uniforme operacional" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Solicitante</label>
+            <input id="compras-solicitante" type="text" placeholder="Nome do solicitante" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Prioridade</label>
+            <select id="compras-prioridade" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px">
+              <option value="NORMAL">🟡 Normal</option>
+              <option value="URGENTE">🔴 Urgente</option>
+              <option value="BAIXA">⚪ Baixa</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Contrato Ref.</label>
+            <input id="compras-contrato-ref" type="text" placeholder="Ex: UFT 16/2025" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Data Necessidade</label>
+            <input id="compras-data-nec" type="date" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+          </div>
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Descrição / Justificativa</label>
+          <textarea id="compras-descricao" rows="2" placeholder="Detalhes e justificativa da compra…" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box;resize:vertical"></textarea>
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Itens da Requisição</label>
+            <button onclick="comprasAddItem()" style="padding:4px 12px;font-size:11px;background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;border-radius:5px;cursor:pointer;font-weight:700">+ Item</button>
+          </div>
+          <div id="compras-itens-wrap" style="display:flex;flex-direction:column;gap:6px"></div>
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Valor Estimado Total (R$)</label>
+          <input id="compras-val-est" type="number" step="0.01" min="0" placeholder="0,00" style="width:200px;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:20px">
+        <button onclick="salvarComprasRequisicao()" style="padding:9px 24px;background:#15803d;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">💾 Salvar Requisição</button>
+        <button onclick="comprasSubTab('requisicoes')" style="padding:9px 18px;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;cursor:pointer">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Detalhe Requisição (Compras) -->
+<div id="modal-compras-detalhe" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;padding:24px;width:820px;max-width:96vw;max-height:90vh;overflow-y:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div>
+        <div style="font-weight:800;font-size:15px;color:#1e293b" id="modal-compras-titulo">Detalhe da Requisição</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:2px" id="modal-compras-meta"></div>
+      </div>
+      <button onclick="document.getElementById('modal-compras-detalhe').style.display='none'" style="background:none;border:none;font-size:20px;cursor:pointer;color:#64748b">✕</button>
+    </div>
+    <!-- Sub-tabs do modal -->
+    <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:14px">
+      <button id="mcd-tab-itens"     onclick="mcdTab('itens')"     style="padding:6px 14px;font-size:11px;font-weight:600;border:none;border-bottom:2px solid #0d6efd;background:none;color:#0d6efd;cursor:pointer;margin-bottom:-2px">📦 Itens</button>
+      <button id="mcd-tab-cotacoes"  onclick="mcdTab('cotacoes')"  style="padding:6px 14px;font-size:11px;font-weight:600;border:none;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;margin-bottom:-2px">💰 Cotações</button>
+      <button id="mcd-tab-status"    onclick="mcdTab('status')"    style="padding:6px 14px;font-size:11px;font-weight:600;border:none;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;margin-bottom:-2px">🔄 Status</button>
+    </div>
+    <div id="mcd-panel-itens">
+      <div class="tw"><table><thead id="mcd-itens-head"></thead><tbody id="mcd-itens-body"></tbody></table></div>
+    </div>
+    <div id="mcd-panel-cotacoes" style="display:none">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+        <button onclick="abrirFormCotacao()" style="padding:6px 14px;font-size:11px;font-weight:700;background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;border-radius:6px;cursor:pointer">+ Nova Cotação</button>
+      </div>
+      <div id="mcd-form-cotacao" style="display:none;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;margin-bottom:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Fornecedor *</label>
+            <input id="cot-fornecedor" type="text" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:5px;font-size:11px;margin-top:3px;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">CNPJ/CPF</label>
+            <input id="cot-cnpj" type="text" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:5px;font-size:11px;margin-top:3px;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Valor Total (R$)</label>
+            <input id="cot-valor" type="number" step="0.01" min="0" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:5px;font-size:11px;margin-top:3px;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Prazo de Entrega</label>
+            <input id="cot-prazo" type="text" placeholder="Ex: 15 dias úteis" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:5px;font-size:11px;margin-top:3px;box-sizing:border-box">
+          </div>
+        </div>
+        <div style="margin-bottom:10px">
+          <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Observações</label>
+          <input id="cot-obs" type="text" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:5px;font-size:11px;margin-top:3px;box-sizing:border-box">
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="salvarCotacao()" style="padding:6px 16px;background:#15803d;color:#fff;border:none;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer">💾 Salvar</button>
+          <button onclick="document.getElementById('mcd-form-cotacao').style.display='none'" style="padding:6px 12px;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:5px;font-size:11px;cursor:pointer">Cancelar</button>
+        </div>
+      </div>
+      <div class="tw"><table><thead id="mcd-cot-head"></thead><tbody id="mcd-cot-body"></tbody></table></div>
+    </div>
+    <div id="mcd-panel-status" style="display:none">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Novo Status</label>
+          <select id="mcd-novo-status" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px">
+            <option value="PENDENTE">Pendente</option>
+            <option value="COTANDO">Cotando</option>
+            <option value="APROVADA">Aprovada</option>
+            <option value="COMPRADA">Comprada</option>
+            <option value="CANCELADA">Cancelada</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Valor Aprovado (R$)</label>
+          <input id="mcd-val-aprov" type="number" step="0.01" min="0" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Fornecedor Escolhido</label>
+          <input id="mcd-forn-esc" type="text" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;box-sizing:border-box">
+        </div>
+      </div>
+      <button onclick="atualizarStatusRequisicao()" style="margin-top:14px;padding:9px 22px;background:#0d6efd;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">💾 Atualizar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- MÓDULO SUPERVISOR OPERACIONAL                                   -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="pg-supervisor" class="pg">
+  <!-- Sub-tabs -->
+  <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:14px">
+    <button id="sup-tab-dashboard"   onclick="supSubTab('dashboard')"   style="padding:7px 16px;font-size:11px;font-weight:600;border:none;border-bottom:2px solid #0d6efd;background:none;color:#0d6efd;cursor:pointer;margin-bottom:-2px">📊 Dashboard</button>
+    <button id="sup-tab-ocorrencias" onclick="supSubTab('ocorrencias')" style="padding:7px 16px;font-size:11px;font-weight:600;border:none;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;margin-bottom:-2px">⚠️ Ocorrências</button>
+    <button id="sup-tab-checklist"   onclick="supSubTab('checklist')"   style="padding:7px 16px;font-size:11px;font-weight:600;border:none;border-bottom:2px solid transparent;background:none;color:#64748b;cursor:pointer;margin-bottom:-2px">✅ Checklist</button>
+  </div>
+
+  <!-- Painel: Dashboard -->
+  <div id="sup-panel-dashboard">
+    <div class="kpis" id="sup-kpis" style="margin-bottom:14px"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="dash-panel">
+        <div class="dash-panel-title">⚠️ Ocorrências Recentes</div>
+        <div class="tw" style="max-height:300px;overflow-y:auto">
+          <table><thead id="sup-rec-head"></thead><tbody id="sup-rec-body"></tbody></table>
+        </div>
+      </div>
+      <div class="dash-panel">
+        <div class="dash-panel-title">📊 Abertas por Contrato</div>
+        <div id="sup-por-contrato-chart" style="padding:8px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Painel: Ocorrências -->
+  <div id="sup-panel-ocorrencias" style="display:none">
+    <div class="toolbar" style="margin-bottom:10px">
+      <span style="font-size:16px">⚠️</span>
+      <span class="toolbar-title">OCORRÊNCIAS OPERACIONAIS</span>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select id="sup-filtro-status" onchange="loadSupOcorrencias()" style="padding:5px 10px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+          <option value="">Todos os status</option>
+          <option value="ABERTA">Aberta</option>
+          <option value="EM_ANDAMENTO">Em andamento</option>
+          <option value="RESOLVIDA">Resolvida</option>
+        </select>
+        <select id="sup-filtro-tipo" onchange="loadSupOcorrencias()" style="padding:5px 10px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+          <option value="">Todos os tipos</option>
+          <option value="FALTA">Falta</option>
+          <option value="ATRASO">Atraso</option>
+          <option value="INCIDENTE">Incidente</option>
+          <option value="SUBSTITUICAO">Substituição</option>
+          <option value="OUTRO">Outro</option>
+        </select>
+        <input id="sup-filtro-de" type="date" onchange="loadSupOcorrencias()" style="padding:5px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px" title="De">
+        <input id="sup-filtro-ate" type="date" onchange="loadSupOcorrencias()" style="padding:5px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px" title="Até">
+        <button onclick="abrirModalOcorrencia()" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;padding:5px 14px;font-size:11px;border-radius:6px;cursor:pointer;font-weight:700">+ Registrar</button>
+      </div>
+    </div>
+    <div class="tw">
+      <table id="tbl-sup-ocorrencias">
+        <thead id="sup-oc-head"></thead>
+        <tbody id="sup-oc-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Painel: Checklist -->
+  <div id="sup-panel-checklist" style="display:none">
+    <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap;align-items:flex-end">
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Data</label>
+        <input type="date" id="sup-cl-data" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+      </div>
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Contrato</label>
+        <input type="text" id="sup-cl-contrato" placeholder="Ex: UFT 16/2025" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;width:160px">
+      </div>
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Posto</label>
+        <input type="text" id="sup-cl-posto" placeholder="Nome do posto" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;width:160px">
+      </div>
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Turno</label>
+        <select id="sup-cl-turno" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+          <option value="DIURNO">☀️ Diurno</option>
+          <option value="NOTURNO">🌙 Noturno</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Supervisor</label>
+        <input type="text" id="sup-cl-supervisor" placeholder="Nome do supervisor" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;width:160px">
+      </div>
+    </div>
+
+    <!-- Itens do checklist -->
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:14px">
+      <div style="font-weight:700;font-size:13px;color:#0f172a;margin-bottom:12px">✅ Itens de Verificação</div>
+      <div id="sup-cl-itens" style="display:flex;flex-direction:column;gap:8px"></div>
+    </div>
+
+    <div>
+      <label style="font-size:10px;color:#64748b;font-weight:600;display:block;margin-bottom:3px">Observações Gerais</label>
+      <textarea id="sup-cl-obs" rows="3" placeholder="Observações do turno…" style="width:100%;max-width:600px;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box;resize:vertical"></textarea>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:14px;align-items:center">
+      <button onclick="salvarChecklist()" style="padding:9px 24px;background:#15803d;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">💾 Salvar Checklist</button>
+      <button onclick="loadChecklistsAnteriores()" style="padding:9px 18px;background:#f1f5f9;color:#0f172a;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;cursor:pointer">📄 Ver Anteriores</button>
+    </div>
+
+    <!-- Checklists anteriores -->
+    <div id="sup-cl-anteriores" style="display:none;margin-top:16px">
+      <div style="font-weight:700;font-size:13px;color:#0f172a;margin-bottom:8px">📄 Checklists Salvos</div>
+      <div class="tw">
+        <table><thead id="sup-cl-hist-head"></thead><tbody id="sup-cl-hist-body"></tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Registrar Ocorrência -->
+<div id="modal-ocorrencia" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;padding:24px;width:560px;max-width:96vw;max-height:90vh;overflow-y:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="font-weight:800;font-size:15px;color:#1e293b" id="modal-oc-titulo">Registrar Ocorrência</div>
+      <button onclick="fecharModalOcorrencia()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#64748b">✕</button>
+    </div>
+    <input type="hidden" id="oc-edit-id">
+    <div style="display:grid;gap:10px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Tipo *</label>
+          <select id="oc-tipo" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px">
+            <option value="FALTA">Falta</option>
+            <option value="ATRASO">Atraso</option>
+            <option value="INCIDENTE">Incidente</option>
+            <option value="SUBSTITUICAO">Substituição</option>
+            <option value="OUTRO">Outro</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Status</label>
+          <select id="oc-status-modal" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px">
+            <option value="ABERTA">Aberta</option>
+            <option value="EM_ANDAMENTO">Em andamento</option>
+            <option value="RESOLVIDA">Resolvida</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Contrato</label>
+          <input id="oc-contrato" type="text" placeholder="Ex: UFT 16/2025" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Posto</label>
+          <input id="oc-posto" type="text" placeholder="Nome do posto" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Funcionário</label>
+          <input id="oc-funcionario" type="text" placeholder="Nome do funcionário" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Data da Ocorrência</label>
+          <input id="oc-data" type="date" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box">
+        </div>
+      </div>
+      <div>
+        <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Descrição *</label>
+        <textarea id="oc-descricao" rows="3" placeholder="Descreva a ocorrência detalhadamente…" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box;resize:vertical"></textarea>
+      </div>
+      <div id="oc-resolucao-wrap" style="display:none">
+        <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Resolução</label>
+        <textarea id="oc-resolucao" rows="2" placeholder="Como foi resolvida…" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-top:4px;box-sizing:border-box;resize:vertical"></textarea>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
+      <button onclick="fecharModalOcorrencia()" style="padding:7px 16px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;background:#f8fafc;cursor:pointer">Cancelar</button>
+      <button onclick="salvarOcorrencia()" style="padding:7px 18px;background:#dc2626;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">💾 Salvar</button>
+    </div>
+  </div>
+</div>
+
+</div><!-- fim main-content -->
+</div><!-- fim app-layout -->
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<script src="/app.js"></script>
+<script src="/app-extras.js"></script>
+<script src="/app-boletins.js"></script>
+<script src="/app-compras-supervisor.js"></script>
+<script src="/app-ia.js"></script>
+<script src="/app-bb.js"></script>
+</body>
+</html>

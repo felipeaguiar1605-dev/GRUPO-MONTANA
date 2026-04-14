@@ -472,6 +472,85 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_ponto_reg_data ON ponto_registros(data_hora);
   CREATE INDEX IF NOT EXISTS idx_ponto_oc_func ON ponto_ocorrencias(funcionario_id);
   CREATE INDEX IF NOT EXISTS idx_ponto_jorn_func ON ponto_jornadas(funcionario_id);
+
+  -- ═══════════════════════════════════════════════════════════════
+  -- MÓDULO SETOR DE COMPRAS
+  -- ═══════════════════════════════════════════════════════════════
+  CREATE TABLE IF NOT EXISTS compras_requisicoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    titulo TEXT NOT NULL,
+    solicitante TEXT DEFAULT '',
+    contrato_ref TEXT DEFAULT '',
+    prioridade TEXT DEFAULT 'NORMAL',
+    status TEXT DEFAULT 'PENDENTE',
+    descricao TEXT DEFAULT '',
+    valor_estimado REAL,
+    valor_aprovado REAL,
+    fornecedor_escolhido TEXT DEFAULT '',
+    data_necessidade TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS compras_itens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    requisicao_id INTEGER NOT NULL REFERENCES compras_requisicoes(id) ON DELETE CASCADE,
+    descricao TEXT NOT NULL,
+    unidade TEXT DEFAULT 'un',
+    quantidade REAL DEFAULT 1,
+    valor_unitario_est REAL,
+    valor_unitario_real REAL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS compras_cotacoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    requisicao_id INTEGER NOT NULL REFERENCES compras_requisicoes(id) ON DELETE CASCADE,
+    fornecedor TEXT NOT NULL,
+    cnpj_cpf TEXT DEFAULT '',
+    valor_total REAL,
+    prazo_entrega TEXT DEFAULT '',
+    observacoes TEXT DEFAULT '',
+    escolhida INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_compras_req_status ON compras_requisicoes(status);
+  CREATE INDEX IF NOT EXISTS idx_compras_req_prio ON compras_requisicoes(prioridade);
+  CREATE INDEX IF NOT EXISTS idx_compras_itens_req ON compras_itens(requisicao_id);
+  CREATE INDEX IF NOT EXISTS idx_compras_cot_req ON compras_cotacoes(requisicao_id);
+
+  -- ═══════════════════════════════════════════════════════════════
+  -- MÓDULO SUPERVISOR OPERACIONAL
+  -- ═══════════════════════════════════════════════════════════════
+  CREATE TABLE IF NOT EXISTS sup_ocorrencias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contrato_ref TEXT DEFAULT '',
+    posto TEXT DEFAULT '',
+    tipo TEXT DEFAULT 'OUTRO',
+    descricao TEXT NOT NULL,
+    funcionario_nome TEXT DEFAULT '',
+    data_ocorrencia TEXT DEFAULT '',
+    data_ocorrencia_iso TEXT DEFAULT '',
+    status TEXT DEFAULT 'ABERTA',
+    resolucao TEXT DEFAULT '',
+    registrado_por TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS sup_checklist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contrato_ref TEXT DEFAULT '',
+    posto TEXT DEFAULT '',
+    data_iso TEXT DEFAULT '',
+    turno TEXT DEFAULT 'DIURNO',
+    supervisor TEXT DEFAULT '',
+    itens_json TEXT DEFAULT '[]',
+    observacoes TEXT DEFAULT '',
+    assinatura TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_sup_oc_status ON sup_ocorrencias(status);
+  CREATE INDEX IF NOT EXISTS idx_sup_oc_data ON sup_ocorrencias(data_ocorrencia_iso);
+  CREATE INDEX IF NOT EXISTS idx_sup_oc_contrato ON sup_ocorrencias(contrato_ref);
+  CREATE INDEX IF NOT EXISTS idx_sup_cl_data ON sup_checklist(data_iso);
 `;
 
 const MIGRATIONS = [
@@ -495,6 +574,9 @@ const MIGRATIONS = [
   "ALTER TABLE contratos ADD COLUMN obs_reajuste TEXT DEFAULT ''",
   // Integração Ponto → Folha: matrícula para exportação Alterdata/Domínio
   "ALTER TABLE rh_funcionarios ADD COLUMN matricula TEXT DEFAULT ''",
+  // Centro de custo para despesas sem vínculo contratual (rateio e dividendos)
+  "ALTER TABLE despesas ADD COLUMN centro_custo TEXT DEFAULT ''",
+  "CREATE INDEX IF NOT EXISTS idx_desp_cc ON despesas(centro_custo)",
 ];
 
 function getDb(companyKey) {

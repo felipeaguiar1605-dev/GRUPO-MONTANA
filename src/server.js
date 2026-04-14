@@ -244,6 +244,58 @@ try {
   cron.schedule('0 8 * * *', dispararAlertasDiarios, { timezone: 'America/Araguaina' });
   console.log('  ⏰ Cron de alertas configurado: todo dia 08:00 (America/Araguaina)');
 
+  // ── Sync automático BB — todo dia às 06:00 ───────────────────
+  cron.schedule('0 6 * * *', async () => {
+    const http  = require('http');
+    const jwt   = require('jsonwebtoken');
+    const hoje  = new Date().toISOString().split('T')[0];
+    const ontem = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+
+    for (const key of Object.keys(COMPANIES)) {
+      try {
+        // Verifica se a empresa tem BB configurado antes de chamar
+        const db  = getDb(key);
+        const cfg = db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'bb_%'`).all()
+          .reduce((acc, r) => { acc[r.chave.replace('bb_', '')] = r.valor; return acc; }, {});
+        if (!cfg.client_id || !cfg.client_secret || !cfg.app_key || !cfg.agencia || !cfg.conta) continue;
+
+        const body  = JSON.stringify({ dataInicio: ontem, dataFim: hoje });
+        const token = jwt.sign({ id: 0, username: 'cron', role: 'admin' },
+          process.env.JWT_SECRET || 'montana_seg_secret_2026_!xK9#', { expiresIn: '5m' });
+
+        await new Promise((resolve) => {
+          const req = http.request({
+            hostname: '127.0.0.1', port: PORT, path: '/api/bb/sync',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Content-Length': Buffer.byteLength(body),
+              'X-Company': key,
+              'Authorization': 'Bearer ' + token,
+            },
+          }, (res) => {
+            let data = '';
+            res.on('data', c => data += c);
+            res.on('end', () => {
+              try {
+                const r = JSON.parse(data);
+                if (r.ok) console.log(`  🏦 BB sync [${key}] ${ontem}: +${r.imported} importados`);
+                else      console.warn(`  ⚠ BB sync [${key}]:`, r.error);
+              } catch (_) {}
+              resolve();
+            });
+          });
+          req.on('error', (e) => { console.warn(`  ⚠ BB sync cron [${key}]:`, e.message); resolve(); });
+          req.write(body);
+          req.end();
+        });
+      } catch (e) {
+        console.warn(`  ⚠ BB sync cron [${key}]:`, e.message);
+      }
+    }
+  }, { timezone: 'America/Araguaina' });
+  console.log('  ⏰ Cron BB sync configurado: todo dia 06:00 (America/Araguaina)');
+
   // ── Apuração mensal automática — dia 1° às 06:00 ───────────
   cron.schedule('0 6 1 * *', async () => {
     console.log('[CRON] Iniciando apuração mensal automática...');

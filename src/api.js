@@ -2096,20 +2096,25 @@ function calcRetencoes(categoria, valor_bruto) {
 }
 
 router.get('/despesas', (req, res) => {
-  const { categoria, fornecedor, status, from, to, contrato_ref, page = 1, limit = 100 } = req.query;
+  const { categoria, fornecedor, status, from, to, contrato_ref, centro_custo, page = 1, limit = 100 } = req.query;
   let where = '1=1';
   const params = {};
-  if (categoria) { where += ' AND categoria = @categoria'; params.categoria = categoria; }
-  if (fornecedor) { where += ' AND fornecedor = @fornecedor'; params.fornecedor = fornecedor; }
-  if (status) { where += ' AND status = @status'; params.status = status; }
-  if (from) { where += ' AND data_iso >= @from'; params.from = from; }
-  if (to) { where += ' AND data_iso <= @to'; params.to = to; }
+  if (categoria)    { where += ' AND categoria = @categoria';       params.categoria    = categoria; }
+  if (fornecedor)   { where += ' AND fornecedor = @fornecedor';     params.fornecedor   = fornecedor; }
+  if (status)       { where += ' AND status = @status';             params.status       = status; }
+  if (from)         { where += ' AND data_iso >= @from';            params.from         = from; }
+  if (to)           { where += ' AND data_iso <= @to';              params.to           = to; }
   if (contrato_ref) { where += ' AND contrato_ref = @contrato_ref'; params.contrato_ref = contrato_ref; }
+  if (centro_custo !== undefined) {
+    // '' = contrato específico (ou não classificado), 'ESCRITORIO'|'OPERACIONAL'|'DIVIDENDOS' = overhead
+    where += ' AND COALESCE(centro_custo,\'\') = @centro_custo';
+    params.centro_custo = centro_custo;
+  }
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit); params.offset = offset;
 
   const total = req.db.prepare(`SELECT COUNT(*) as cnt FROM despesas WHERE ${where}`).get(params).cnt;
-  const rows = req.db.prepare(`SELECT * FROM despesas WHERE ${where} ORDER BY data_iso DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
+  const rows  = req.db.prepare(`SELECT * FROM despesas WHERE ${where} ORDER BY data_iso DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
   res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
 });
 
@@ -2142,7 +2147,85 @@ router.get('/despesas/resumo', (req, res) => {
     GROUP BY categoria ORDER BY total DESC
   `).all(params);
 
-  res.json({ totais, porCategoria });
+  // Overhead (despesas não vinculadas a contrato — ESCRITORIO, OPERACIONAL, DIVIDENDOS)
+  const overhead = req.db.prepare(`
+    SELECT
+      COALESCE(centro_custo,'') as tipo,
+      COUNT(*) as qtd,
+      COALESCE(SUM(valor_bruto), 0) as total
+    FROM despesas
+    WHERE COALESCE(centro_custo,'') IN ('ESCRITORIO','OPERACIONAL','DIVIDENDOS') ${dateFilter}
+    GROUP BY COALESCE(centro_custo,'')
+    ORDER BY total DESC
+  `).all(params);
+
+  const totalOverhead = overhead
+    .filter(r => r.tipo !== 'DIVIDENDOS')
+    .reduce((s, r) => s + r.total, 0);
+
+  res.json({ totais, porCategoria, overhead, totalOverhead });
+});
+
+// ─── RATEIO DE OVERHEAD POR CONTRATO ─────────────────────────────────────────
+router.get('/despesas/rateio', (req, res) => {
+  const { from, to } = req.query;
+  let dateFilter = '';
+  const params = {};
+  if (from) { dateFilter += ' AND data_iso >= @from'; params.from = from; }
+  if (to)   { dateFilter += ' AND data_iso <= @to';   params.to   = to; }
+
+  // Total de overhead rateável (ESCRITORIO + OPERACIONAL, excluindo DIVIDENDOS)
+  const overheadRows = req.db.prepare(`
+    SELECT COALESCE(centro_custo,'') as tipo,
+           COUNT(*) as qtd,
+           COALESCE(SUM(valor_bruto), 0) as total
+    FROM despesas
+    WHERE COALESCE(centro_custo,'') IN ('ESCRITORIO','OPERACIONAL') ${dateFilter}
+    GROUP BY COALESCE(centro_custo,'')
+  `).all(params);
+
+  const totalOverhead = overheadRows.reduce((s, r) => s + r.total, 0);
+
+  // Dividendos (separado — não entra no custo operacional)
+  const dividendos = req.db.prepare(`
+    SELECT COALESCE(SUM(valor_bruto),0) as total, COUNT(*) as qtd
+    FROM despesas WHERE COALESCE(centro_custo,'')='DIVIDENDOS' ${dateFilter}
+  `).get(params);
+
+  // Contratos ativos para base de rateio — usa valor_mensal_bruto como peso
+  const contratos = req.db.prepare(`
+    SELECT numContrato, contrato, orgao,
+           COALESCE(valor_mensal_bruto, 0) as valor_mensal_bruto,
+           COALESCE(total_pago, 0) as total_pago
+    FROM contratos
+    WHERE status = 'ATIVO' AND COALESCE(valor_mensal_bruto, 0) > 0
+    ORDER BY valor_mensal_bruto DESC
+  `).all();
+
+  const somaBase = contratos.reduce((s, c) => s + c.valor_mensal_bruto, 0);
+
+  const rateio = contratos.map(c => {
+    const proporcao = somaBase > 0 ? c.valor_mensal_bruto / somaBase : 0;
+    return {
+      numContrato:       c.numContrato,
+      contrato:          c.contrato,
+      orgao:             c.orgao,
+      valor_mensal:      +c.valor_mensal_bruto.toFixed(2),
+      proporcao_pct:     +(proporcao * 100).toFixed(2),
+      overhead_rateado:  +(proporcao * totalOverhead).toFixed(2),
+    };
+  });
+
+  res.json({
+    ok: true,
+    totalOverhead:     +totalOverhead.toFixed(2),
+    overheadPorTipo:   overheadRows,
+    dividendos:        { total: +dividendos.total.toFixed(2), qtd: dividendos.qtd },
+    somaBase:          +somaBase.toFixed(2),
+    contratos_na_base: contratos.length,
+    rateio,
+    periodo:           { from: from || null, to: to || null },
+  });
 });
 
 router.get('/despesas/compensacao', (req, res) => {
@@ -2320,7 +2403,8 @@ router.get('/apuracao-caixa', (req, res) => {
 });
 
 router.post('/despesas', (req, res) => {
-  const { categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, competencia, valor_bruto, obs, contrato_ref } = req.body;
+  const { categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa,
+          competencia, valor_bruto, obs, contrato_ref, centro_custo } = req.body;
   if (!valor_bruto) return res.status(400).json({ error: 'valor_bruto obrigatório' });
 
   const auto = calcRetencoes(categoria || 'FORNECEDOR', valor_bruto);
@@ -2337,9 +2421,11 @@ router.post('/despesas', (req, res) => {
 
   const r = req.db.prepare(`
     INSERT INTO despesas (categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, data_iso, competencia,
-      valor_bruto, irrf, csll, pis_retido, cofins_retido, inss_retido, iss_retido, total_retencao, valor_liquido, status, obs, contrato_ref)
+      valor_bruto, irrf, csll, pis_retido, cofins_retido, inss_retido, iss_retido, total_retencao, valor_liquido,
+      status, obs, contrato_ref, centro_custo)
     VALUES (@categoria, @descricao, @fornecedor, @cnpj, @nf, @data, @data_iso, @comp,
-      @vbruto, @irrf, @csll, @pis, @cofins, @inss, @iss, @total_ret, @vliq, @status, @obs, @contrato_ref)
+      @vbruto, @irrf, @csll, @pis, @cofins, @inss, @iss, @total_ret, @vliq,
+      @status, @obs, @contrato_ref, @centro_custo)
   `).run({
     categoria: categoria || 'FORNECEDOR', descricao: descricao || '', fornecedor: fornecedor || '',
     cnpj: cnpj_fornecedor || '', nf: nf_numero || '', data: data_despesa || '',
@@ -2347,7 +2433,8 @@ router.post('/despesas', (req, res) => {
     vbruto: valor_bruto, ...ret, irrf: ret.irrf, csll: ret.csll, pis: ret.pis_retido,
     cofins: ret.cofins_retido, inss: ret.inss_retido, iss: ret.iss_retido,
     total_ret: ret.total_retencao, vliq: ret.valor_liquido,
-    status: req.body.status || 'PENDENTE', obs: obs || '', contrato_ref: contrato_ref || ''
+    status: req.body.status || 'PENDENTE', obs: obs || '',
+    contrato_ref: contrato_ref || '', centro_custo: centro_custo || '',
   });
 
   res.json({ ok: true, id: r.lastInsertRowid, retencoes: ret });
@@ -2359,7 +2446,7 @@ router.patch('/despesas/:id', (req, res) => {
   if (!desp) return res.status(404).json({ error: 'Despesa não encontrada' });
 
   const fields = ['categoria','descricao','fornecedor','cnpj_fornecedor','nf_numero','data_despesa','competencia',
-    'valor_bruto','irrf','csll','pis_retido','cofins_retido','inss_retido','iss_retido','status','obs','contrato_ref'];
+    'valor_bruto','irrf','csll','pis_retido','cofins_retido','inss_retido','iss_retido','status','obs','contrato_ref','centro_custo'];
   const updates = [];
   const params = { id: parseInt(id) };
   for (const f of fields) {

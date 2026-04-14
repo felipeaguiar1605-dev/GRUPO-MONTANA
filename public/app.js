@@ -1391,9 +1391,14 @@ async function loadPagamentos(){
 }
 
 // ─── Despesas ────────────────────────────────────────────────────
-const DESP_CATS=['FORNECEDOR','SERVICO','FOLHA','ENCARGOS','IMPOSTO','CONTRIBUICAO','Material Limpeza','EPI/Ferramentas','OUTROS'];
-const DESP_CAT_LABELS={FORNECEDOR:'Fornecedor',SERVICO:'Serviço PJ',FOLHA:'Folha Pgto',ENCARGOS:'Encargos',IMPOSTO:'Imposto',CONTRIBUICAO:'Contribuição','Material Limpeza':'🧹 Mat. Limpeza','EPI/Ferramentas':'🦺 EPI/Ferramentas',OUTROS:'Outros'};
-const DESP_CAT_COLORS={FORNECEDOR:'#1d4ed8',SERVICO:'#7c3aed',FOLHA:'#d97706',ENCARGOS:'#dc2626',IMPOSTO:'#475569',CONTRIBUICAO:'#0891b2','Material Limpeza':'#059669','EPI/Ferramentas':'#d97706',OUTROS:'#64748b'};
+const DESP_CATS=['FORNECEDOR','SERVICO','FOLHA','ENCARGOS','IMPOSTO','CONTRIBUICAO','Material Limpeza','EPI/Ferramentas','OUTROS','ESCRITORIO','OPERACIONAL','DIVIDENDOS'];
+const DESP_CAT_LABELS={FORNECEDOR:'Fornecedor',SERVICO:'Serviço PJ',FOLHA:'Folha Pgto',ENCARGOS:'Encargos',IMPOSTO:'Imposto',CONTRIBUICAO:'Contribuição','Material Limpeza':'🧹 Mat. Limpeza','EPI/Ferramentas':'🦺 EPI/Ferramentas',OUTROS:'Outros',ESCRITORIO:'🏢 Escritório/Admin',OPERACIONAL:'⚙️ Custo Operacional',DIVIDENDOS:'💰 Dividendos'};
+const DESP_CAT_COLORS={FORNECEDOR:'#1d4ed8',SERVICO:'#7c3aed',FOLHA:'#d97706',ENCARGOS:'#dc2626',IMPOSTO:'#475569',CONTRIBUICAO:'#0891b2','Material Limpeza':'#059669','EPI/Ferramentas':'#d97706',OUTROS:'#64748b',ESCRITORIO:'#0891b2',OPERACIONAL:'#7c3aed',DIVIDENDOS:'#15803d'};
+
+// Centro de custo — mapeamento para centro_custo do backend
+const CC_MAP = { ESCRITORIO:'ESCRITORIO', OPERACIONAL:'OPERACIONAL', DIVIDENDOS:'DIVIDENDOS' };
+// Categoria → centro_custo automático
+function catToCentroCusto(cat){ return CC_MAP[cat] || ''; }
 let _despPage=1;
 
 function despCatBadge(cat){
@@ -1532,6 +1537,69 @@ async function loadDespData(){
     </div>
   `;
 
+  // ── Painel de Rateio Overhead ─────────────────────────────────
+  const rDiv=document.getElementById('desp-rateio');
+  if(rDiv){
+    try{
+      const rat=await api(`/despesas/rateio${resumoParams.length?'?'+resumoParams.join('&'):''}`);
+      if(rat.ok && (rat.totalOverhead>0 || rat.dividendos?.total>0)){
+        const ratRows=(rat.rateio||[]).map(c=>`
+          <tr>
+            <td style="padding:4px 10px;font-size:11px;font-weight:600;border-bottom:1px solid #f1f5f9">${c.numContrato}</td>
+            <td style="padding:4px 10px;font-size:11px;color:#475569;border-bottom:1px solid #f1f5f9;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.orgao||''}</td>
+            <td style="padding:4px 10px;font-size:11px;font-family:monospace;text-align:right;border-bottom:1px solid #f1f5f9">${brl(c.valor_mensal)}</td>
+            <td style="padding:4px 10px;font-size:11px;text-align:center;border-bottom:1px solid #f1f5f9;color:#64748b">${c.proporcao_pct}%</td>
+            <td style="padding:4px 10px;font-size:11px;font-family:monospace;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-weight:700">${brl(c.overhead_rateado)}</td>
+          </tr>`).join('');
+        const tipoLabels={ESCRITORIO:'🏢 Escritório/Admin',OPERACIONAL:'⚙️ Custo Operacional'};
+        const tipoBadges=(rat.overheadPorTipo||[]).map(t=>`
+          <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:12px;background:#f1f5f9;font-size:10px;font-weight:600;color:#475569">
+            ${tipoLabels[t.tipo]||t.tipo}: <span style="color:#dc2626">${brl(t.total)}</span>
+          </span>`).join('');
+        rDiv.innerHTML=`
+          <div style="background:#fff;border:1px solid #fecaca;border-radius:10px;padding:16px;margin-bottom:12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+              <div style="font-size:13px;font-weight:700;color:#0f172a">📊 Overhead — Rateio por Contrato</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">${tipoBadges}
+                ${rat.dividendos?.total>0?`<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:12px;background:#dcfce7;font-size:10px;font-weight:600;color:#15803d">💰 Dividendos: ${brl(rat.dividendos.total)}</span>`:''}
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px">
+              <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px;text-align:center">
+                <div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Total Overhead (rateável)</div>
+                <div style="font-size:18px;font-weight:800;color:#dc2626">${brl(rat.totalOverhead)}</div>
+                <div style="font-size:9px;color:#94a3b8">Escritório + Operacional</div>
+              </div>
+              <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px;text-align:center">
+                <div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Contratos na Base</div>
+                <div style="font-size:18px;font-weight:800;color:#15803d">${rat.contratos_na_base}</div>
+                <div style="font-size:9px;color:#94a3b8">Base: ${brl(rat.somaBase)}/mês</div>
+              </div>
+              ${rat.dividendos?.total>0?`
+              <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px;text-align:center">
+                <div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Dividendos</div>
+                <div style="font-size:18px;font-weight:800;color:#15803d">${brl(rat.dividendos.total)}</div>
+                <div style="font-size:9px;color:#94a3b8">${rat.dividendos.qtd} lançamento(s)</div>
+              </div>`:''}
+            </div>
+            ${ratRows?`<table style="width:100%;border-collapse:collapse">
+              <thead><tr>
+                <th style="padding:4px 10px;font-size:9px;color:#475569;font-weight:700;text-align:left;background:#f8fafc">CONTRATO</th>
+                <th style="padding:4px 10px;font-size:9px;color:#475569;font-weight:700;text-align:left;background:#f8fafc">ÓRGÃO</th>
+                <th style="padding:4px 10px;font-size:9px;color:#475569;font-weight:700;text-align:right;background:#f8fafc">VALOR MENSAL</th>
+                <th style="padding:4px 10px;font-size:9px;color:#475569;font-weight:700;text-align:center;background:#f8fafc">% BASE</th>
+                <th style="padding:4px 10px;font-size:9px;color:#475569;font-weight:700;text-align:right;background:#f8fafc">OVERHEAD RATEADO</th>
+              </tr></thead>
+              <tbody>${ratRows}</tbody>
+            </table>
+            <div style="font-size:9px;color:#94a3b8;margin-top:6px">* Rateio proporcional ao valor mensal bruto de cada contrato ativo. Dividendos não entram no custo dos contratos.</div>`:''}
+          </div>`;
+      } else {
+        rDiv.innerHTML='';
+      }
+    }catch(_){ rDiv.innerHTML=''; }
+  }
+
   // Por Categoria (mini bar)
   if(resumo.porCategoria.length){
     const maxCat=Math.max(...resumo.porCategoria.map(c=>c.total));
@@ -1553,11 +1621,16 @@ async function loadDespData(){
     <th class="r">Bruto</th><th class="r">Retenção</th><th class="r">Líquido</th><th>Status</th><th>Ações</th>
   </tr>`;
   document.getElementById('desp-body').innerHTML=(d.data||[]).map(r=>{
-    const cName=(r.contrato_vinculado||'').replace(/\s*—.*$/,'');
+    const cc=r.centro_custo||'';
+    const ccBadge = cc==='ESCRITORIO' ? `<span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#e0f2fe;color:#0369a1;font-weight:600">🏢 Escritório</span>`
+                  : cc==='OPERACIONAL' ? `<span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#f3e8ff;color:#7c3aed;font-weight:600">⚙️ Operacional</span>`
+                  : cc==='DIVIDENDOS'  ? `<span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#dcfce7;color:#15803d;font-weight:600">💰 Dividendos</span>`
+                  : '';
+    const cName = cc ? '' : (r.contrato_ref||r.contrato_vinculado||'').replace(/\s*—.*$/,'');
     return `<tr>
     <td style="font-size:10px;color:#64748b;white-space:nowrap">${r.data_despesa||''}</td>
     <td>${despCatBadge(r.categoria)}</td>
-    <td style="font-size:10px;font-weight:600;color:#1d4ed8;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.contrato_vinculado||''}">${cName||'—'}</td>
+    <td style="font-size:10px;font-weight:600;color:#1d4ed8;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.contrato_ref||r.contrato_vinculado||cc}">${ccBadge||cName||'—'}</td>
     <td style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.descricao||'').replace(/"/g,'&quot;')}">${r.descricao||'—'}</td>
     <td class="r mono" style="font-weight:600">${brl(r.valor_bruto)}</td>
     <td class="r mono" style="color:#d97706;font-size:10px" title="IRRF ${brl(r.irrf)} · CSLL ${brl(r.csll)} · PIS ${brl(r.pis_retido)} · COFINS ${brl(r.cofins_retido)} · INSS ${brl(r.inss_retido)}">${brl(r.total_retencao)}</td>
@@ -1600,19 +1673,74 @@ async function excluirNf(id, numero){
 
 // Form nova despesa
 const RETENCAO_SERVICO_FE={irrf:0.015,csll:0.01,pis:0.0065,cofins:0.03,inss:0.11};
-function toggleDespForm(){
+
+// Atualiza visibilidade do campo contrato ao mudar categoria
+function onDespCatChange(){
+  calcRetFe();
+  const cat=document.getElementById('nd-cat')?.value||'';
+  const cc=catToCentroCusto(cat);
+  // Campo de contrato: visível só quando centro_custo é vazio (despesa vinculada a contrato)
+  const wrap=document.getElementById('nd-contrato-wrap');
+  if(wrap) wrap.style.display = cc ? 'none' : '';
+  // Destaque visual para categorias de overhead
+  const hdr=document.getElementById('nd-overhead-hint');
+  if(hdr){
+    if(cat==='ESCRITORIO') hdr.textContent='🏢 Despesa de escritório — será rateada entre todos os contratos ativos proporcionalmente ao valor mensal.';
+    else if(cat==='OPERACIONAL') hdr.textContent='⚙️ Custo operacional — será rateado entre todos os contratos ativos proporcionalmente ao valor mensal.';
+    else if(cat==='DIVIDENDOS') hdr.textContent='💰 Distribuição de lucros — registrada como dividendos, não entra no custo dos contratos.';
+    else hdr.textContent='';
+    hdr.style.display = cc ? 'block' : 'none';
+  }
+}
+
+async function _loadContratosForm(){
+  try{
+    const r=await api('/contratos?status=ATIVO&limit=100');
+    return (r.data||[]).map(c=>`<option value="${c.numContrato}">${c.numContrato} — ${c.orgao||c.contrato||''}</option>`).join('');
+  }catch(e){ return ''; }
+}
+
+async function toggleDespForm(){
   const w=document.getElementById('desp-form-wrap');
   if(w.style.display!=='none'){w.style.display='none';return;}
   w.style.display='block';
+
+  // Carrega lista de contratos para o select
+  const contratosOpts = await _loadContratosForm();
+
   w.innerHTML=`
     <div style="background:#fff;border:1px solid #93c5fd;border-radius:10px;padding:16px;margin-bottom:12px">
       <div style="font-size:13px;font-weight:700;color:#1d4ed8;margin-bottom:12px">+ Novo Lançamento de Despesa</div>
+
+      <!-- Hint overhead -->
+      <div id="nd-overhead-hint" style="display:none;padding:8px 12px;border-radius:7px;background:#fef9c3;border:1px solid #fde68a;font-size:11px;color:#92400e;font-weight:600;margin-bottom:10px"></div>
+
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
-        <div><label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:2px">CATEGORIA</label>
-          <select id="nd-cat" onchange="calcRetFe()" style="width:100%;padding:6px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px">
-            ${DESP_CATS.map(c=>`<option value="${c}">${DESP_CAT_LABELS[c]}</option>`).join('')}
-          </select></div>
-        <div><label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:2px">FORNECEDOR</label>
+        <!-- CATEGORIA — inclui ESCRITORIO, OPERACIONAL, DIVIDENDOS -->
+        <div>
+          <label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:2px">CATEGORIA / CENTRO DE CUSTO</label>
+          <select id="nd-cat" onchange="onDespCatChange()" style="width:100%;padding:6px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px">
+            <optgroup label="── Vinculado a Contrato ──">
+              ${['FORNECEDOR','SERVICO','FOLHA','ENCARGOS','IMPOSTO','CONTRIBUICAO','Material Limpeza','EPI/Ferramentas','OUTROS'].map(c=>`<option value="${c}">${DESP_CAT_LABELS[c]}</option>`).join('')}
+            </optgroup>
+            <optgroup label="── Rateio / Sem Contrato ──">
+              <option value="ESCRITORIO">🏢 Escritório / Administrativo (rateio)</option>
+              <option value="OPERACIONAL">⚙️ Custo Operacional (rateio)</option>
+              <option value="DIVIDENDOS">💰 Dividendos / Distribuição</option>
+            </optgroup>
+          </select>
+        </div>
+
+        <!-- CONTRATO — oculto quando categoria for overhead -->
+        <div id="nd-contrato-wrap">
+          <label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:2px">CONTRATO (opcional)</label>
+          <select id="nd-contrato" style="width:100%;padding:6px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px">
+            <option value="">— Sem vínculo —</option>
+            ${contratosOpts}
+          </select>
+        </div>
+
+        <div><label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:2px">FORNECEDOR / BENEFICIÁRIO</label>
           <input id="nd-forn" style="width:100%;padding:6px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px" placeholder="Nome do fornecedor"></div>
         <div><label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:2px">CNPJ</label>
           <input id="nd-cnpj" style="width:100%;padding:6px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px" placeholder="00.000.000/0000-00"></div>
@@ -1627,6 +1755,7 @@ function toggleDespForm(){
         <div><label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:2px">DESCRIÇÃO</label>
           <input id="nd-desc" style="width:100%;padding:6px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px" placeholder="Descrição da despesa"></div>
       </div>
+
       <div style="margin-top:10px;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
         <div style="font-size:10px;font-weight:600;color:#64748b;margin-bottom:6px">RETENÇÕES (editáveis — calculadas automaticamente para Serviço PJ)</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -1684,8 +1813,12 @@ async function saveDespesa(){
   if(!vb){alert('Informe o valor bruto');return;}
   const dataRaw=document.getElementById('nd-data').value;
   const dataBR=dataRaw?dataRaw.split('-').reverse().join('/'):'';
+  const cat=document.getElementById('nd-cat').value;
+  const cc=catToCentroCusto(cat);
   const body={
-    categoria:document.getElementById('nd-cat').value,
+    categoria:cat,
+    centro_custo:cc,
+    contrato_ref: cc ? '' : (document.getElementById('nd-contrato')?.value||''),
     fornecedor:document.getElementById('nd-forn').value,
     cnpj_fornecedor:document.getElementById('nd-cnpj').value,
     nf_numero:document.getElementById('nd-nf').value,
@@ -1702,7 +1835,8 @@ async function saveDespesa(){
   };
   await api('/despesas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   document.getElementById('desp-form-wrap').style.display='none';
-  toast('Despesa salva!');
+  const ccLabel={ESCRITORIO:'🏢 Escritório salvo!',OPERACIONAL:'⚙️ Custo operacional salvo!',DIVIDENDOS:'💰 Dividendos salvos!'};
+  toast(ccLabel[cc]||'Despesa salva!');
   loadDespData();
 }
 
