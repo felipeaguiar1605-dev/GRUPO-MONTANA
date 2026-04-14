@@ -3107,6 +3107,58 @@ router.get('/conta-vinculada/estimativa', (req, res) => {
   }
 });
 
+// ─── CONTA VINCULADA — Extratos reais ───────────────────────────────
+router.get('/conta-vinculada/extratos', (req, res) => {
+  try {
+    const { conta, from, to } = req.query;
+    let where = '1=1';
+    const params = {};
+    if (conta) { where += ' AND conta = @conta'; params.conta = conta; }
+    if (from) { where += ' AND data_iso >= @from'; params.from = from; }
+    if (to) { where += ' AND data_iso <= @to'; params.to = to; }
+
+    const rows = req.db.prepare(`SELECT * FROM conta_vinculada WHERE ${where} ORDER BY data_iso, id`).all(params);
+
+    // Resumo por conta
+    const resumo = req.db.prepare(`
+      SELECT conta, orgao, count(*) as qtd,
+        sum(credito) as total_creditos, sum(debito) as total_debitos
+      FROM conta_vinculada GROUP BY conta, orgao
+    `).all();
+
+    res.json({ data: rows, resumo, total: rows.length });
+  } catch (e) { errRes(res, e); }
+});
+
+router.post('/conta-vinculada/batch', (req, res) => {
+  try {
+    const { lancamentos } = req.body;
+    if (!Array.isArray(lancamentos)) return res.status(400).json({ error: 'Array de lancamentos esperado' });
+
+    const insert = req.db.prepare(`INSERT OR IGNORE INTO conta_vinculada
+      (conta, orgao, cnpj_orgao, data, data_iso, historico, debito, credito, saldo, contrato_ref, competencia, origem)
+      VALUES (@conta, @orgao, @cnpj_orgao, @data, @data_iso, @historico, @debito, @credito, @saldo, @contrato_ref, @competencia, @origem)`);
+
+    const batch = req.db.transaction((items) => {
+      let count = 0;
+      for (const l of items) {
+        insert.run({
+          conta: l.conta || '', orgao: l.orgao || '', cnpj_orgao: l.cnpj_orgao || '',
+          data: l.data || '', data_iso: l.data_iso || '', historico: l.historico || '',
+          debito: l.debito || 0, credito: l.credito || 0, saldo: l.saldo || 0,
+          contrato_ref: l.contrato_ref || '', competencia: l.competencia || '',
+          origem: l.origem || 'pipeline'
+        });
+        count++;
+      }
+      return count;
+    });
+
+    const count = batch(lancamentos);
+    res.json({ ok: true, message: `${count} lancamentos de conta vinculada importados` });
+  } catch (e) { errRes(res, e); }
+});
+
 function parseDataBR(str) {
   if (!str) return null;
   const p = str.split('/');

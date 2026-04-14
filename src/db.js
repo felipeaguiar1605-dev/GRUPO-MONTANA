@@ -472,6 +472,26 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_ponto_reg_data ON ponto_registros(data_hora);
   CREATE INDEX IF NOT EXISTS idx_ponto_oc_func ON ponto_ocorrencias(funcionario_id);
   CREATE INDEX IF NOT EXISTS idx_ponto_jorn_func ON ponto_jornadas(funcionario_id);
+
+  CREATE TABLE IF NOT EXISTS conta_vinculada (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conta TEXT NOT NULL,
+    orgao TEXT DEFAULT '',
+    cnpj_orgao TEXT DEFAULT '',
+    data TEXT NOT NULL,
+    data_iso TEXT NOT NULL,
+    historico TEXT DEFAULT '',
+    debito REAL DEFAULT 0,
+    credito REAL DEFAULT 0,
+    saldo REAL DEFAULT 0,
+    contrato_ref TEXT DEFAULT '',
+    competencia TEXT DEFAULT '',
+    origem TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_cv_data ON conta_vinculada(data_iso);
+  CREATE INDEX IF NOT EXISTS idx_cv_conta ON conta_vinculada(conta);
+  CREATE INDEX IF NOT EXISTS idx_cv_contrato ON conta_vinculada(contrato_ref);
 `;
 
 const MIGRATIONS = [
