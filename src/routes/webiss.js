@@ -211,27 +211,28 @@ function signRpsXml(rpsXml, privateKeyPem, certPem, refId) {
   // Extrai apenas o DER base64 do certificado (sem cabeçalho PEM)
   const certB64 = certPem.replace(/-----[^-]+-----/g, '').replace(/\s/g, '');
 
+  // ABRASF v2.02 exige C14N inclusivo (não exclusivo)
+  const C14N = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315';
+
   const sig = new SignedXml({
     privateKey:              privateKeyPem,
     signatureAlgorithm:      'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
-    canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+    canonicalizationAlgorithm: C14N,
   });
 
   sig.addReference({
     xpath: `//*[@Id="${refId}"]`,
     transforms: [
       'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
-      'http://www.w3.org/2001/10/xml-exc-c14n#',
+      C14N,
     ],
     digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
   });
 
-  // Injeta X509Certificate no KeyInfo
-  sig.keyInfoProvider = {
-    getKeyInfo: () => `<X509Data><X509Certificate>${certB64}</X509Certificate></X509Data>`,
-    getKey:     () => Buffer.from(privateKeyPem),
-  };
+  // Injeta X509Certificate no KeyInfo (API xml-crypto v6+)
+  sig.getKeyInfoContent = () => `<X509Data><X509Certificate>${certB64}</X509Certificate></X509Data>`;
 
+  // Signature fica em <Rps> após </InfDeclaracaoPrestacaoServico> (enveloped no doc root)
   sig.computeSignature(rpsXml);
   return sig.getSignedXml();
 }
@@ -455,6 +456,7 @@ router.post('/emitir', async (req, res) => {
 
   const cnpj   = req.company.cnpjRaw;
   const insc   = process.env[`WEBISS_INSC_${req.companyKey.toUpperCase()}`] || '';
+  const cnae   = process.env[`WEBISS_CNAE_${req.companyKey.toUpperCase()}`] || rps.servico.codigoCnae || '';
   const certPath = req.company.certificadoPfx;
   const rpsId  = `rps_${rps.numero}_${(rps.serie || 'A').replace(/\W/g, '')}`;
 
@@ -486,12 +488,12 @@ router.post('/emitir', async (req, res) => {
       <ValorInss>${(+(rps.servico.valorInss || 0)).toFixed(2)}</ValorInss>
       <ValorIr>${(+(rps.servico.valorIr || 0)).toFixed(2)}</ValorIr>
       <ValorCsll>${(+(rps.servico.valorCsll || 0)).toFixed(2)}</ValorCsll>
-      <IssRetido>${rps.servico.issRetido ? 1 : 2}</IssRetido>
       <ValorIss>${(+(rps.servico.valorIss || 0)).toFixed(2)}</ValorIss>
-      <Aliquota>${(+(rps.servico.aliquota || 0)).toFixed(4)}</Aliquota>
+      ${rps.servico.issRetido ? `<Aliquota>${(+(rps.servico.aliquota || 0)).toFixed(4)}</Aliquota>` : ''}
     </Valores>
+    <IssRetido>${rps.servico.issRetido ? 1 : 2}</IssRetido>
     <ItemListaServico>${rps.servico.itemLista || '07.10'}</ItemListaServico>
-    <CodigoTributacaoMunicipio>${rps.servico.codTributacao || '07.10'}</CodigoTributacaoMunicipio>
+    <CodigoTributacaoMunicipio>${rps.servico.codTributacao || rps.servico.itemLista || '07.10'}</CodigoTributacaoMunicipio>
     <Discriminacao>${rps.servico.discriminacao}</Discriminacao>
     <CodigoMunicipio>${IBGE_PALMAS}</CodigoMunicipio>
     <ExigibilidadeISS>${rps.servico.exigibilidadeIss || 1}</ExigibilidadeISS>
