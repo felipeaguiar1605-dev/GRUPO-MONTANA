@@ -171,8 +171,10 @@ function showTab(id,el){
   if(id==='keywords') loadKeywords();
   if(id==='config') loadConfig();
   if(id==='consolidado') loadConsolidado();
-  if(id==='estoque')  window.estoqueInit  && window.estoqueInit();
-  if(id==='juridico') window.juridicoInit && window.juridicoInit();
+  if(id==='estoque')    window.estoqueInit    && window.estoqueInit();
+  if(id==='juridico')  window.juridicoInit   && window.juridicoInit();
+  if(id==='compras')   window.comprasInit    && window.comprasInit();
+  if(id==='supervisor')window.supervisorInit && window.supervisorInit();
 }
 
 // ─── Global Period Filter ────────────────────────────────────────
@@ -669,8 +671,8 @@ async function autoVincular(){
   const kwData = await api('/configuracoes/keywords');
   const keywordsList = kwData.keywords || [];
 
-  // Load all unlinked extratos and try to match by keywords
-  const d=await api('/extratos?status=PENDENTE&limit=9999');
+  // Load extratos pendentes de 2026 (anos anteriores não são prioridade operacional)
+  const d=await api('/extratos?status=PENDENTE&from=2026-01-01&limit=9999');
   const keywords={};
   _contratos.forEach(c=>{
     const name=c.contrato.toLowerCase();

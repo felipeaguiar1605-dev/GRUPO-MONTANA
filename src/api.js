@@ -511,8 +511,9 @@ router.get('/dashboard', (req, res) => {
 
   // 10. Alertas
   const alertas = [];
-  const semVinculo = req.db.prepare(`SELECT COUNT(*) as n FROM extratos WHERE credito > 0 AND (status_conciliacao = 'PENDENTE' OR status_conciliacao = '' OR status_conciliacao IS NULL)`).get();
-  if (semVinculo.n > 0) alertas.push({ tipo: 'warning', msg: `${semVinculo.n} créditos sem vínculo a contrato`, icon: '⚠️' });
+  // Alerta apenas para extratos de 2026 (anos anteriores não são prioridade operacional)
+  const semVinculo = req.db.prepare(`SELECT COUNT(*) as n FROM extratos WHERE credito > 0 AND data_iso >= '2026-01-01' AND (status_conciliacao = 'PENDENTE' OR status_conciliacao = '' OR status_conciliacao IS NULL)`).get();
+  if (semVinculo.n > 0) alertas.push({ tipo: 'warning', msg: `${semVinculo.n} créditos de 2026 sem vínculo a contrato`, icon: '⚠️' });
 
   const parciais = req.db.prepare(`SELECT COUNT(*) as n FROM extratos WHERE status_conciliacao = 'PARCIAL'`).get();
   if (parciais.n > 0) alertas.push({ tipo: 'info', msg: `${parciais.n} lançamentos com conciliação parcial`, icon: '🔶' });
@@ -649,7 +650,7 @@ router.get('/contratos/saude', (req, res) => {
         nfWhere: `(tomador LIKE ? OR tomador LIKE ?)`,
         nfParams: ['%PREVIPALMAS%','%PREVIDENCIA SOCIAL DO MUNICIPIO DE PALMAS%'],
       },
-      'SEDUC Limpeza/Copeiragem': {
+      'SEDUC 016/2023': {
         nfWhere: `tomador LIKE ?`,
         nfParams: ['%SECRETARIA DA EDUCACAO%'],
       },
@@ -4400,6 +4401,366 @@ router.get('/relatorios/apuracao-mensal', (req, res) => {
 
     res.json({ data: rows, total: rows.length, fonte });
   } catch(e) { errRes(res, e); }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO SETOR DE COMPRAS
+// ═══════════════════════════════════════════════════════════════
+
+// Dashboard de compras
+router.get('/compras/dashboard', (req, res) => {
+  try {
+    const db = req.db;
+    const porStatus = db.prepare(`
+      SELECT status, COUNT(*) as total,
+             COALESCE(SUM(valor_aprovado), SUM(valor_estimado), 0) as valor
+      FROM compras_requisicoes
+      GROUP BY status
+    `).all();
+
+    const urgentes = db.prepare(`
+      SELECT COUNT(*) as total FROM compras_requisicoes
+      WHERE prioridade = 'URGENTE' AND status NOT IN ('COMPRADA','CANCELADA')
+    `).get();
+
+    const mesAtual = new Date().toISOString().substring(0, 7);
+    const valorMes = db.prepare(`
+      SELECT COALESCE(SUM(valor_aprovado), SUM(valor_estimado), 0) as total
+      FROM compras_requisicoes
+      WHERE substr(created_at, 1, 7) = ?
+        AND status NOT IN ('CANCELADA')
+    `).get(mesAtual);
+
+    const recentes = db.prepare(`
+      SELECT r.id, r.titulo, r.prioridade, r.status, r.solicitante,
+             r.valor_estimado, r.valor_aprovado, r.created_at, r.data_necessidade,
+             (SELECT COUNT(*) FROM compras_cotacoes c WHERE c.requisicao_id = r.id) as qtd_cotacoes
+      FROM compras_requisicoes r
+      ORDER BY r.created_at DESC LIMIT 10
+    `).all();
+
+    res.json({ porStatus, urgentes: urgentes.total, valorMes: valorMes.total, recentes });
+  } catch(e) { errRes(res, e, 'compras/dashboard'); }
+});
+
+// Listar requisições
+router.get('/compras/requisicoes', (req, res) => {
+  try {
+    const db = req.db;
+    const { status, prioridade, contrato_ref, q } = req.query;
+    let where = [];
+    let params = [];
+
+    if (status)       { where.push('r.status = ?');       params.push(status); }
+    if (prioridade)   { where.push('r.prioridade = ?');   params.push(prioridade); }
+    if (contrato_ref) { where.push('r.contrato_ref = ?'); params.push(contrato_ref); }
+    if (q)            { where.push('(r.titulo LIKE ? OR r.solicitante LIKE ? OR r.fornecedor_escolhido LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
+
+    const clause = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const rows = db.prepare(`
+      SELECT r.*,
+             (SELECT COUNT(*) FROM compras_itens    i WHERE i.requisicao_id = r.id) as qtd_itens,
+             (SELECT COUNT(*) FROM compras_cotacoes c WHERE c.requisicao_id = r.id) as qtd_cotacoes
+      FROM compras_requisicoes r
+      ${clause}
+      ORDER BY
+        CASE r.prioridade WHEN 'URGENTE' THEN 1 WHEN 'NORMAL' THEN 2 ELSE 3 END,
+        r.created_at DESC
+    `).all(...params);
+    res.json({ data: rows, total: rows.length });
+  } catch(e) { errRes(res, e, 'compras/requisicoes GET'); }
+});
+
+// Detalhe de uma requisição (com itens e cotações)
+router.get('/compras/requisicoes/:id', (req, res) => {
+  try {
+    const db = req.db;
+    const id = Number(req.params.id);
+    const req_ = db.prepare('SELECT * FROM compras_requisicoes WHERE id = ?').get(id);
+    if (!req_) return res.status(404).json({ error: 'Requisição não encontrada' });
+    const itens = db.prepare('SELECT * FROM compras_itens WHERE requisicao_id = ? ORDER BY id').all(id);
+    const cotacoes = db.prepare('SELECT * FROM compras_cotacoes WHERE requisicao_id = ? ORDER BY created_at').all(id);
+    res.json({ ...req_, itens, cotacoes });
+  } catch(e) { errRes(res, e, 'compras/requisicoes/:id'); }
+});
+
+// Criar requisição (com itens opcionais)
+router.post('/compras/requisicoes', (req, res) => {
+  try {
+    const db = req.db;
+    const { titulo, solicitante, contrato_ref, prioridade, status, descricao,
+            valor_estimado, data_necessidade, itens } = req.body;
+    if (!titulo) return res.status(400).json({ error: 'titulo é obrigatório' });
+
+    const info = db.prepare(`
+      INSERT INTO compras_requisicoes
+        (titulo, solicitante, contrato_ref, prioridade, status, descricao,
+         valor_estimado, data_necessidade, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,datetime('now'))
+    `).run(
+      titulo, solicitante || '', contrato_ref || '',
+      prioridade || 'NORMAL', status || 'PENDENTE',
+      descricao || '', valor_estimado || null, data_necessidade || ''
+    );
+
+    const reqId = info.lastInsertRowid;
+
+    if (Array.isArray(itens) && itens.length) {
+      const stmtItem = db.prepare(`
+        INSERT INTO compras_itens (requisicao_id, descricao, unidade, quantidade, valor_unitario_est)
+        VALUES (?,?,?,?,?)
+      `);
+      for (const it of itens) {
+        if (!it.descricao) continue;
+        stmtItem.run(reqId, it.descricao, it.unidade || 'un', it.quantidade || 1, it.valor_unitario_est || null);
+      }
+    }
+
+    audit(req, 'INSERT', 'compras_requisicoes', reqId, titulo);
+    res.json({ id: reqId, ok: true });
+  } catch(e) { errRes(res, e, 'compras/requisicoes POST'); }
+});
+
+// Atualizar requisição
+router.put('/compras/requisicoes/:id', (req, res) => {
+  try {
+    const db = req.db;
+    const id = Number(req.params.id);
+    const { titulo, solicitante, contrato_ref, prioridade, status, descricao,
+            valor_estimado, valor_aprovado, fornecedor_escolhido, data_necessidade } = req.body;
+
+    const fields = [];
+    const params = [];
+    if (titulo !== undefined)              { fields.push('titulo = ?');              params.push(titulo); }
+    if (solicitante !== undefined)         { fields.push('solicitante = ?');         params.push(solicitante); }
+    if (contrato_ref !== undefined)        { fields.push('contrato_ref = ?');        params.push(contrato_ref); }
+    if (prioridade !== undefined)          { fields.push('prioridade = ?');          params.push(prioridade); }
+    if (status !== undefined)              { fields.push('status = ?');              params.push(status); }
+    if (descricao !== undefined)           { fields.push('descricao = ?');           params.push(descricao); }
+    if (valor_estimado !== undefined)      { fields.push('valor_estimado = ?');      params.push(valor_estimado); }
+    if (valor_aprovado !== undefined)      { fields.push('valor_aprovado = ?');      params.push(valor_aprovado); }
+    if (fornecedor_escolhido !== undefined){ fields.push('fornecedor_escolhido = ?');params.push(fornecedor_escolhido); }
+    if (data_necessidade !== undefined)    { fields.push('data_necessidade = ?');    params.push(data_necessidade); }
+
+    if (!fields.length) return res.status(400).json({ error: 'Nenhum campo para atualizar' });
+    fields.push("updated_at = datetime('now')");
+    params.push(id);
+
+    db.prepare(`UPDATE compras_requisicoes SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+    audit(req, 'UPDATE', 'compras_requisicoes', id, status || '');
+    res.json({ ok: true });
+  } catch(e) { errRes(res, e, 'compras/requisicoes PUT'); }
+});
+
+// Adicionar cotação
+router.post('/compras/cotacoes', (req, res) => {
+  try {
+    const db = req.db;
+    const { requisicao_id, fornecedor, cnpj_cpf, valor_total, prazo_entrega, observacoes } = req.body;
+    if (!requisicao_id || !fornecedor) return res.status(400).json({ error: 'requisicao_id e fornecedor são obrigatórios' });
+
+    const info = db.prepare(`
+      INSERT INTO compras_cotacoes (requisicao_id, fornecedor, cnpj_cpf, valor_total, prazo_entrega, observacoes)
+      VALUES (?,?,?,?,?,?)
+    `).run(requisicao_id, fornecedor, cnpj_cpf || '', valor_total || null, prazo_entrega || '', observacoes || '');
+
+    audit(req, 'INSERT', 'compras_cotacoes', info.lastInsertRowid, `req=${requisicao_id} forn=${fornecedor}`);
+    res.json({ id: info.lastInsertRowid, ok: true });
+  } catch(e) { errRes(res, e, 'compras/cotacoes POST'); }
+});
+
+// Escolher cotação vencedora
+router.put('/compras/cotacoes/:id/escolher', (req, res) => {
+  try {
+    const db = req.db;
+    const cotId = Number(req.params.id);
+    const cot = db.prepare('SELECT * FROM compras_cotacoes WHERE id = ?').get(cotId);
+    if (!cot) return res.status(404).json({ error: 'Cotação não encontrada' });
+
+    // Desmarcar todas da mesma requisição
+    db.prepare('UPDATE compras_cotacoes SET escolhida = 0 WHERE requisicao_id = ?').run(cot.requisicao_id);
+    // Marcar a escolhida
+    db.prepare('UPDATE compras_cotacoes SET escolhida = 1 WHERE id = ?').run(cotId);
+    // Atualizar requisição
+    db.prepare(`
+      UPDATE compras_requisicoes
+      SET fornecedor_escolhido = ?, valor_aprovado = ?, status = 'APROVADA', updated_at = datetime('now')
+      WHERE id = ?
+    `).run(cot.fornecedor, cot.valor_total, cot.requisicao_id);
+
+    audit(req, 'UPDATE', 'compras_cotacoes', cotId, `escolhida req=${cot.requisicao_id}`);
+    res.json({ ok: true });
+  } catch(e) { errRes(res, e, 'compras/cotacoes escolher'); }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO SUPERVISOR OPERACIONAL
+// ═══════════════════════════════════════════════════════════════
+
+// Dashboard supervisor
+router.get('/supervisor/dashboard', (req, res) => {
+  try {
+    const db = req.db;
+    const hoje = new Date().toISOString().substring(0, 10);
+
+    const abertas = db.prepare(`
+      SELECT contrato_ref, COUNT(*) as total
+      FROM sup_ocorrencias WHERE status = 'ABERTA'
+      GROUP BY contrato_ref ORDER BY total DESC
+    `).all();
+
+    const hoje_count = db.prepare(`
+      SELECT COUNT(*) as total FROM sup_ocorrencias
+      WHERE data_ocorrencia_iso = ?
+    `).get(hoje);
+
+    const checklists_hoje = db.prepare(`
+      SELECT COUNT(*) as total FROM sup_checklist WHERE data_iso = ?
+    `).get(hoje);
+
+    const por_tipo = db.prepare(`
+      SELECT tipo, COUNT(*) as total
+      FROM sup_ocorrencias WHERE status = 'ABERTA'
+      GROUP BY tipo ORDER BY total DESC
+    `).all();
+
+    const recentes = db.prepare(`
+      SELECT * FROM sup_ocorrencias
+      ORDER BY created_at DESC LIMIT 10
+    `).all();
+
+    res.json({
+      abertas_por_contrato: abertas,
+      total_abertas: abertas.reduce((s, r) => s + r.total, 0),
+      ocorrencias_hoje: hoje_count.total,
+      checklists_hoje: checklists_hoje.total,
+      por_tipo,
+      recentes
+    });
+  } catch(e) { errRes(res, e, 'supervisor/dashboard'); }
+});
+
+// Listar ocorrências
+router.get('/supervisor/ocorrencias', (req, res) => {
+  try {
+    const db = req.db;
+    const { status, tipo, contrato_ref, de, ate, q } = req.query;
+    let where = [];
+    let params = [];
+
+    if (status)       { where.push('status = ?');       params.push(status); }
+    if (tipo)         { where.push('tipo = ?');         params.push(tipo); }
+    if (contrato_ref) { where.push('contrato_ref = ?'); params.push(contrato_ref); }
+    if (de)           { where.push('data_ocorrencia_iso >= ?'); params.push(de); }
+    if (ate)          { where.push('data_ocorrencia_iso <= ?'); params.push(ate); }
+    if (q)            { where.push('(descricao LIKE ? OR funcionario_nome LIKE ? OR posto LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
+
+    const clause = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const rows = db.prepare(`
+      SELECT * FROM sup_ocorrencias ${clause}
+      ORDER BY created_at DESC
+    `).all(...params);
+    res.json({ data: rows, total: rows.length });
+  } catch(e) { errRes(res, e, 'supervisor/ocorrencias GET'); }
+});
+
+// Registrar ocorrência
+router.post('/supervisor/ocorrencias', (req, res) => {
+  try {
+    const db = req.db;
+    const { contrato_ref, posto, tipo, descricao, funcionario_nome,
+            data_ocorrencia, data_ocorrencia_iso, registrado_por } = req.body;
+    if (!descricao) return res.status(400).json({ error: 'descricao é obrigatória' });
+
+    const info = db.prepare(`
+      INSERT INTO sup_ocorrencias
+        (contrato_ref, posto, tipo, descricao, funcionario_nome,
+         data_ocorrencia, data_ocorrencia_iso, registrado_por)
+      VALUES (?,?,?,?,?,?,?,?)
+    `).run(
+      contrato_ref || '', posto || '', tipo || 'OUTRO', descricao,
+      funcionario_nome || '', data_ocorrencia || '',
+      data_ocorrencia_iso || new Date().toISOString().substring(0, 10),
+      registrado_por || req.user?.login || ''
+    );
+
+    audit(req, 'INSERT', 'sup_ocorrencias', info.lastInsertRowid, tipo || 'OUTRO');
+    res.json({ id: info.lastInsertRowid, ok: true });
+  } catch(e) { errRes(res, e, 'supervisor/ocorrencias POST'); }
+});
+
+// Atualizar ocorrência (status / resolução)
+router.put('/supervisor/ocorrencias/:id', (req, res) => {
+  try {
+    const db = req.db;
+    const id = Number(req.params.id);
+    const { status, resolucao, tipo, descricao, funcionario_nome,
+            contrato_ref, posto, data_ocorrencia, data_ocorrencia_iso } = req.body;
+
+    const fields = [];
+    const params = [];
+    if (status !== undefined)              { fields.push('status = ?');              params.push(status); }
+    if (resolucao !== undefined)           { fields.push('resolucao = ?');           params.push(resolucao); }
+    if (tipo !== undefined)                { fields.push('tipo = ?');                params.push(tipo); }
+    if (descricao !== undefined)           { fields.push('descricao = ?');           params.push(descricao); }
+    if (funcionario_nome !== undefined)    { fields.push('funcionario_nome = ?');    params.push(funcionario_nome); }
+    if (contrato_ref !== undefined)        { fields.push('contrato_ref = ?');        params.push(contrato_ref); }
+    if (posto !== undefined)               { fields.push('posto = ?');               params.push(posto); }
+    if (data_ocorrencia !== undefined)     { fields.push('data_ocorrencia = ?');     params.push(data_ocorrencia); }
+    if (data_ocorrencia_iso !== undefined) { fields.push('data_ocorrencia_iso = ?'); params.push(data_ocorrencia_iso); }
+
+    if (!fields.length) return res.status(400).json({ error: 'Nenhum campo para atualizar' });
+    fields.push("updated_at = datetime('now')");
+    params.push(id);
+
+    db.prepare(`UPDATE sup_ocorrencias SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+    audit(req, 'UPDATE', 'sup_ocorrencias', id, status || '');
+    res.json({ ok: true });
+  } catch(e) { errRes(res, e, 'supervisor/ocorrencias PUT'); }
+});
+
+// Listar checklists
+router.get('/supervisor/checklist', (req, res) => {
+  try {
+    const db = req.db;
+    const { data_iso, contrato_ref, turno } = req.query;
+    let where = [];
+    let params = [];
+
+    if (data_iso)     { where.push('data_iso = ?');     params.push(data_iso); }
+    if (contrato_ref) { where.push('contrato_ref = ?'); params.push(contrato_ref); }
+    if (turno)        { where.push('turno = ?');        params.push(turno); }
+
+    const clause = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const rows = db.prepare(`
+      SELECT * FROM sup_checklist ${clause}
+      ORDER BY created_at DESC LIMIT 200
+    `).all(...params);
+    res.json({ data: rows, total: rows.length });
+  } catch(e) { errRes(res, e, 'supervisor/checklist GET'); }
+});
+
+// Salvar checklist
+router.post('/supervisor/checklist', (req, res) => {
+  try {
+    const db = req.db;
+    const { contrato_ref, posto, data_iso, turno, supervisor, itens_json, observacoes, assinatura } = req.body;
+
+    const info = db.prepare(`
+      INSERT INTO sup_checklist
+        (contrato_ref, posto, data_iso, turno, supervisor, itens_json, observacoes, assinatura)
+      VALUES (?,?,?,?,?,?,?,?)
+    `).run(
+      contrato_ref || '', posto || '',
+      data_iso || new Date().toISOString().substring(0, 10),
+      turno || 'DIURNO', supervisor || '',
+      typeof itens_json === 'string' ? itens_json : JSON.stringify(itens_json || []),
+      observacoes || '', assinatura || ''
+    );
+
+    audit(req, 'INSERT', 'sup_checklist', info.lastInsertRowid, `${data_iso} ${posto}`);
+    res.json({ id: info.lastInsertRowid, ok: true });
+  } catch(e) { errRes(res, e, 'supervisor/checklist POST'); }
 });
 
 module.exports = router;
