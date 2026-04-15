@@ -167,9 +167,12 @@ function buildEmpresaData(nomeEmpresa, cfg) {
   const { pareados, extSemNf } = nfsPagasNoMes(db, DATA_INI, DATA_FIM);
 
   const rows = pareados.map(({ nf, extrato, tipo }) => {
+    // Competência: mês do serviço — usado em Contratos para controle de adimplência
     const compFinal  = nf.competencia || (nf.data_emissao ? nf.data_emissao.substring(0,7) : '');
-    const anoComp    = anoCompetencia(compFinal);
-    const jaTribt    = anoComp && anoComp < ANO_ARG;
+    // Para efeito FISCAL: o que define "já tributado" é o ANO DA EMISSÃO da NF
+    // (não a competência do serviço). NF emitida em 2025 → imposto de 2025.
+    const anoEmissao = nf.data_emissao ? nf.data_emissao.substring(0, 4) : '';
+    const jaTribt    = anoEmissao !== '' && anoEmissao < ANO_ARG;
     const vbruto     = num(nf.valor_bruto);
     const vliq       = num(nf.valor_liquido || nf.valor_bruto);
     const retTotal   = num(nf.retencao) || (num(nf.ir)+num(nf.csll)+num(nf.pis)+num(nf.cofins)+num(nf.inss)+num(nf.iss));
@@ -182,8 +185,8 @@ function buildEmpresaData(nomeEmpresa, cfg) {
       nf_num:       nf.numero || '',
       tomador:      nf.tomador || '',
       cnpj_tomador: nf.cnpj_tomador || '',
-      competencia:  compFinal,
-      ano_comp:     anoComp,
+      competencia:  compFinal,          // mês do serviço — controle adimplência
+      ano_emissao:  anoEmissao,         // ano fiscal da NF
       ja_tributado: jaTribt ? 'SIM' : 'NÃO',
       data_emissao: fmtD(nf.data_emissao),
       data_pagto:   fmtD(extrato.data_iso),
@@ -208,10 +211,10 @@ function buildEmpresaData(nomeEmpresa, cfg) {
 
   console.log(`\n  🏢 ${cfg.label} (${cfg.regime})`);
   console.log(`     ${rows.length} NFs identificadas | ${extSemNf.length} créditos sem NF`);
-  const anos = [...new Set(rows.map(r=>r.ano_comp).filter(Boolean))].sort();
+  const anos = [...new Set(rows.map(r=>r.ano_emissao).filter(Boolean))].sort();
   anos.forEach(a => {
-    const n = rows.filter(r=>r.ano_comp===a);
-    console.log(`     Competência ${a}: ${n.length} NFs → R$${fmtR(n.reduce((s,r)=>s+r.vliq,0))} (${a<ANO_ARG?'já tributado':'tributar agora'})`);
+    const n = rows.filter(r=>r.ano_emissao===a);
+    console.log(`     NFs emitidas em ${a}: ${n.length} NFs → R$${fmtR(n.reduce((s,r)=>s+r.vliq,0))} (${a<ANO_ARG?'já tributado':'tributar agora'})`);
   });
   return { rows, semNfRows, cfg, nomeEmpresa };
 }
@@ -314,27 +317,33 @@ async function gerarXlsxEmpresa(empData) {
   wsRes.addRow([]);
 
   // Subtítulo
-  const rSub = wsRes.addRow(['', 'TOTAIS POR COMPETÊNCIA', '', '', '']);
+  const rSub = wsRes.addRow(['', 'TOTAIS POR ANO DE EMISSÃO DA NF', '', '', '']);
   wsRes.mergeCells(`B${rSub.number}:E${rSub.number}`);
   rSub.font = { bold: true, size: 11, name: 'Calibri' };
   rSub.height = 22;
 
+  // Nota explicativa
+  const rObs = wsRes.addRow(['', '⚠️  Base fiscal: ano de emissão da NF (não a competência do serviço). Competência consta nas abas 2 e 3 para controle de adimplência de contratos.', '', '', '']);
+  wsRes.mergeCells(`B${rObs.number}:E${rObs.number}`);
+  rObs.getCell(2).font = { italic: true, size: 9, name: 'Calibri', color: { argb: '546E7A' } };
+  rObs.height = 16;
+
   // Cabeçalho tabela resumo
-  const rHdr = wsRes.addRow(['', 'Competência', 'Qtd NFs', 'Valor Líq. Recebido (R$)', 'Situação Tributária']);
+  const rHdr = wsRes.addRow(['', 'Ano Emissão NF', 'Qtd NFs', 'Valor Líq. Recebido (R$)', 'Situação Tributária']);
   styleHeader(rHdr, COR.header_cinza);
 
-  // Agrupa por competência
-  const porComp = new Map();
+  // Agrupa por ano de emissão (critério fiscal)
+  const porAnoEmissao = new Map();
   for (const r of rows) {
-    const k = r.competencia || '(sem competência)';
-    if (!porComp.has(k)) porComp.set(k, { qtd: 0, vliq: 0, anoComp: r.ano_comp });
-    const c = porComp.get(k); c.qtd++; c.vliq += r.vliq;
+    const k = r.ano_emissao || '(sem data emissão)';
+    if (!porAnoEmissao.has(k)) porAnoEmissao.set(k, { qtd: 0, vliq: 0 });
+    const c = porAnoEmissao.get(k); c.qtd++; c.vliq += r.vliq;
   }
   let totQtd = 0, totVliq = 0;
-  for (const [comp, v] of [...porComp.entries()].sort()) {
-    const jaT = v.anoComp && v.anoComp < ANO_ARG;
-    const sit = jaT ? '✅ JÁ TRIBUTADO ('+v.anoComp+')' : '⚠️  TRIBUTAR AGORA ('+ANO_ARG+')';
-    const rr  = wsRes.addRow(['', comp, v.qtd, v.vliq, sit]);
+  for (const [ano, v] of [...porAnoEmissao.entries()].sort()) {
+    const jaT = ano !== '(sem data emissão)' && ano < ANO_ARG;
+    const sit = jaT ? '✅ JÁ TRIBUTADO — NF emitida em '+ano : '⚠️  TRIBUTAR AGORA — NF emitida em '+ano;
+    const rr  = wsRes.addRow(['', ano, v.qtd, v.vliq, sit]);
     rr.getCell(4).numFmt = '#,##0.00';
     rr.getCell(4).alignment = { horizontal: 'right' };
     const bg = jaT ? COR.tributado_fundo : COR.tributar_fundo;
@@ -457,10 +466,10 @@ async function gerarXlsxEmpresa(empData) {
   const hdrCalc = wsCalc.addRow(colsCalc.map(c => c.header));
   styleHeader(hdrCalc);
 
-  // Agrupa por situação: tributar agora (2026) primeiro, depois já tributados (2025)
+  // Ordenação: tributar agora primeiro, depois já tributados; dentro de cada grupo por ano_emissao → contrato
   const rowsOrdenados = [...rows].sort((a,b) => {
     if (a.ja_tributado !== b.ja_tributado) return a.ja_tributado === 'SIM' ? 1 : -1;
-    return (a.competencia||'').localeCompare(b.competencia||'') || (a.contrato_ref||'').localeCompare(b.contrato_ref||'');
+    return (a.ano_emissao||'').localeCompare(b.ano_emissao||'') || (a.contrato_ref||'').localeCompare(b.contrato_ref||'');
   });
 
   let secaoAtual = null;
@@ -469,8 +478,8 @@ async function gerarXlsxEmpresa(empData) {
     if (secao !== secaoAtual) {
       secaoAtual = secao;
       const rSec = wsCalc.addRow([r.ja_tributado === 'SIM'
-        ? `── COMPETÊNCIA ANOS ANTERIORES — JÁ TRIBUTADO (imposto declarado em ${r.ano_comp || 'ano anterior'})`
-        : `── COMPETÊNCIA ${ANO_ARG} — TRIBUTAR AGORA (incluir no DARF de ${MES_LABEL})`
+        ? `── NF EMITIDA EM ANO ANTERIOR — JÁ TRIBUTADO (imposto declarado em ${r.ano_emissao || 'ano anterior'})`
+        : `── NF EMITIDA EM ${ANO_ARG} — TRIBUTAR AGORA (incluir no DARF de ${MES_LABEL})`
       ]);
       wsCalc.mergeCells(`A${rSec.number}:M${rSec.number}`);
       rSec.font   = { bold: true, size: 10, name: 'Calibri', color: { argb: r.ja_tributado === 'SIM' ? '6B4F0C' : '1A5722' } };
