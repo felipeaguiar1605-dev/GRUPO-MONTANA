@@ -60,9 +60,26 @@ function anoCompetencia(comp) {
 
 // ── Matching: keyword de contrato para batch TEDs ─────────────────────────────
 const KWS = ['DETRAN','UNITINS','SESAU','SEDUC','UFT','UFNT','TCE','SEMARH',
-             'CBMTO','FUNJURIS','TJ','PREFEITURA','PREVI','MUNICIPIO'];
+             'CBMTO','FUNJURIS','TJ','PREFEITURA','PREVI','MUNICIPIO','MINISTERIO'];
+
+// Mapeamento CNPJ (parcial) → keyword — para extratos cujo histórico traz o CNPJ do pagador
+// mas não o nome do contrato (ex: "GOVERNO DO ESTADO 01786029" → SEDUC)
+const CNPJ_KW = {
+  '01786029': 'SEDUC',      // Estado do Tocantins (paga SEDUC e SEINF)
+  '01786078': 'MINISTERIO', // MP/TO
+  '01786011': 'SEDUC',      // SEINF Tocantins — tratar como SEDUC para match
+  '24851511': 'MUNICIPIO',  // Município de Palmas (vários estabelecimentos)
+  '05149726': 'UFT',        // Fundação UFT
+  '25053083': 'SEDUC',      // Secretaria da Educação Tocantins
+};
+
 function kwContrato(s) {
   const up = (s||'').toUpperCase();
+  // 1. Verifica CNPJ no texto (ex: histórico do extrato bancário)
+  for (const [cnpj, kw] of Object.entries(CNPJ_KW)) {
+    if (up.includes(cnpj)) return kw;
+  }
+  // 2. Verifica keyword textual no contrato_ref, tomador ou historico
   return KWS.find(kw => up.includes(kw)) || '';
 }
 
@@ -83,7 +100,10 @@ function categorizarCredito(e) {
 
 // ── Core: NFs pagas no mês ────────────────────────────────────────────────────
 function nfsPagasNoMes(db, dataIni, dataFim) {
-  // Extratos CONCILIADOS no mês — deduplicados por (data_iso, credito)
+  // Extratos CONCILIADOS no mês
+  // Deduplicação: remove re-importações do MESMO lançamento (mesmo valor+data+histórico prefix),
+  // mas PRESERVA múltiplos pagamentos legítimos de mesmo valor no mesmo dia (ex: SEDUC pagando
+  // várias unidades escolares). Critério: agrupa por (data, credito, primeiros 30 chars do histórico).
   const extRaw = db.prepare(`
     SELECT id, data_iso, credito, historico, contrato_vinculado
     FROM extratos
@@ -94,7 +114,9 @@ function nfsPagasNoMes(db, dataIni, dataFim) {
 
   const extDedup = new Map();
   for (const e of extRaw) {
-    const k = `${e.data_iso}|${R(e.credito).toFixed(2)}`;
+    // Chave inclui os primeiros 30 chars do histórico para distinguir transações distintas
+    const histPfx = (e.historico||'').substring(0,30).replace(/\s+/g,' ').trim();
+    const k = `${e.data_iso}|${R(e.credito).toFixed(2)}|${histPfx}`;
     if (!extDedup.has(k) || (!extDedup.get(k).contrato_vinculado && e.contrato_vinculado))
       extDedup.set(k, e);
   }
@@ -145,11 +167,13 @@ function nfsPagasNoMes(db, dataIni, dataFim) {
     const dtMax = new Date(extDt); dtMax.setDate(dtMax.getDate()+30);
     const dtMinS = dtMin.toISOString().substring(0,10);
     const dtMaxS = dtMax.toISOString().substring(0,10);
-    const nfsMatch = nfsConcil.filter(nf =>
-      !usadosNf.has(nf.id) &&
-      kwContrato(nf.contrato_ref) === kwExt &&
-      nf.data_emissao >= dtMinS && nf.data_emissao <= dtMaxS
-    );
+    const nfsMatch = nfsConcil.filter(nf => {
+      if (usadosNf.has(nf.id)) return false;
+      if (nf.data_emissao < dtMinS || nf.data_emissao > dtMaxS) return false;
+      // Keyword da NF: prefere contrato_ref, usa tomador como fallback (ex: Segurança sem contrato_ref)
+      const kwNf = kwContrato(nf.contrato_ref) || kwContrato(nf.tomador);
+      return kwNf === kwExt;
+    });
     if (!nfsMatch.length) { semNf.push(ext); continue; }
     for (const nf of nfsMatch) {
       usadosNf.add(nf.id);
