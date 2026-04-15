@@ -13,7 +13,7 @@
  * Abas por arquivo:
  *   1. Resumo          — sumário executivo + totais por competência
  *   2. NFs Pagas       — nota a nota, ordenado por contrato → competência
- *   3. Apuração Fiscal — PIS/COFINS/IR calculados (Lucro Real 1,65%+7,60% | Presumido 0,65%+3%)
+ *   3. Apuração Fiscal — PIS/COFINS calculados (Assessoria: Lucro Real não-cumulativo 1,65%+7,60% | Segurança: Lucro Real PIS/COFINS cumulativo 0,65%+3%)
  *   4. Créditos sem NF — créditos bancários não vinculados a NF (categorizados)
  */
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
@@ -41,9 +41,10 @@ console.log(`\n  📑 Relatório Receita Federal — recebimentos ${MES_LABEL}`)
 
 // ── Configuração de empresas ───────────────────────────────────────────────────
 // regime: 'Lucro Real' | 'Lucro Presumido' | 'Simples Nacional'
+// pisCofinsRegime: 'não-cumulativo' (créditos sobre insumos) | 'cumulativo' (sem créditos)
 const CONFIG_EMPRESAS = {
-  assessoria: { regime: 'Lucro Real',      pisPct: 0.0165, cofinsPct: 0.0760, label: 'Montana Assessoria Empresarial Ltda' },
-  seguranca:  { regime: 'Lucro Presumido', pisPct: 0.0065, cofinsPct: 0.0300, label: 'Montana Segurança e Vigilância Ltda' },
+  assessoria: { regime: 'Lucro Real', pisCofinsRegime: 'não-cumulativo', pisPct: 0.0165, cofinsPct: 0.0760, label: 'Montana Assessoria Empresarial Ltda' },
+  seguranca:  { regime: 'Lucro Real', pisCofinsRegime: 'cumulativo',     pisPct: 0.0065, cofinsPct: 0.0300, label: 'Montana Segurança e Vigilância Ltda' },
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -233,7 +234,7 @@ function buildEmpresaData(nomeEmpresa, cfg) {
     categoria: categorizarCredito(e),
   }));
 
-  console.log(`\n  🏢 ${cfg.label} (${cfg.regime})`);
+  console.log(`\n  🏢 ${cfg.label} (${cfg.regime} — PIS/COFINS ${cfg.pisCofinsRegime})`);
   console.log(`     ${rows.length} NFs identificadas | ${extSemNf.length} créditos sem NF`);
   const anos = [...new Set(rows.map(r=>r.ano_emissao).filter(Boolean))].sort();
   anos.forEach(a => {
@@ -325,7 +326,7 @@ async function gerarXlsxEmpresa(empData) {
   wsRes.getRow(1).height = 36;
 
   const info = [
-    ['Regime tributário:', cfg.regime],
+    ['Regime tributário:', `${cfg.regime} — PIS/COFINS ${cfg.pisCofinsRegime}`],
     ['Período de recebimento:', MES_LABEL],
     ['PIS próprio:', `${(cfg.pisPct*100).toFixed(2)}%`],
     ['COFINS própria:', `${(cfg.cofinsPct*100).toFixed(2)}%`],
