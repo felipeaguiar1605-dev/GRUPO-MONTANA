@@ -276,6 +276,25 @@ function lancamentoToExtrato(l) {
 
 // ─── Sync de uma conta específica ────────────────────────────────────────────
 
+// BB API: máximo 31 dias por requisição — divide em blocos de 30 dias
+function periodoEmBlocos(dataInicio, dataFim) {
+  const blocos = [];
+  let cur = new Date(dataInicio + 'T00:00:00Z');
+  const fim = new Date(dataFim + 'T00:00:00Z');
+  while (cur <= fim) {
+    const blkFim = new Date(cur);
+    blkFim.setUTCDate(blkFim.getUTCDate() + 29);
+    if (blkFim > fim) blkFim.setTime(fim.getTime());
+    blocos.push({
+      de:  cur.toISOString().split('T')[0],
+      ate: blkFim.toISOString().split('T')[0],
+    });
+    cur = new Date(blkFim);
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return blocos;
+}
+
 async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim) {
   const ins = db.prepare(`
     INSERT OR IGNORE INTO extratos
@@ -290,40 +309,44 @@ async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim) {
       (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito, 'PENDENTE')
   `);
 
-  let imported = 0, skipped = 0, pagina = 1, hasMore = true;
+  let imported = 0, skipped = 0;
+  const blocos = periodoEmBlocos(dataInicio, dataFim);
 
-  while (hasMore) {
-    const data = await getLancamentos(cfg, token, agencia, conta, dataInicio, dataFim, pagina);
-    // listaLancamento pode ser array ou objeto com items
-    let lista = data.listaLancamento || data.lancamentos || data.data || [];
-    if (!Array.isArray(lista)) lista = Object.values(lista);
+  for (const bloco of blocos) {
+    let pagina = 1, hasMore = true;
 
-    db.transaction(() => {
-      for (const l of lista) {
-        if (!isLancamentoReal(l)) { skipped++; continue; }
-        const ext = lancamentoToExtrato(l);
-        const row = {
-          mes:       ext.mes,
-          data:      ext.data,
-          data_iso:  ext.iso,
-          tipo:      ext.tipo,
-          historico: ext.historico,
-          debito:    ext.debito,
-          credito:   ext.credito,
-        };
-        let r;
-        if (ext.id) {
-          r = ins.run({ id: ext.id, ...row });
-        } else {
-          r = insNoId.run(row);
+    while (hasMore) {
+      const data = await getLancamentos(cfg, token, agencia, conta, bloco.de, bloco.ate, pagina);
+      let lista = data.listaLancamento || data.lancamentos || data.data || [];
+      if (!Array.isArray(lista)) lista = Object.values(lista);
+
+      db.transaction(() => {
+        for (const l of lista) {
+          if (!isLancamentoReal(l)) { skipped++; continue; }
+          const ext = lancamentoToExtrato(l);
+          const row = {
+            mes:       ext.mes,
+            data:      ext.data,
+            data_iso:  ext.iso,
+            tipo:      ext.tipo,
+            historico: ext.historico,
+            debito:    ext.debito,
+            credito:   ext.credito,
+          };
+          let r;
+          if (ext.id) {
+            r = ins.run({ id: ext.id, ...row });
+          } else {
+            r = insNoId.run(row);
+          }
+          if (r.changes > 0) imported++; else skipped++;
         }
-        if (r.changes > 0) imported++; else skipped++;
-      }
-    })();
+      })();
 
-    // numeroPaginaProximo = 0 significa última página
-    hasMore = (data.numeroPaginaProximo || 0) > 0 && lista.length > 0;
-    pagina++;
+      hasMore = (data.numeroPaginaProximo || 0) > 0 && lista.length > 0;
+      pagina++;
+      if (pagina > 10) break;
+    }
   }
 
   return { imported, skipped };

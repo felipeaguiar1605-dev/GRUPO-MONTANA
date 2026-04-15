@@ -1,24 +1,30 @@
 /**
  * Conciliação Financeira — Montana Segurança Patrimonial Ltda
- * Estratégia: matching INDIVIDUAL NF→Extrato por valor_liquido ≈ extrato.credito
  *
- * Particularidades da Segurança:
- * - Palmas paga por Ordem Bancária individual (1 extrato ≈ 1 NF)
- * - Estado (SEDUC) paga via TED (1 extrato ≈ 1 ou mais NFs)
- * - UFT paga via Pix parcelado (1 extrato ≈ 1 posto)
- * - O banco importou 2 CSVs (pipe e sem-pipe) — deduplicamos por (data_iso, credito)
- * - 569 NFs contaminadas de clientes da Assessoria presentes no banco (excluídas)
+ * Particularidades:
+ * - Palmas paga por Ordem Bancária individual (1 extrato ≈ 1 NF) — até 240 dias de atraso
+ * - Estado (SEDUC/MP) paga via TED CNPJ 01786029000103 — às vezes em lote (N NFs → 1 TED)
+ * - UFT paga via Pix CNPJ 05149726000104
+ * - DB importou 2 CSVs (pipe e sem-pipe) — deduplicamos por (data_iso, credito)
+ * - NFs contaminadas (Assessoria): UNITINS, DETRAN, TCE, CBMTO, FUNJURIS — marcadas ASSESSORIA
+ * - Extratos internos (Montana própria CNPJ 19200109) e BB Rende Fácil → marcados INTERNO/INVESTIMENTO
  *
  * Uso:
  *   node scripts/conciliacao_seguranca.js          (executa)
  *   node scripts/conciliacao_seguranca.js --dry-run (analisa, não salva)
  */
 
+'use strict';
 const path = require('path');
 const Database = require('better-sqlite3');
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const db = new Database(path.join(__dirname, '../data/seguranca/montana.db'));
+
+// Normaliza acentos para comparação insensível a diacríticos
+function semAcento(s) {
+  return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+}
 
 console.log('');
 console.log('══════════════════════════════════════════════════════════');
@@ -54,25 +60,49 @@ console.log(`  Corrigidas: ${corrigidas} | Sem competência: ${nfsSemData.length
 
 // ── 2. NORMALIZAR TOMADORES ────────────────────────────────────────
 console.log('2. NORMALIZAÇÃO DE TOMADORES\n' + '─'.repeat(50));
-const norm = [
-  ['MUNICÍPIO DE PALMAS',                                     'MUNICIPIO DE PALMAS'],
-  ['UNIVERSIDADE ESTADUAL DO TOCANTINS - UNITINS.',           'UNIVERSIDADE ESTADUAL DO TOCANTINS - UNITINS'],
-  ['DEPARTAMENTO ESTADUAL DE TRANSITO - DETRAN - TO',         'DEPARTAMENTO ESTADUAL DE TRANSITO'],
-  ['DEPARTAMENTO ESTADUAL DE TRANSITO - DETRAN/TO',           'DEPARTAMENTO ESTADUAL DE TRANSITO'],
-  ['TOCANTINS PROCURADORIA GERAL DA JUSTICA',                 'MINISTERIO PUBLICO DO ESTADO DO TOCANTINS - MP/TO'],
-];
-for (const [de, para] of norm) {
-  const c = db.prepare('SELECT COUNT(*) c FROM notas_fiscais WHERE tomador=?').get(de).c;
-  if (c === 0) { console.log(`  ⏭️  Sem ocorrências: ${de.slice(0, 55)}`); continue; }
-  if (!DRY_RUN) db.prepare('UPDATE notas_fiscais SET tomador=? WHERE tomador=?').run(para, de);
-  console.log(`  ✅ ${c}x "${de.slice(0, 45)}" → "${para.slice(0, 45)}"`);
-}
 
-// ── 3. TOMADORES CONTAMINADOS (clientes da Assessoria no banco Segurança) ─
-// Esses tomadores pertencem a contratos da Montana Assessoria, não Segurança.
-// Foram importados erroneamente via WebISS (NFS-e Palmas/TO em conta conjunta).
-// São EXCLUÍDOS da conciliação mas NÃO apagados do banco.
-const CONTAMINADOS_PREFIXOS = [
+// ILIKE por semAcento — busca via LIKE com versão sem acento
+// Para executar no SQLite precisamos buscar todos e comparar em JS
+const NORM_RULES = [
+  // Palmas e órgãos municipais — variantes com/sem acento e grafia alternativa
+  [t => semAcento(t) === 'MUNICIPIO DE PALMAS',                             'MUNICIPIO DE PALMAS'],
+  [t => semAcento(t).includes('AGENCIA DE TRANSPORTE COLETIVO DE PALMAS'),  'AGENCIA DE TRANSPORTE COLETIVO DE PALMAS (ATCP)'],
+  [t => semAcento(t).includes('AGENCIA MUNICIPAL DE TURISMO'),              'PMP-AGENCIA MUNICIPAL DE TURISMO'],
+  [t => semAcento(t).startsWith('PMP-AGENCIA MUNICIPAL DE TURISMO'),       'PMP-AGENCIA MUNICIPAL DE TURISMO'],
+  [t => semAcento(t).includes('INSTITUTO DE PREVIDENCIA SOCIAL DO MUNICIPIO') || semAcento(t).includes('PREVIDENCIA SOCIAL DO MUNICIPIO DE PALMAS'), 'PREVIDENCIA SOCIAL DO MUNICIPIO DE PALMAS - PREVIPALMAS'],
+  [t => semAcento(t).includes('FUNDACAO MUNICIPAL DE MEIO AMBIENTE'),      'FUNDACAO MUNICIPAL DE MEIO AMBIENTE DE PALMAS - FMA'],
+  // DETRAN — variantes com/sem acento, com/sem prefixo estado
+  [t => semAcento(t).includes('DEPARTAMENTO ESTADUAL DE TRANSITO'),         'DEPARTAMENTO ESTADUAL DE TRANSITO'],
+  // SEDUC — Estado do Tocantins
+  [t => semAcento(t).includes('SECRETARIA DA EDUCACAO DO ESTADO DE TOCANTINS'), 'SECRETARIA DA EDUCACAO'],
+  // MP/TO — variantes
+  [t => ['TOCANTINS PROCURADORIA GERAL DA JUSTICA',
+         'MINISTERIO PUBLICO ESTADUAL',
+         'PROCURADORIA GERAL DE JUSTICA'].includes(semAcento(t)),            'MINISTERIO PUBLICO DO ESTADO DO TOCANTINS - MP/TO'],
+  // UNITINS
+  [t => semAcento(t).startsWith('UNIVERSIDADE ESTADUAL DO TOCANTINS') && t.endsWith('.'), 'UNIVERSIDADE ESTADUAL DO TOCANTINS - UNITINS'],
+];
+
+const todasNFsParaNorm = db.prepare('SELECT id, tomador FROM notas_fiscais WHERE tomador IS NOT NULL').all();
+let normCount = 0;
+const updTomador = db.prepare('UPDATE notas_fiscais SET tomador=? WHERE id=?');
+for (const nf of todasNFsParaNorm) {
+  for (const [testFn, alvo] of NORM_RULES) {
+    if (nf.tomador !== alvo && testFn(nf.tomador)) {
+      if (!DRY_RUN) updTomador.run(alvo, nf.id);
+      normCount++;
+      break;
+    }
+  }
+}
+console.log(`  Tomadores normalizados: ${normCount} NFs atualizadas\n`);
+
+// ── 3. TOMADORES CONTAMINADOS (clientes da Assessoria) ─────────────
+// Marcados como status_conciliacao='ASSESSORIA' para exclusão da conciliação
+console.log('3. MARCAR NFs CONTAMINADAS → ASSESSORIA\n' + '─'.repeat(50));
+
+// Prefixos (sem acento, comparados com semAcento(tomador))
+const CONTAMINADOS_PREFIXOS_SA = [
   'UNIVERSIDADE ESTADUAL DO TOCANTINS', // UNITINS — contrato Assessoria
   'DEPARTAMENTO ESTADUAL DE TRANSITO',  // DETRAN — contrato Assessoria
   'TRIBUNAL DE CONTAS',                 // TCE — contrato Assessoria
@@ -80,15 +110,58 @@ const CONTAMINADOS_PREFIXOS = [
   'FUNDO ESPECIAL DE MODERNIZACAO',     // FUNJURIS/TJ — contrato Assessoria
   'PODER JUDICIARIO',
 ];
-const isContaminado = t => CONTAMINADOS_PREFIXOS.some(p => (t || '').toUpperCase().includes(p));
+const isContaminado = t => CONTAMINADOS_PREFIXOS_SA.some(p => semAcento(t || '').includes(p));
 
-const contaminadasCount = db.prepare("SELECT COUNT(*) n FROM notas_fiscais WHERE status_conciliacao IS NULL OR status_conciliacao='PENDENTE'").get().n;
-console.log('\n  (NFs contaminadas serão ignoradas na conciliação — ver relatório final)\n');
+// Marcar como ASSESSORIA as que ainda estão PENDENTE
+const nfsContPend = db.prepare(
+  "SELECT id, tomador FROM notas_fiscais WHERE (status_conciliacao IS NULL OR status_conciliacao='PENDENTE')"
+).all().filter(n => isContaminado(n.tomador));
 
-// ── 4. CARREGAR DADOS ──────────────────────────────────────────────
-console.log('3. CONCILIAÇÃO INDIVIDUAL NF → EXTRATO\n' + '─'.repeat(50));
+const updAssessoria = db.prepare("UPDATE notas_fiscais SET status_conciliacao='ASSESSORIA' WHERE id=?");
+if (!DRY_RUN) {
+  for (const nf of nfsContPend) updAssessoria.run(nf.id);
+}
+console.log(`  Marcadas ASSESSORIA agora: ${nfsContPend.length}`);
 
-// NFs pendentes após corrigir data_emissao (recarregar)
+const totalAssessoria = db.prepare("SELECT COUNT(*) n FROM notas_fiscais WHERE status_conciliacao='ASSESSORIA'").get().n;
+console.log(`  Total ASSESSORIA no banco: ${totalAssessoria}\n`);
+
+// ── 4. MARCAR EXTRATOS INTERNOS / INVESTIMENTO ─────────────────────
+console.log('4. CLASSIFICAR EXTRATOS INTERNOS\n' + '─'.repeat(50));
+
+// Montana Segurança própria CNPJ: 19200109000109 → INTERNO (transferência entre contas)
+// BB Rende Fácil → INVESTIMENTO (aplicação financeira)
+// TED Devolvida → INTERNO
+const updExtStatus = db.prepare("UPDATE extratos SET status_conciliacao=? WHERE id=?");
+const extIntervos = db.prepare(
+  "SELECT id, historico FROM extratos WHERE (status_conciliacao IS NULL OR status_conciliacao='PENDENTE') AND credito > 0"
+).all();
+
+let marcadosInterno = 0, marcadosInvest = 0;
+for (const e of extIntervos) {
+  const h = (e.historico || '').toUpperCase();
+  // Transferências internas (Montana própria, outras empresas do grupo)
+  if (h.includes('19200109000109') ||  // Montana Segurança própria
+      h.includes('14092519000151') ||  // Montana Assessoria
+      h.includes('MONTANA ASSESS') ||  // Montana Assessoria (nome)
+      h.includes('MONTANA SERVIC') ||  // Montana Serviços
+      h.includes('TED DEVOLVIDA') ||
+      h.includes('DEPOSITO GARANTIA') ||
+      h.includes('RESGATE DEP')) {
+    if (!DRY_RUN) updExtStatus.run('INTERNO', e.id);
+    marcadosInterno++;
+  } else if (h.includes('BB RENDE') || h.includes('RENDE FACIL') || h.includes('RENDE FÁCIL') ||
+             h.includes('POUPANCA') || h.includes('POUPANÇA') || h.includes('RESGATE DEPOSITO')) {
+    if (!DRY_RUN) updExtStatus.run('INVESTIMENTO', e.id);
+    marcadosInvest++;
+  }
+}
+console.log(`  Marcados INTERNO:      ${marcadosInterno}`);
+console.log(`  Marcados INVESTIMENTO: ${marcadosInvest}\n`);
+
+// ── 5. CARREGAR DADOS PARA CONCILIAÇÃO ─────────────────────────────
+console.log('5. CONCILIAÇÃO INDIVIDUAL NF → EXTRATO\n' + '─'.repeat(50));
+
 const todasNFs = db.prepare(`
   SELECT id, numero, tomador, valor_bruto, valor_liquido, data_emissao
   FROM notas_fiscais
@@ -99,14 +172,13 @@ const todasNFs = db.prepare(`
 `).all();
 
 // Extratos de receita — DEDUPLICA por (data_iso, credito) mantendo o menor id
-// Razão: banco importou 2 CSVs (uma conta com pipe, outra sem) com os mesmos lançamentos
 const extCredsRaw = db.prepare(`
   SELECT MIN(id) id, data_iso, credito, MIN(historico) historico, status_conciliacao
   FROM extratos
   WHERE credito > 100
     AND data_iso IS NOT NULL
     AND (status_conciliacao IS NULL
-         OR status_conciliacao NOT IN ('INTERNO','INVESTIMENTO','TRANSFERENCIA'))
+         OR status_conciliacao NOT IN ('CONCILIADO','INTERNO','INVESTIMENTO','TRANSFERENCIA'))
   GROUP BY data_iso, credito
   ORDER BY data_iso ASC
 `).all();
@@ -116,10 +188,9 @@ const extIdsPorDedupKey = {};
 const extRawAll = db.prepare(`
   SELECT id, data_iso, credito, status_conciliacao
   FROM extratos
-  WHERE credito > 100
-    AND data_iso IS NOT NULL
+  WHERE credito > 100 AND data_iso IS NOT NULL
     AND (status_conciliacao IS NULL
-         OR status_conciliacao NOT IN ('INTERNO','INVESTIMENTO','TRANSFERENCIA'))
+         OR status_conciliacao NOT IN ('CONCILIADO','INTERNO','INVESTIMENTO','TRANSFERENCIA'))
 `).all();
 for (const e of extRawAll) {
   const key = `${e.data_iso}|${e.credito}`;
@@ -127,153 +198,121 @@ for (const e of extRawAll) {
   extIdsPorDedupKey[key].push(e.id);
 }
 
-console.log(`  NFs pendentes: ${todasNFs.length} | Legítimas: ${todasNFs.filter(n => !isContaminado(n.tomador)).length} | Contaminadas: ${todasNFs.filter(n => isContaminado(n.tomador)).length}`);
-console.log(`  Extratos (deduplicados): ${extCredsRaw.length}\n`);
+console.log(`  NFs pendentes: ${todasNFs.length}`);
+console.log(`  Extratos livres (deduplicados): ${extCredsRaw.length}\n`);
 
 const updNF  = db.prepare("UPDATE notas_fiscais SET status_conciliacao='CONCILIADO' WHERE id=?");
 const updExt = db.prepare("UPDATE extratos SET status_conciliacao='CONCILIADO' WHERE id=?");
 
-const extUsados = new Set(); // IDs dos extratos já usados (pós-dedup)
-const nfUsadas  = new Set(); // IDs das NFs já conciliadas (evita match duplo entre passos)
+const extUsados = new Set();
+const nfUsadas  = new Set();
 let totalConc = 0;
 let totalSkip = 0;
 
-// ── 5. PASSO 1: Matching individual exato (tolerância 0.5%) ───────
-// Alta confiança: valores muito próximos → correspondência direta
-console.log('  Passo 1 — Matching individual exato (≤0.5%)');
-let conc1 = 0;
-
-for (const nf of todasNFs) {
-  if (isContaminado(nf.tomador)) { totalSkip++; continue; }
-  if (nfUsadas.has(nf.id)) continue;
-
-  const liq = nf.valor_liquido || nf.valor_bruto;
-  const nfDate = new Date(nf.data_emissao).getTime();
-  const tol05 = Math.max(liq * 0.005, 5);
-
-  let best = null, bestDiff = Infinity;
-  for (const ext of extCredsRaw) {
-    if (extUsados.has(ext.id)) continue;
-    const diff = Math.abs(ext.credito - liq);
-    if (diff > tol05) continue;
-    const extDate = new Date(ext.data_iso).getTime();
-    if (extDate < nfDate - 30 * 86400000) continue;  // até 30 dias antes
-    if (extDate > nfDate + 90 * 86400000) continue;  // até 90 dias depois
-    if (diff < bestDiff) { best = ext; bestDiff = diff; }
+function marcaMatch(nf, ext) {
+  const key = `${ext.data_iso}|${ext.credito}`;
+  extUsados.add(ext.id);
+  nfUsadas.add(nf.id);
+  if (!DRY_RUN) {
+    updNF.run(nf.id);
+    for (const eid of (extIdsPorDedupKey[key] || [ext.id])) updExt.run(eid);
   }
-
-  if (best) {
-    const key = `${best.data_iso}|${best.credito}`;
-    extUsados.add(best.id);
-    nfUsadas.add(nf.id);
-    if (!DRY_RUN) {
-      updNF.run(nf.id);
-      for (const eid of (extIdsPorDedupKey[key] || [best.id])) updExt.run(eid);
-    }
-    conc1++;
-    totalConc++;
-    const pct = (bestDiff / liq * 100).toFixed(2);
-    console.log(`    ✅ NF ${String(nf.id).padStart(5)} ${nf.data_emissao} ${(nf.tomador || '').slice(0, 32).padEnd(32)} liq=${liq.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(13)}  ext=${best.data_iso} R$${best.credito.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(13)}  diff=${pct}%`);
-  }
+  totalConc++;
 }
+
+// Helper de matching individual (reutilizado nos passos 1, 2, 3)
+function matchNFsAoExtratos(nfs, exts, tolPct, janelaDias, label) {
+  let conc = 0;
+  for (const nf of nfs) {
+    if (isContaminado(nf.tomador)) { totalSkip++; continue; }
+    if (nfUsadas.has(nf.id)) continue;
+    const liq = nf.valor_liquido || nf.valor_bruto;
+    const nfDate = new Date(nf.data_emissao).getTime();
+    const tol = Math.max(liq * tolPct, 5);
+    let best = null, bestDiff = Infinity;
+    for (const ext of exts) {
+      if (extUsados.has(ext.id)) continue;
+      const diff = Math.abs(ext.credito - liq);
+      if (diff > tol) continue;
+      const extDate = new Date(ext.data_iso).getTime();
+      if (extDate < nfDate - 30 * 86400000) continue;
+      if (extDate > nfDate + janelaDias * 86400000) continue;
+      if (diff < bestDiff) { best = ext; bestDiff = diff; }
+    }
+    if (best) {
+      marcaMatch(nf, best);
+      conc++;
+      const pct = (bestDiff / liq * 100).toFixed(2);
+      console.log(`    ✅ NF ${String(nf.id).padStart(5)} ${nf.data_emissao} ${(nf.tomador||'').slice(0,32).padEnd(32)} liq=${liq.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(13)}  ext=${best.data_iso} R$${best.credito.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(13)}  diff=${pct}%`);
+    }
+  }
+  return conc;
+}
+
+// ── Passo 1: Matching individual exato (≤0.5%, janela 150 dias) ─────
+console.log('  Passo 1 — Matching individual exato (≤0.5%, 150d)');
+const conc1 = matchNFsAoExtratos(todasNFs, extCredsRaw, 0.005, 150, 'P1');
 console.log(`  → Passo 1: ${conc1} NFs conciliadas\n`);
 
-// ── 6. PASSO 2: Matching individual ampliado (tolerância 5%) ──────
-// Captura NFs com pequenas variações (descontos ISS, ajustes de retenção)
-console.log('  Passo 2 — Matching individual ampliado (≤5%)');
-let conc2 = 0;
-
-for (const nf of todasNFs) {
-  if (isContaminado(nf.tomador)) continue;
-  if (nfUsadas.has(nf.id)) continue;
-
-  const liq = nf.valor_liquido || nf.valor_bruto;
-  const nfDate = new Date(nf.data_emissao).getTime();
-  const tol5 = Math.max(liq * 0.05, 20);
-
-  let best = null, bestDiff = Infinity;
-  for (const ext of extCredsRaw) {
-    if (extUsados.has(ext.id)) continue;
-    const diff = Math.abs(ext.credito - liq);
-    if (diff > tol5) continue;
-    const extDate = new Date(ext.data_iso).getTime();
-    if (extDate < nfDate - 30 * 86400000) continue;
-    if (extDate > nfDate + 90 * 86400000) continue;
-    if (diff < bestDiff) { best = ext; bestDiff = diff; }
-  }
-
-  if (best) {
-    const key = `${best.data_iso}|${best.credito}`;
-    extUsados.add(best.id);
-    nfUsadas.add(nf.id);
-    if (!DRY_RUN) {
-      updNF.run(nf.id);
-      for (const eid of (extIdsPorDedupKey[key] || [best.id])) updExt.run(eid);
-    }
-    conc2++;
-    totalConc++;
-    const pct = (Math.abs(best.credito - liq) / liq * 100).toFixed(2);
-    console.log(`    ✅ NF ${String(nf.id).padStart(5)} ${nf.data_emissao} ${(nf.tomador || '').slice(0, 32).padEnd(32)} liq=${liq.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(13)}  ext=${best.data_iso} R$${best.credito.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(13)}  diff=${pct}%`);
-  }
-}
+// ── Passo 2: Matching individual ampliado (≤5%, janela 240 dias) ────
+console.log('  Passo 2 — Matching individual ampliado (≤5%, 240d)');
+const conc2 = matchNFsAoExtratos(todasNFs, extCredsRaw, 0.05, 240, 'P2');
 console.log(`  → Passo 2: ${conc2} NFs conciliadas\n`);
 
-// ── 7. PASSO 3: Extratos restantes por grupo × mês ────────────────
-// Para extratos que não casaram individualmente com nenhuma NF,
-// tentamos match de LOTE: soma de NFs do grupo no mês ≈ soma de extratos do grupo no mês
-console.log('  Passo 3 — Matching por lote (grupo × mês)');
+// ── Passo 3: Matching por pagador identificado (≤10%, 300 dias) ─────
+console.log('  Passo 3 — Matching por pagador identificado (≤10%, 300d)');
 
 const GRUPOS = [
   {
-    key: 'ESTADO_SEDUC',
-    label: 'Estado — SEDUC',
-    filtroExt: e => {
-      const h = (e.historico || '').toUpperCase();
-      return h.includes('070 0380') || h.includes('01786029') ||
-             h.includes('GOVERNO DO EST') || h.includes('ESTADO DO TOCANTINS');
-    },
-    filtroNF: t => {
-      const u = t.toUpperCase();
-      return u.includes('SEDUC') || u.includes('SECRETARIA DA EDUCACAO') ||
-             u.includes('SECRETARIA MUNICIPAL DE EDUC');
-    },
-  },
-  {
     key: 'MUNICIPIO_PALMAS',
     label: 'Município de Palmas',
-    filtroExt: e => {
-      const h = (e.historico || '').toUpperCase();
-      return h.includes('MUNICIPIO DE PALMAS') || h.includes('ORDENS BANCARIAS') ||
-             (h.includes('ORDEM BANC') && (h.includes('PALMAS') || h.includes('ORDENS')));
-    },
-    filtroNF: t => {
-      const u = t.toUpperCase();
-      return u.includes('MUNICIPIO DE PALMAS') || u.includes('PALMAS') ||
+    filtroExt: h => h.includes('MUNICIPIO DE PALMAS') || h.includes('ORDENS BANCARIAS') ||
+                    (h.includes('ORDEM BANC') && (h.includes('PALMAS') || h.includes('ORDENS'))),
+    filtroNF:  t => {
+      const u = semAcento(t);
+      return u.includes('MUNICIPIO DE PALMAS') || u.includes('PREFEITURA') ||
              u.includes('FCP') || u.includes('FUNDACAO CULTURAL') ||
              u.includes('ATCP') || u.includes('AGENCIA DE TRANSPORTE') ||
              u.includes('ARCES') || u.includes('PREVI') ||
              u.includes('FUNDACAO MUNICIPAL') || u.includes('MEIO AMBIENTE') ||
              u.includes('REGULACAO') || u.includes('TECNOLOGIA DA INFORMACAO') ||
              u.includes('TURISMO') || u.includes('ASSISTENCIA SOCIAL') ||
-             u.includes('PREVIDENCIA SOCIAL DO MUNI');
+             u.includes('AGENCIA MUNICIPAL') ||
+             u.includes('PREVIDENCIA SOCIAL DO MUNI') ||
+             u.includes('INSTITUTO 20 DE MAIO') ||
+             u.includes('FUNDO MUNICIPAL') || u.includes('JUVENTUDE DE PALMAS');
     },
   },
   {
+    key: 'ESTADO_TO',
+    label: 'Estado do Tocantins (SEDUC/outros)',
+    filtroExt: h => h.includes('01786029') || h.includes('070 0380') ||
+                    h.includes('GOVERNO DO EST') || h.includes('ESTADO DO TOCANTINS'),
+    filtroNF:  t => {
+      const u = semAcento(t);
+      return u.includes('SECRETARIA DA EDUCACAO') || u.includes('SEDUC') ||
+             u.includes('SECRETARIA DA INFRA') || u.includes('SEINF');
+      // MP/TO excluído aqui — tem passo próprio abaixo
+    },
+  },
+  {
+    key: 'MP_TO',
+    label: 'Ministério Público do Tocantins',
+    // MP paga via Estado OU via seu próprio CNPJ
+    filtroExt: h => h.includes('01786029') || h.includes('01786078') ||
+                    h.includes('MINISTERIO PUBLICO') || h.includes('MP/TO'),
+    filtroNF:  t => semAcento(t).includes('MINISTERIO PUBLICO') || t.includes('MP/TO'),
+  },
+  {
     key: 'UFT',
-    label: 'UFT — Univ. Federal do Tocantins',
-    filtroExt: e => {
-      const h = (e.historico || '').toUpperCase();
-      return h.includes('05149726') || h.includes('FUNDACAO UNIVER') ||
-             h.includes('SEC TES NAC');
-    },
-    filtroNF: t => {
-      const u = t.toUpperCase();
-      return u.includes('FUNDACAO UNIVERSIDADE FEDERAL') || u.includes('UFT');
-    },
+    label: 'UFT — Fundação Univ. Federal do Tocantins',
+    filtroExt: h => h.includes('05149726') || h.includes('FUNDACAO UNIVER') ||
+                    h.includes('UNIV FEDERAL') || h.includes('UFT'),
+    filtroNF:  t => semAcento(t).includes('FUNDACAO UNIVERSIDADE FEDERAL') || t.toUpperCase().includes('UFT'),
   },
 ];
 
-// Para o passo 3, recarregamos NFs ainda pendentes
+// Recarregar NFs pendentes após passos 1 e 2
 const nfsPendentes3 = db.prepare(`
   SELECT id, numero, tomador, valor_bruto, valor_liquido, data_emissao
   FROM notas_fiscais
@@ -284,100 +323,146 @@ const nfsPendentes3 = db.prepare(`
 `).all();
 
 let conc3 = 0;
-
 for (const grupo of GRUPOS) {
-  const nfsGrupo = nfsPendentes3.filter(n => !isContaminado(n.tomador) && grupo.filtroNF(n.tomador));
-  if (nfsGrupo.length === 0) continue;
+  const extGrupo = extCredsRaw.filter(e =>
+    !extUsados.has(e.id) && grupo.filtroExt((e.historico || '').toUpperCase())
+  );
+  if (extGrupo.length === 0) { console.log(`    ⏭️  ${grupo.key}: sem extratos disponíveis`); continue; }
 
-  const extGrupo = extCredsRaw.filter(e => !extUsados.has(e.id) && grupo.filtroExt(e));
-  if (extGrupo.length === 0) {
-    console.log(`    ⏭️  ${grupo.key}: extratos esgotados`);
-    continue;
-  }
+  const nfsGrupo = nfsPendentes3.filter(n =>
+    !nfUsadas.has(n.id) && !isContaminado(n.tomador) && grupo.filtroNF(n.tomador)
+  );
+  if (nfsGrupo.length === 0) { console.log(`    ⏭️  ${grupo.key}: sem NFs pendentes`); continue; }
 
-  // Agrupar NFs por mês
-  const nfPorMes = {};
-  for (const nf of nfsGrupo) {
-    const mes = nf.data_emissao.slice(0, 7);
-    if (!nfPorMes[mes]) nfPorMes[mes] = [];
-    nfPorMes[mes].push(nf);
-  }
-
-  let concGrupo = 0;
-  for (const [mes, nfsMes] of Object.entries(nfPorMes).sort()) {
-    const somaLiq = nfsMes.reduce((s, n) => s + (n.valor_liquido || n.valor_bruto), 0);
-    const mesStart = new Date(mes + '-01').getTime();
-    const mesEnd   = mesStart + (90 * 24 * 60 * 60 * 1000);
-
-    // Acumular todos os extratos do grupo dentro da janela temporal
-    const extJanela = extGrupo.filter(e => {
-      if (extUsados.has(e.id)) return false;
-      const t = new Date(e.data_iso).getTime();
-      return t >= mesStart - (15 * 86400000) && t <= mesEnd;
-    });
-    if (extJanela.length === 0) continue;
-
-    const somaExt = extJanela.reduce((s, e) => s + e.credito, 0);
-    const tol = Math.max(somaLiq * 0.15, 500); // 15% tolerância no lote
-    const diff = Math.abs(somaExt - somaLiq);
-
-    if (diff <= tol) {
-      for (const ext of extJanela) {
-        const key = `${ext.data_iso}|${ext.credito}`;
-        extUsados.add(ext.id);
-        if (!DRY_RUN) for (const eid of (extIdsPorDedupKey[key] || [ext.id])) updExt.run(eid);
-      }
-      if (!DRY_RUN) for (const nf of nfsMes) updNF.run(nf.id);
-      concGrupo += nfsMes.length;
-      conc3 += nfsMes.length;
-      totalConc += nfsMes.length;
-      const pct = (diff / somaLiq * 100).toFixed(1);
-      console.log(`    ✅ ${grupo.key.padEnd(18)} ${mes}  ${String(nfsMes.length).padStart(3)} NFs  liq=R$${somaLiq.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(14)}  exts=${extJanela.length} R$${somaExt.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(14)}  diff=${pct}%`);
-    } else {
-      const pct = (diff / somaLiq * 100).toFixed(1);
-      console.log(`    ❌ ${grupo.key.padEnd(18)} ${mes}  ${String(nfsMes.length).padStart(3)} NFs  liq=R$${somaLiq.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(14)}  exts=${extJanela.length} R$${somaExt.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(14)}  diff=${pct}% (sem match)`);
-    }
-  }
-  if (concGrupo > 0) console.log(`     → ${grupo.label}: ${concGrupo} NFs conciliadas\n`);
+  console.log(`    ${grupo.key}: ${extGrupo.length} extratos × ${nfsGrupo.length} NFs`);
+  const concGrupo = matchNFsAoExtratos(nfsGrupo, extGrupo, 0.10, 300, grupo.key);
+  conc3 += concGrupo;
+  console.log(`     → ${grupo.label}: ${concGrupo} NFs conciliadas\n`);
 }
 console.log(`  → Passo 3: ${conc3} NFs conciliadas\n`);
 
-// ── 8. RESUMO FINAL ────────────────────────────────────────────────
-console.log('═'.repeat(60));
-console.log(`  TOTAL CONCILIADAS AGORA: ${totalConc} NFs (contaminadas ignoradas: ${totalSkip})`);
+// ── Passo 4: Batch matching Estado TED → N NFs (SEDUC + MP) ─────────
+// Estado paga várias NFs em uma TED. Ex: R$259K = 2 meses × (R$51K + R$76K) SEDUC
+// Algoritmo greedy: para cada TED livre, acumula NFs (ordenadas por data) até soma ≈ TED
+console.log('  Passo 4 — Batch matching Estado TED → N NFs (≤8%, 365d)');
 
-if (!DRY_RUN) {
-  const res = {
-    conc:  db.prepare("SELECT COUNT(*) n, COALESCE(SUM(valor_bruto),0) s FROM notas_fiscais WHERE status_conciliacao='CONCILIADO'").get(),
-    pend:  db.prepare("SELECT COUNT(*) n FROM notas_fiscais WHERE status_conciliacao IS NULL OR status_conciliacao='PENDENTE'").get(),
-    extC:  db.prepare("SELECT COUNT(*) n, COALESCE(SUM(credito),0) s FROM extratos WHERE status_conciliacao='CONCILIADO' AND credito>0").get(),
-  };
-  console.log(`  NFs conciliadas total: ${res.conc.n} | R$ ${res.conc.s.toLocaleString('pt-BR', {minimumFractionDigits:2})}`);
-  console.log(`  NFs pendentes:         ${res.pend.n}`);
-  console.log(`  Extratos conciliados:  ${res.extC.n} | R$ ${res.extC.s.toLocaleString('pt-BR', {minimumFractionDigits:2})}`);
+const nfsPendentes4 = db.prepare(`
+  SELECT id, numero, tomador, valor_bruto, valor_liquido, data_emissao
+  FROM notas_fiscais
+  WHERE (status_conciliacao IS NULL OR status_conciliacao = 'PENDENTE')
+    AND valor_bruto > 10
+    AND data_emissao IS NOT NULL AND data_emissao != ''
+  ORDER BY data_emissao ASC
+`).all();
 
-  console.log('\n  Conciliadas por tomador (top 12):');
-  db.prepare("SELECT tomador, COUNT(*) n, SUM(valor_bruto) tot FROM notas_fiscais WHERE status_conciliacao='CONCILIADO' GROUP BY tomador ORDER BY tot DESC LIMIT 12").all()
-    .forEach(r => console.log(`    ${(r.tomador||'').slice(0, 50).padEnd(50)} n=${String(r.n).padStart(4)} | R$${r.tot.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(16)}`));
+// Extratos Estado TED livres
+const extEstadoLivres = extCredsRaw.filter(e =>
+  !extUsados.has(e.id) &&
+  e.credito > 5000 &&
+  ((e.historico || '').toUpperCase().includes('01786029') ||
+   (e.historico || '').toUpperCase().includes('070 0380') ||
+   (e.historico || '').toUpperCase().includes('GOVERNO DO EST'))
+).sort((a, b) => a.data_iso.localeCompare(b.data_iso));
 
-  console.log('\n  NFs pendentes por tomador (top 10):');
-  db.prepare("SELECT tomador, COUNT(*) n, SUM(valor_bruto) tot FROM notas_fiscais WHERE status_conciliacao IS NULL OR status_conciliacao='PENDENTE' GROUP BY tomador ORDER BY tot DESC LIMIT 10").all()
-    .forEach(r => console.log(`    ${(r.tomador||'').slice(0, 50).padEnd(50)} n=${String(r.n).padStart(4)} | R$${r.tot.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(16)}`));
+// Grupos de tomadores para batch — Estado paga cada grupo separado
+const BATCH_GRUPOS = [
+  {
+    label: 'SEDUC',
+    filtroNF: t => semAcento(t).includes('SECRETARIA DA EDUCACAO') || semAcento(t).includes('SEDUC'),
+  },
+  {
+    label: 'MP/TO',
+    filtroNF: t => semAcento(t).includes('MINISTERIO PUBLICO') || t.includes('MP/TO'),
+  },
+  {
+    label: 'SEINF',
+    filtroNF: t => semAcento(t).includes('SECRETARIA DA INFRA'),
+  },
+];
 
-  console.log('\n  Extratos sem NF conciliada (fonte):');
-  const extSemNF = db.prepare("SELECT substr(historico,1,50) h, COUNT(*) n, SUM(credito) s FROM extratos WHERE status_conciliacao='CONCILIADO' AND credito>100 AND historico NOT LIKE '%|%' GROUP BY h ORDER BY s DESC LIMIT 10").all();
-  // Contar quantos foram usados vs total conciliados
-  const totalExtConc = db.prepare("SELECT COUNT(*) n FROM extratos WHERE status_conciliacao='CONCILIADO' AND credito>100 AND historico NOT LIKE '%|%'").get().n;
-  console.log(`    Total extratos CONCILIADO (não-dup): ${totalExtConc}`);
-} else {
-  console.log(`\n⚠️  DRY RUN — banco não alterado. ${totalConc} NFs seriam conciliadas.`);
+let conc4 = 0;
 
-  // Mostrar extratos ainda livres
-  const livres = extCredsRaw.filter(e => !extUsados.has(e.id));
-  if (livres.length > 0) {
-    console.log(`\n  Extratos não utilizados: ${livres.length}`);
-    livres.slice(0, 15).forEach(e => console.log(`    ${e.data_iso} ${(e.status_conciliacao||'null').padEnd(12)} R$${e.credito.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(14)} ${(e.historico||'').replace('|','').trim().slice(0,50)}`));
+for (const tedExt of extEstadoLivres) {
+  if (extUsados.has(tedExt.id)) continue;
+  const tedDate = new Date(tedExt.data_iso).getTime();
+  const TARGET = tedExt.credito;
+  const TOL_PCT = 0.08;
+
+  for (const grp of BATCH_GRUPOS) {
+    if (extUsados.has(tedExt.id)) break; // já usado por grupo anterior
+
+    // NFs elegíveis: deste grupo, não usadas, emitidas até 30d APÓS o TED (tolerância), dentro de 365d
+    const eligible = nfsPendentes4.filter(n =>
+      !nfUsadas.has(n.id) &&
+      !isContaminado(n.tomador) &&
+      grp.filtroNF(n.tomador) &&
+      new Date(n.data_emissao).getTime() <= tedDate + 30 * 86400000 &&
+      new Date(n.data_emissao).getTime() >= tedDate - 365 * 86400000
+    ).sort((a, b) => a.data_emissao.localeCompare(b.data_emissao)); // oldest first
+
+    if (eligible.length === 0) continue;
+
+    // Greedy: acumula até soma entrar na janela [TARGET*(1-TOL), TARGET*(1+TOL)]
+    let soma = 0;
+    const batch = [];
+    let found = false;
+    for (const nf of eligible) {
+      const liq = nf.valor_liquido || nf.valor_bruto;
+      soma += liq;
+      batch.push(nf);
+      const lo = TARGET * (1 - TOL_PCT);
+      const hi = TARGET * (1 + TOL_PCT);
+      if (soma >= lo && soma <= hi) { found = true; break; }
+      if (soma > hi) break; // ultrapassou — não vai melhorar
+    }
+
+    if (found && batch.length >= 2) { // mínimo 2 NFs para ser um lote válido
+      const diffPct = (Math.abs(soma - TARGET) / TARGET * 100).toFixed(2);
+      console.log(`    🔀 BATCH ${grp.label} → TED ${tedExt.data_iso} R$${TARGET.toLocaleString('pt-BR',{minimumFractionDigits:2})} (${batch.length} NFs, soma=R$${soma.toLocaleString('pt-BR',{minimumFractionDigits:2})}, diff=${diffPct}%)`);
+      for (const nf of batch) {
+        marcaMatch(nf, tedExt);
+        console.log(`      ✅ NF ${nf.id} ${nf.data_emissao} R$${(nf.valor_liquido||nf.valor_bruto).toLocaleString('pt-BR',{minimumFractionDigits:2})} ${(nf.tomador||'').slice(0,40)}`);
+      }
+      conc4 += batch.length;
+      break; // TED usado — próxima TED
+    }
   }
 }
 
+console.log(`  → Passo 4: ${conc4} NFs conciliadas (batch Estado)\n`);
+
+// ── 6. RESUMO FINAL ────────────────────────────────────────────────
+console.log('═'.repeat(60));
+console.log(`  CONCILIADAS NESTE RUN: ${totalConc} NFs (contaminadas ignoradas: ${totalSkip})`);
+
+if (!DRY_RUN) {
+  const res = {
+    conc: db.prepare("SELECT COUNT(*) n, COALESCE(SUM(valor_bruto),0) s FROM notas_fiscais WHERE status_conciliacao='CONCILIADO'").get(),
+    pend: db.prepare("SELECT COUNT(*) n, COALESCE(SUM(valor_bruto),0) s FROM notas_fiscais WHERE status_conciliacao IS NULL OR status_conciliacao='PENDENTE'").get(),
+    asse: db.prepare("SELECT COUNT(*) n FROM notas_fiscais WHERE status_conciliacao='ASSESSORIA'").get(),
+    extC: db.prepare("SELECT COUNT(*) n, COALESCE(SUM(credito),0) s FROM extratos WHERE status_conciliacao='CONCILIADO' AND credito>0").get(),
+    extL: db.prepare("SELECT COUNT(*) n, COALESCE(SUM(credito),0) s FROM (SELECT MIN(id) id, credito FROM extratos WHERE credito>100 AND (status_conciliacao IS NULL OR status_conciliacao='PENDENTE') GROUP BY data_iso,credito)").get(),
+  };
+  console.log(`\n  NFs CONCILIADAS:  ${res.conc.n.toString().padStart(5)} | R$ ${res.conc.s.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(18)}`);
+  console.log(`  NFs PENDENTES:    ${res.pend.n.toString().padStart(5)} | R$ ${res.pend.s.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(18)}`);
+  console.log(`  NFs ASSESSORIA:   ${res.asse.n.toString().padStart(5)}`);
+  console.log(`  Extratos CONC.:   ${res.extC.n.toString().padStart(5)} | R$ ${res.extC.s.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(18)}`);
+  console.log(`  Extratos LIVRES:  ${res.extL.n.toString().padStart(5)} | R$ ${res.extL.s.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(18)}`);
+
+  console.log('\n  Conciliadas por tomador (top 15):');
+  db.prepare("SELECT tomador, COUNT(*) n, SUM(valor_bruto) tot FROM notas_fiscais WHERE status_conciliacao='CONCILIADO' GROUP BY tomador ORDER BY tot DESC LIMIT 15").all()
+    .forEach(r => console.log(`    ${(r.tomador||'').slice(0,50).padEnd(50)} n=${String(r.n).padStart(4)} | R$${r.tot.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(16)}`));
+
+  console.log('\n  NFs pendentes por tomador (top 12):');
+  db.prepare("SELECT tomador, COUNT(*) n, SUM(valor_bruto) tot FROM notas_fiscais WHERE status_conciliacao IS NULL OR status_conciliacao='PENDENTE' GROUP BY tomador ORDER BY tot DESC LIMIT 12").all()
+    .forEach(r => console.log(`    ${(r.tomador||'').slice(0,50).padEnd(50)} n=${String(r.n).padStart(4)} | R$${r.tot.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(16)}`));
+
+  console.log('\n  Extratos livres (top 10 por valor):');
+  db.prepare("SELECT MIN(id) id, data_iso, credito, MIN(historico) h FROM extratos WHERE credito>500 AND (status_conciliacao IS NULL OR status_conciliacao='PENDENTE') GROUP BY data_iso,credito ORDER BY credito DESC LIMIT 10").all()
+    .forEach(r => console.log(`    ${r.data_iso} R$${r.credito.toLocaleString('pt-BR',{minimumFractionDigits:2}).padStart(14)}  ${(r.h||'').slice(0,55)}`));
+} else {
+  console.log(`\n⚠️  DRY RUN — banco não alterado.`);
+}
+
 db.close();
+console.log('\n  ✅ Conciliação concluída!\n');
