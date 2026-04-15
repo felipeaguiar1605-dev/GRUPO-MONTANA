@@ -27,8 +27,11 @@ const args = Object.fromEntries(
   process.argv.slice(2).filter(a => a.startsWith('--'))
     .map(a => { const [k,v] = a.slice(2).split('='); return [k, v||true]; })
 );
-const MES_ARG     = String(args.mes  || '03').padStart(2, '0');
-const ANO_ARG     = String(args.ano  || '2026');
+// Default: mês anterior (ex: rodando em abril/2026 → gera março/2026)
+const _hoje    = new Date();
+const _mesAnt  = new Date(_hoje.getFullYear(), _hoje.getMonth() - 1, 1);
+const MES_ARG  = String(args.mes || (_mesAnt.getMonth() + 1)).padStart(2, '0');
+const ANO_ARG  = String(args.ano || _mesAnt.getFullYear());
 const EMPRESA_ARG = args.empresa || 'todas';
 const MES_LABEL   = `${ANO_ARG}-${MES_ARG}`;
 const DATA_INI    = `${ANO_ARG}-${MES_ARG}-01`;
