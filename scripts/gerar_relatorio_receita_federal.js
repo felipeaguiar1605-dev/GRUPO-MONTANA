@@ -6,19 +6,20 @@
  * Uso:
  *   node scripts/gerar_relatorio_receita_federal.js [--mes=03] [--ano=2026] [--empresa=assessoria|seguranca|todas]
  *
- * Saída: relatorios/receita_federal_<empresa>_<ano>-<mes>.xlsx
+ * Saída (arquivos separados por empresa):
+ *   relatorios/receita_federal_assessoria_<ano>-<mes>.xlsx
+ *   relatorios/receita_federal_seguranca_<ano>-<mes>.xlsx
  *
- * Abas:
- *   1. Resumo          — totais por empresa × competência × situação tributária
- *   2. Assessoria      — NFs pagas no mês, nota a nota, ordenado por competência
- *   3. Segurança       — idem
- *   4. PIS-COFINS Calc — apuração PIS/COFINS Assessoria (Lucro Real, regime de caixa)
- *   5. Créditos s/ NF  — créditos bancários do mês sem NF correspondente identificada
+ * Abas por arquivo:
+ *   1. Resumo          — sumário executivo + totais por competência
+ *   2. NFs Pagas       — nota a nota, ordenado por contrato → competência
+ *   3. Apuração Fiscal — PIS/COFINS/IR calculados (Lucro Real 1,65%+7,60% | Presumido 0,65%+3%)
+ *   4. Créditos sem NF — créditos bancários não vinculados a NF (categorizados)
  */
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
-const path = require('path');
-const fs   = require('fs');
-const XLSX = require('xlsx');
+const path    = require('path');
+const fs      = require('fs');
+const ExcelJS = require('exceljs');
 const { getDb } = require('../src/db');
 
 // ── Parâmetros ─────────────────────────────────────────────────────────────────
@@ -26,401 +27,508 @@ const args = Object.fromEntries(
   process.argv.slice(2).filter(a => a.startsWith('--'))
     .map(a => { const [k,v] = a.slice(2).split('='); return [k, v||true]; })
 );
-const MES_ARG    = String(args.mes  || '03').padStart(2, '0');
-const ANO_ARG    = String(args.ano  || '2026');
+const MES_ARG     = String(args.mes  || '03').padStart(2, '0');
+const ANO_ARG     = String(args.ano  || '2026');
 const EMPRESA_ARG = args.empresa || 'todas';
-const MES_LABEL  = `${ANO_ARG}-${MES_ARG}`;
-const DATA_INI   = `${ANO_ARG}-${MES_ARG}-01`;
-const DATA_FIM   = `${ANO_ARG}-${MES_ARG}-31`;
+const MES_LABEL   = `${ANO_ARG}-${MES_ARG}`;
+const DATA_INI    = `${ANO_ARG}-${MES_ARG}-01`;
+const DATA_FIM    = `${ANO_ARG}-${MES_ARG}-31`;
 
 console.log(`\n  📑 Relatório Receita Federal — recebimentos ${MES_LABEL}`);
+
+// ── Configuração de empresas ───────────────────────────────────────────────────
+// regime: 'Lucro Real' | 'Lucro Presumido' | 'Simples Nacional'
+const CONFIG_EMPRESAS = {
+  assessoria: { regime: 'Lucro Real',      pisPct: 0.0165, cofinsPct: 0.0760, label: 'Montana Assessoria Empresarial Ltda' },
+  seguranca:  { regime: 'Lucro Presumido', pisPct: 0.0065, cofinsPct: 0.0300, label: 'Montana Segurança e Vigilância Ltda' },
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const R    = v  => Number(v || 0);
 const fmtD = iso => iso ? iso.replace(/(\d{4})-(\d{2})-(\d{2})/, '$3/$2/$1') : '';
-const fmtR = v  => R(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-const pct  = (v, base) => base > 0 ? (v / base * 100).toFixed(2) + '%' : '0,00%';
+const fmtR = v  => R(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const num  = v  => R(v);   // valor numérico puro para células ExcelJS
 
-// Identifica ano da competência a partir de "2025-03" ou "03/2025"
 function anoCompetencia(comp) {
   if (!comp) return '';
   const m = comp.match(/(\d{4})/);
   return m ? m[1] : '';
 }
 
-// ── Extrai palavra-chave do nome de contrato para matching fuzzy ──────────────
-// Ex: "DETRAN 41/2023 + 2°TA" → "DETRAN"
-//     "SEDUC Limpeza/Copeiragem" → "SEDUC"
-const PALAVRAS_CONTRATO = ['DETRAN','UNITINS','SESAU','SEDUC','UFT','UFNT','TCE','SEMARH',
-  'CBMTO','FUNJURIS','TJ','PREFEITURA','PREVI','MUNICIPIO'];
+// ── Matching: keyword de contrato para batch TEDs ─────────────────────────────
+const KWS = ['DETRAN','UNITINS','SESAU','SEDUC','UFT','UFNT','TCE','SEMARH',
+             'CBMTO','FUNJURIS','TJ','PREFEITURA','PREVI','MUNICIPIO'];
 function kwContrato(s) {
   const up = (s||'').toUpperCase();
-  return PALAVRAS_CONTRATO.find(kw => up.includes(kw)) || '';
+  return KWS.find(kw => up.includes(kw)) || '';
 }
 
-// ── Lógica central: NFs pagas no mês ─────────────────────────────────────────
-// Etapa 1: matching individual por valor exato (Pix UFT/UFNT)
-// Etapa 2: matching em lote por contrato keyword + janela de data (TEDs Estado)
-// Deduplicação prévia dos extratos (mesmo TED importado 2× — pipe e nopipe)
+// ── Categorização de créditos sem NF ─────────────────────────────────────────
+function categorizarCredito(e) {
+  const h = (e.historico||'').toUpperCase();
+  const c = (e.contrato_vinculado||'').toUpperCase();
+  if (c.includes('CONTA VINCULADA') || c.includes('VINCULADA'))
+    return '🔒 CONTA VINCULADA — escrow (não tributável)';
+  if (h.includes('RESGATE') && (h.includes('GARANTIA') || h.includes('DEP')))
+    return '🔒 RESGATE DEPÓSITO GARANTIA — devolução de caução (não tributável)';
+  if (h.includes('MONTANA') || h.includes('TRANSFERÊNCIA INTERNA') || h.includes('0151'))
+    return '🔄 TRANSFERÊNCIA INTERNA — entre contas Montana (não tributável)';
+  if (h.includes('BACEN') || h.includes('JUDICIAL') || h.includes('DESBL'))
+    return '⚖️  DESBLOQUEIO JUDICIAL — verificar NF correspondente';
+  return '⚠️  VERIFICAR — possível NF não importada ou pagamento sem NF emitida';
+}
+
+// ── Core: NFs pagas no mês ────────────────────────────────────────────────────
 function nfsPagasNoMes(db, dataIni, dataFim) {
-  // Extratos CONCILIADOS no mês — deduplicados por (data_iso, credito arredondado)
-  // Quando há duplicata, prioriza o que tem contrato_vinculado preenchido
+  // Extratos CONCILIADOS no mês — deduplicados por (data_iso, credito)
   const extRaw = db.prepare(`
     SELECT id, data_iso, credito, historico, contrato_vinculado
     FROM extratos
-    WHERE status_conciliacao = 'CONCILIADO'
-      AND credito > 0
+    WHERE status_conciliacao = 'CONCILIADO' AND credito > 0
       AND data_iso >= ? AND data_iso <= ?
     ORDER BY data_iso, (contrato_vinculado <> '') DESC
   `).all(dataIni, dataFim);
 
-  const extDedup = new Map(); // "data|valor" → extrato
+  const extDedup = new Map();
   for (const e of extRaw) {
     const k = `${e.data_iso}|${R(e.credito).toFixed(2)}`;
-    if (!extDedup.has(k) || (!extDedup.get(k).contrato_vinculado && e.contrato_vinculado)) {
+    if (!extDedup.has(k) || (!extDedup.get(k).contrato_vinculado && e.contrato_vinculado))
       extDedup.set(k, e);
-    }
   }
-  const extMes = [...extDedup.values()].sort((a, b) => new Date(a.data_iso) - new Date(b.data_iso));
+  const extMes = [...extDedup.values()].sort((a,b) => new Date(a.data_iso)-new Date(b.data_iso));
 
-  // NFs CONCILIADAS emitidas nos últimos 9 meses
-  const janelaIni = new Date(dataFim);
-  janelaIni.setMonth(janelaIni.getMonth() - 9);
-  const janelaIniStr = janelaIni.toISOString().substring(0, 10);
+  // NFs CONCILIADAS — janela de 9 meses para trás
+  const jIni = new Date(dataFim); jIni.setMonth(jIni.getMonth()-9);
+  const jIniS = jIni.toISOString().substring(0,10);
 
   const nfsConcil = db.prepare(`
-    SELECT id, numero, tomador, cnpj_tomador, competencia,
-           data_emissao, valor_bruto, valor_liquido,
-           inss, ir, iss, csll, pis, cofins, retencao,
+    SELECT id, numero, tomador, cnpj_tomador, competencia, data_emissao,
+           valor_bruto, valor_liquido, inss, ir, iss, csll, pis, cofins, retencao,
            contrato_ref, discriminacao
     FROM notas_fiscais
-    WHERE status_conciliacao = 'CONCILIADO'
-      AND data_emissao >= ?
+    WHERE status_conciliacao='CONCILIADO' AND data_emissao >= ?
     ORDER BY contrato_ref, competencia, data_emissao
-  `).all(janelaIniStr);
+  `).all(jIniS);
 
   const pareados  = [];
   const usadosExt = new Set();
   const usadosNf  = new Set();
 
-  // ── Etapa 1: matching individual por valor exato ───────────────────────────
-  const extPorValor = new Map(); // valor → [extrato]
+  // Etapa 1: valor exato (Pix individuais)
+  const extPorValor = new Map();
   for (const e of extMes) {
     const k = R(e.credito).toFixed(2);
     if (!extPorValor.has(k)) extPorValor.set(k, []);
     extPorValor.get(k).push(e);
   }
-
   for (const nf of nfsConcil) {
     const vliq  = R(nf.valor_liquido || nf.valor_bruto);
-    const cands = (extPorValor.get(vliq.toFixed(2)) || []).filter(e => !usadosExt.has(e.id));
+    const cands = (extPorValor.get(vliq.toFixed(2))||[]).filter(e=>!usadosExt.has(e.id));
     if (!cands.length) continue;
     const emMs = nf.data_emissao ? new Date(nf.data_emissao).getTime() : 0;
-    let melhor = cands[0], menorDif = Infinity;
-    for (const e of cands) {
-      const d = Math.abs(new Date(e.data_iso).getTime() - emMs);
-      if (d < menorDif) { melhor = e; menorDif = d; }
-    }
-    usadosExt.add(melhor.id);
-    usadosNf.add(nf.id);
-    pareados.push({ nf, extrato: melhor, tipo: 'individual' });
+    let melhor = cands[0], dMin = Infinity;
+    for (const e of cands) { const d=Math.abs(new Date(e.data_iso).getTime()-emMs); if(d<dMin){melhor=e;dMin=d;} }
+    usadosExt.add(melhor.id); usadosNf.add(nf.id);
+    pareados.push({ nf, extrato: melhor, tipo: 'Pix/OB individual' });
   }
 
-  // ── Etapa 2: TEDs em lote — matching por keyword de contrato + janela ──────
-  // Não exige que a soma das NFs iguale o TED; usa keyword do contrato_vinculado
-  // para identificar quais NFs do mesmo contrato foram cobertas por esse TED.
+  // Etapa 2: TEDs em lote — keyword contrato + janela ±90d/-30d
   const semNf = [];
-
-  for (const ext of extMes.filter(e => !usadosExt.has(e.id))) {
+  for (const ext of extMes.filter(e=>!usadosExt.has(e.id))) {
     const kwExt = kwContrato(ext.contrato_vinculado) || kwContrato(ext.historico);
     if (!kwExt) { semNf.push(ext); continue; }
-
     const extDt = new Date(ext.data_iso);
-    const dtMin = new Date(extDt); dtMin.setDate(dtMin.getDate() - 90);
-    const dtMax = new Date(extDt); dtMax.setDate(dtMax.getDate() + 30);
-    const dtMinS = dtMin.toISOString().substring(0, 10);
-    const dtMaxS = dtMax.toISOString().substring(0, 10);
-
-    // NFs com mesma keyword de contrato na janela, ainda não pareadas
+    const dtMin = new Date(extDt); dtMin.setDate(dtMin.getDate()-90);
+    const dtMax = new Date(extDt); dtMax.setDate(dtMax.getDate()+30);
+    const dtMinS = dtMin.toISOString().substring(0,10);
+    const dtMaxS = dtMax.toISOString().substring(0,10);
     const nfsMatch = nfsConcil.filter(nf =>
       !usadosNf.has(nf.id) &&
       kwContrato(nf.contrato_ref) === kwExt &&
-      nf.data_emissao >= dtMinS &&
-      nf.data_emissao <= dtMaxS
+      nf.data_emissao >= dtMinS && nf.data_emissao <= dtMaxS
     );
-
     if (!nfsMatch.length) { semNf.push(ext); continue; }
-
     for (const nf of nfsMatch) {
       usadosNf.add(nf.id);
-      pareados.push({ nf, extrato: ext, tipo: 'lote-TED' });
+      pareados.push({ nf, extrato: ext, tipo: 'TED/OB em lote' });
     }
     usadosExt.add(ext.id);
   }
-
   return { pareados, extSemNf: semNf };
 }
 
-// ── Processa uma empresa ───────────────────────────────────────────────────────
-function processarEmpresa(nomeEmpresa, regime) {
+// ── Monta dados de uma empresa ────────────────────────────────────────────────
+function buildEmpresaData(nomeEmpresa, cfg) {
   let db;
-  try { db = getDb(nomeEmpresa); } catch (_) { return null; }
-
-  console.log(`\n  🏢 ${nomeEmpresa.toUpperCase()} (${regime})`);
-
+  try { db = getDb(nomeEmpresa); } catch(_){ return null; }
   const { pareados, extSemNf } = nfsPagasNoMes(db, DATA_INI, DATA_FIM);
 
-  // Monta linhas do relatório
-  const linhas = pareados.map(({ nf, extrato, tipo }) => {
-    // Competência: usa campo direto ou infere da data de emissão
-    const compFinal = nf.competencia || (nf.data_emissao ? nf.data_emissao.substring(0, 7) : '');
-    const anoComp   = anoCompetencia(compFinal);
-    const jaTribt   = anoComp && anoComp < ANO_ARG ? 'SIM — já tributado em ' + anoComp : 'NÃO — tributar em ' + ANO_ARG;
-    const vbruto    = R(nf.valor_bruto);
-    const vliq      = R(nf.valor_liquido || nf.valor_bruto);
-    const retTotal  = R(nf.retencao) || (R(nf.ir) + R(nf.csll) + R(nf.pis) + R(nf.cofins) + R(nf.inss) + R(nf.iss));
-    const diferenca = R(extrato.credito) - vliq;
-
-    // PIS/COFINS a apurar (só Assessoria / Lucro Real / regime de caixa)
-    let pisProprio = 0, cofinsPropria = 0, pisLiq = 0, cofinsLiq = 0;
-    if (regime === 'Lucro Real') {
-      pisProprio  = vliq * 0.0165;
-      cofinsPropria = vliq * 0.0760;
-      pisLiq      = pisProprio  - R(nf.pis);   // deduz retenção já retida
-      cofinsLiq   = cofinsPropria - R(nf.cofins);
-    }
-
+  const rows = pareados.map(({ nf, extrato, tipo }) => {
+    const compFinal  = nf.competencia || (nf.data_emissao ? nf.data_emissao.substring(0,7) : '');
+    const anoComp    = anoCompetencia(compFinal);
+    const jaTribt    = anoComp && anoComp < ANO_ARG;
+    const vbruto     = num(nf.valor_bruto);
+    const vliq       = num(nf.valor_liquido || nf.valor_bruto);
+    const retTotal   = num(nf.retencao) || (num(nf.ir)+num(nf.csll)+num(nf.pis)+num(nf.cofins)+num(nf.inss)+num(nf.iss));
+    const pisProprio = vliq * cfg.pisPct;
+    const cofinsProp = vliq * cfg.cofinsPct;
+    const pisLiq     = Math.max(0, pisProprio  - num(nf.pis));
+    const cofinsLiq  = Math.max(0, cofinsProp - num(nf.cofins));
     return {
-      // Identificação
-      'Empresa':           nomeEmpresa.charAt(0).toUpperCase() + nomeEmpresa.slice(1),
-      'Regime':            regime,
-      'Contrato Ref':      nf.contrato_ref || '(sem contrato)',
-      'NF Nº':             nf.numero || '',
-      'Tomador':           nf.tomador || '',
-      'CNPJ Tomador':      nf.cnpj_tomador || '',
-      // Datas e competência — ponto central para a Receita
-      'Competência NF':    compFinal,
-      'Ano Competência':   anoComp,
-      'Data Emissão NF':   fmtD(nf.data_emissao),
-      'Data Pagamento':    fmtD(extrato.data_iso),
-      'Tipo Match':        tipo || 'individual',
-      'Já Tributado?':     jaTribt,
-      // Valores
-      'Valor Bruto (R$)':  fmtR(vbruto),
-      'ISS Retido (R$)':   fmtR(nf.iss),
-      'IR Retido (R$)':    fmtR(nf.ir),
-      'CSLL Retido (R$)':  fmtR(nf.csll),
-      'PIS Retido (R$)':   fmtR(nf.pis),
-      'COFINS Retido (R$)':fmtR(nf.cofins),
-      'INSS Retido (R$)':  fmtR(nf.inss),
-      'Total Retenções (R$)': fmtR(retTotal),
-      'Valor Líq. Recebido (R$)': fmtR(vliq),
-      'Valor Extrato (R$)': fmtR(extrato.credito),
-      'Diferença (R$)':    fmtR(diferenca),
-      // PIS/COFINS (só Assessoria)
-      ...(regime === 'Lucro Real' ? {
-        'PIS 1,65% s/VL (R$)':     fmtR(pisProprio),
-        'COFINS 7,60% s/VL (R$)':  fmtR(cofinsPropria),
-        'PIS Líq. a Pagar (R$)':   fmtR(Math.max(0, pisLiq)),
-        'COFINS Líq. a Pagar (R$)':fmtR(Math.max(0, cofinsLiq)),
-      } : {}),
-      'Histórico Banco':   (extrato.historico || '').substring(0, 100),
-      'Discriminação NF':  (nf.discriminacao || '').substring(0, 100),
+      contrato_ref: nf.contrato_ref || '(sem contrato)',
+      nf_num:       nf.numero || '',
+      tomador:      nf.tomador || '',
+      cnpj_tomador: nf.cnpj_tomador || '',
+      competencia:  compFinal,
+      ano_comp:     anoComp,
+      ja_tributado: jaTribt,
+      data_emissao: fmtD(nf.data_emissao),
+      data_pagto:   fmtD(extrato.data_iso),
+      tipo_match:   tipo,
+      vbruto, vliq, viss: num(nf.iss), vir: num(nf.ir), vcsll: num(nf.csll),
+      vpis_ret: num(nf.pis), vcofins_ret: num(nf.cofins), vinss: num(nf.inss),
+      ret_total: retTotal,
+      pis_proprio: pisProprio, cofins_prop: cofinsProp,
+      pis_liq: pisLiq, cofins_liq: cofinsLiq,
+      historico: (extrato.historico||'').substring(0,80),
+      discriminacao: (nf.discriminacao||'').substring(0,80),
     };
   });
 
-  // Categoriza créditos sem NF para o contador
-  function categorizarCredito(e) {
-    const h = (e.historico || '').toUpperCase();
-    const c = (e.contrato_vinculado || '').toUpperCase();
-    if (c.includes('CONTA VINCULADA') || c.includes('VINCULADA'))
-      return '🔒 CONTA VINCULADA — depósito escrow (não tributável, não emite NF)';
-    if (h.includes('RESGATE') && h.includes('GARANTIA'))
-      return '🔒 RESGATE DEPÓSITO GARANTIA — devolução de caução (não tributável)';
-    if (h.includes('MONTANA') || h.includes('TRANSFERÊNCIA INTERNA') || h.includes('0151'))
-      return '🔄 TRANSFERÊNCIA INTERNA — entre contas Montana (não tributável)';
-    if (h.includes('BACEN') || h.includes('JUDICIAL'))
-      return '⚖️ DESBLOQUEIO JUDICIAL — verificar NF correspondente';
-    return '⚠️  VERIFICAR — possível NF não importada ou pagamento sem NF emitida';
-  }
-
-  const linhasSemNf = extSemNf.map(e => ({
-    'Data Crédito':    fmtD(e.data_iso),
-    'Valor (R$)':      fmtR(e.credito),
-    'Contrato':        e.contrato_vinculado || '',
-    'Histórico':       (e.historico || '').substring(0, 120),
-    'Categorização':   categorizarCredito(e),
+  const semNfRows = extSemNf.map(e => ({
+    data:      fmtD(e.data_iso),
+    valor:     num(e.credito),
+    contrato:  e.contrato_vinculado || '',
+    historico: (e.historico||'').substring(0,100),
+    categoria: categorizarCredito(e),
   }));
 
-  // Sumário
-  const nfAno = (ano) => linhas.filter(l => l['Ano Competência'] === ano);
-  const soma  = (lista, campo) => lista.reduce((s, l) => s + R(parseFloat((l[campo]||'0').replace(/\./g,'').replace(',','.'))), 0);
-
-  const anos = [...new Set(linhas.map(l => l['Ano Competência']).filter(Boolean))].sort();
-
-  console.log(`  → ${linhas.length} NFs pagas em ${MES_LABEL} | ${extSemNf.length} créditos sem NF individual`);
-  anos.forEach(ano => {
-    const nfs = nfAno(ano);
-    console.log(`     Competência ${ano}: ${nfs.length} NFs (${ano < ANO_ARG ? 'já tributado' : 'tributar agora'})`);
+  console.log(`\n  🏢 ${cfg.label} (${cfg.regime})`);
+  console.log(`     ${rows.length} NFs identificadas | ${extSemNf.length} créditos sem NF`);
+  const anos = [...new Set(rows.map(r=>r.ano_comp).filter(Boolean))].sort();
+  anos.forEach(a => {
+    const n = rows.filter(r=>r.ano_comp===a);
+    console.log(`     Competência ${a}: ${n.length} NFs → R$${fmtR(n.reduce((s,r)=>s+r.vliq,0))} (${a<ANO_ARG?'já tributado':'tributar agora'})`);
   });
-
-  return { linhas, linhasSemNf, nomeEmpresa, regime };
+  return { rows, semNfRows, cfg, nomeEmpresa };
 }
 
-// ── Empresas a processar ──────────────────────────────────────────────────────
-const CONFIG_EMPRESAS = {
-  assessoria: 'Lucro Real',
-  seguranca:  'Simples Nacional',
+// ── ExcelJS: estilos ──────────────────────────────────────────────────────────
+const COR = {
+  header_azul:    '2E4057',  // fundo cabeçalho azul escuro
+  header_txt:     'FFFFFF',  // texto branco
+  header_cinza:   '546E7A',  // cabeçalho cinza (abas secundárias)
+  tributar_fundo: 'E8F5E9',  // verde claro — tributar agora
+  tributado_fundo:'FFF9C4',  // amarelo claro — já tributado
+  alt_row:        'F5F5F5',  // linha alternada cinza suave
+  total_fundo:    'E3F2FD',  // azul claro — linha de total
+  borda:          'B0BEC5',
 };
 
-const empresasAlvo = EMPRESA_ARG === 'todas'
-  ? Object.keys(CONFIG_EMPRESAS)
-  : [EMPRESA_ARG];
-
-const resultados = empresasAlvo
-  .map(e => processarEmpresa(e, CONFIG_EMPRESAS[e] || 'Simples Nacional'))
-  .filter(Boolean);
-
-// ── Montagem do XLSX ──────────────────────────────────────────────────────────
-const wb = XLSX.utils.book_new();
-
-function addSheet(wb, data, name) {
-  if (!data || data.length === 0) {
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['(sem dados)']]), name);
-    return;
-  }
-  const ws = XLSX.utils.json_to_sheet(data);
-  const cols = Object.keys(data[0]).map(k => ({ wch: Math.max(k.length, 14) }));
-  ws['!cols'] = cols;
-  XLSX.utils.book_append_sheet(wb, ws, name);
+function borderAll(color = COR.borda) {
+  const s = { style: 'thin', color: { argb: color } };
+  return { top: s, left: s, bottom: s, right: s };
 }
 
-// ── Aba 1: Resumo ─────────────────────────────────────────────────────────────
-const resumoLinhas = [
-  [`RELATÓRIO FISCAL — NFs PAGAS EM ${MES_LABEL.toUpperCase()}`],
-  [`Gerado em: ${new Date().toLocaleString('pt-BR')}`],
-  [`Base legal: Lucro Real, regime de caixa (Lei 10.833/2003 art. 10 §2°)`],
-  [],
-  ['EMPRESA', 'REGIME', 'COMPETÊNCIA NF', 'QTD NFs', 'VALOR BRUTO (R$)', 'VALOR LÍQ. (R$)', 'SITUAÇÃO TRIBUTÁRIA'],
-];
+function styleHeader(row, bgColor = COR.header_azul) {
+  row.font = { bold: true, color: { argb: COR.header_txt }, size: 10, name: 'Calibri' };
+  row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+  row.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+  row.height = 30;
+  row.eachCell(c => { c.border = borderAll(); });
+}
 
-for (const res of resultados) {
+function applyRowStyle(row, bgColor, fontSize = 9) {
+  row.font = { size: fontSize, name: 'Calibri' };
+  if (bgColor) row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+  row.eachCell(c => { c.border = borderAll(); });
+  row.alignment = { vertical: 'middle' };
+}
+
+function autoWidth(ws, cols) {
+  ws.columns = cols.map(c => ({
+    key:   c.key,
+    width: Math.min(c.width || 18, 60),
+    style: { font: { name: 'Calibri', size: 9 }, alignment: { vertical: 'middle', wrapText: false } },
+  }));
+}
+
+function freezeHeader(ws) {
+  ws.views = [{ state: 'frozen', ySplit: 1, xSplit: 0, activeCell: 'A2' }];
+}
+
+function addTotalRow(ws, label, cols, data) {
+  const totRow = ws.addRow([]);
+  cols.forEach((col, i) => {
+    const cell = totRow.getCell(i+1);
+    if (i === 0) { cell.value = label; cell.font = { bold: true, size: 9, name: 'Calibri' }; }
+    else if (col.sum) {
+      cell.value = data.reduce((s, r) => s + (r[col.key] || 0), 0);
+      cell.numFmt = '#,##0.00';
+      cell.font = { bold: true, size: 9, name: 'Calibri' };
+    }
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COR.total_fundo } };
+    cell.border = borderAll();
+  });
+  return totRow;
+}
+
+// ── Gera XLSX de uma empresa ──────────────────────────────────────────────────
+async function gerarXlsxEmpresa(empData) {
+  const { rows, semNfRows, cfg, nomeEmpresa } = empData;
+  const wb = new ExcelJS.Workbook();
+  wb.creator  = 'Montana ERP';
+  wb.created  = new Date();
+  wb.modified = new Date();
+
+  // ── Aba 1: RESUMO ──────────────────────────────────────────────────────────
+  const wsRes = wb.addWorksheet('1. Resumo', { pageSetup: { fitToPage: true } });
+  wsRes.views = [{ showGridLines: false }];
+
+  // Título
+  wsRes.mergeCells('A1:E1');
+  const titulo = wsRes.getCell('A1');
+  titulo.value = `RELATÓRIO FISCAL — ${cfg.label.toUpperCase()}`;
+  titulo.font  = { bold: true, size: 14, color: { argb: COR.header_txt }, name: 'Calibri' };
+  titulo.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: COR.header_azul } };
+  titulo.alignment = { horizontal: 'center', vertical: 'middle' };
+  wsRes.getRow(1).height = 36;
+
+  const info = [
+    ['Regime tributário:', cfg.regime],
+    ['Período de recebimento:', MES_LABEL],
+    ['PIS próprio:', `${(cfg.pisPct*100).toFixed(2)}%`],
+    ['COFINS própria:', `${(cfg.cofinsPct*100).toFixed(2)}%`],
+    ['Base de cálculo:', 'Regime de caixa (data do recebimento bancário)'],
+    ['Gerado em:', new Date().toLocaleString('pt-BR')],
+  ];
+  info.forEach(([k,v]) => {
+    const r = wsRes.addRow(['', k, v]);
+    r.getCell(2).font = { bold: true, size: 10, name: 'Calibri' };
+    r.getCell(3).font = { size: 10, name: 'Calibri' };
+    r.height = 18;
+  });
+  wsRes.addRow([]);
+
+  // Subtítulo
+  const rSub = wsRes.addRow(['', 'TOTAIS POR COMPETÊNCIA', '', '', '']);
+  wsRes.mergeCells(`B${rSub.number}:E${rSub.number}`);
+  rSub.font = { bold: true, size: 11, name: 'Calibri' };
+  rSub.height = 22;
+
+  // Cabeçalho tabela resumo
+  const rHdr = wsRes.addRow(['', 'Competência', 'Qtd NFs', 'Valor Líq. Recebido (R$)', 'Situação Tributária']);
+  styleHeader(rHdr, COR.header_cinza);
+
   // Agrupa por competência
   const porComp = new Map();
-  for (const l of res.linhas) {
-    const comp = l['Competência NF'] || '(sem comp.)';
-    const anoC = l['Ano Competência'] || '';
-    if (!porComp.has(comp)) porComp.set(comp, { qtd: 0, bruto: 0, liq: 0, anoC });
-    const c = porComp.get(comp);
-    c.qtd++;
-    c.bruto += R(parseFloat((l['Valor Bruto (R$)']||'0').replace(/\./g,'').replace(',','.')));
-    c.liq   += R(parseFloat((l['Valor Líq. Recebido (R$)']||'0').replace(/\./g,'').replace(',','.')));
+  for (const r of rows) {
+    const k = r.competencia || '(sem competência)';
+    if (!porComp.has(k)) porComp.set(k, { qtd: 0, vliq: 0, anoComp: r.ano_comp });
+    const c = porComp.get(k); c.qtd++; c.vliq += r.vliq;
   }
-
+  let totQtd = 0, totVliq = 0;
   for (const [comp, v] of [...porComp.entries()].sort()) {
-    const situacao = v.anoC && v.anoC < ANO_ARG
-      ? `✅ JÁ TRIBUTADO (${v.anoC})`
-      : `⚠️  TRIBUTAR AGORA (${ANO_ARG})`;
-    resumoLinhas.push([
-      res.nomeEmpresa.toUpperCase(), res.regime, comp,
-      v.qtd, fmtR(v.bruto), fmtR(v.liq), situacao,
-    ]);
+    const jaT = v.anoComp && v.anoComp < ANO_ARG;
+    const sit = jaT ? '✅ JÁ TRIBUTADO ('+v.anoComp+')' : '⚠️  TRIBUTAR AGORA ('+ANO_ARG+')';
+    const rr  = wsRes.addRow(['', comp, v.qtd, v.vliq, sit]);
+    rr.getCell(4).numFmt = '#,##0.00';
+    rr.getCell(4).alignment = { horizontal: 'right' };
+    const bg = jaT ? COR.tributado_fundo : COR.tributar_fundo;
+    applyRowStyle(rr, bg, 10);
+    rr.getCell(5).font = { bold: true, size: 10, name: 'Calibri', color: { argb: jaT ? '7B6000' : '1B5E20' } };
+    totQtd += v.qtd; totVliq += v.vliq;
+  }
+  const rTot = wsRes.addRow(['', 'TOTAL', totQtd, totVliq, '']);
+  rTot.getCell(4).numFmt = '#,##0.00';
+  rTot.font = { bold: true, size: 10, name: 'Calibri' };
+  rTot.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COR.total_fundo } };
+  rTot.eachCell(c => { c.border = borderAll(); });
+
+  wsRes.addRow([]);
+
+  // Créditos sem NF
+  if (semNfRows.length) {
+    const rSub2 = wsRes.addRow(['', 'CRÉDITOS SEM NF IDENTIFICADA', '', '', '']);
+    rSub2.font = { bold: true, size: 11, name: 'Calibri' };
+    wsRes.mergeCells(`B${rSub2.number}:E${rSub2.number}`);
+    const rSemHdr = wsRes.addRow(['', 'Data', 'Valor (R$)', 'Contrato', 'Categorização']);
+    styleHeader(rSemHdr, COR.header_cinza);
+    semNfRows.forEach((s, i) => {
+      const rr = wsRes.addRow(['', s.data, s.valor, s.contrato, s.categoria]);
+      rr.getCell(3).numFmt = '#,##0.00';
+      rr.getCell(3).alignment = { horizontal: 'right' };
+      applyRowStyle(rr, i%2===0 ? COR.alt_row : 'FFFFFF', 9);
+    });
+    const totSem = semNfRows.reduce((s,r)=>s+r.valor,0);
+    const rTotSem = wsRes.addRow(['', 'TOTAL SEM NF', totSem, '', '']);
+    rTotSem.getCell(3).numFmt = '#,##0.00';
+    rTotSem.font = { bold: true, size: 10, name: 'Calibri' };
+    rTotSem.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COR.total_fundo } };
+    rTotSem.eachCell(c => { c.border = borderAll(); });
   }
 
-  if (res.linhasSemNf.length) {
-    resumoLinhas.push([
-      res.nomeEmpresa.toUpperCase(), res.regime,
-      '(TED em lote — sem NF individual)', res.linhasSemNf.length,
-      fmtR(res.linhasSemNf.reduce((s,l) => s + R(parseFloat((l['Valor (R$)']||'0').replace(/\./g,'').replace(',','.'))), 0)),
-      '', '⚠️  VERIFICAR MANUALMENTE',
-    ]);
-  }
-  resumoLinhas.push([]);
-}
+  wsRes.getColumn(2).width = 42;
+  wsRes.getColumn(3).width = 12;
+  wsRes.getColumn(4).width = 28;
+  wsRes.getColumn(5).width = 45;
 
-const wsResumo = XLSX.utils.aoa_to_sheet(resumoLinhas);
-wsResumo['!cols'] = [{ wch: 20 }, { wch: 18 }, { wch: 18 }, { wch: 10 }, { wch: 22 }, { wch: 22 }, { wch: 35 }];
-XLSX.utils.book_append_sheet(wb, wsResumo, '1. Resumo');
+  // ── Aba 2: NFs PAGAS ──────────────────────────────────────────────────────
+  const wsNfs = wb.addWorksheet('2. NFs Pagas');
+  freezeHeader(wsNfs);
 
-// ── Abas por empresa ──────────────────────────────────────────────────────────
-resultados.forEach((res, i) => {
-  const abaNum = i + 2;
-  const nome   = res.nomeEmpresa.charAt(0).toUpperCase() + res.nomeEmpresa.slice(1);
-  addSheet(wb, res.linhas, `${abaNum}. ${nome}`);
-});
-
-// ── Aba PIS/COFINS Assessoria ─────────────────────────────────────────────────
-const resAssessoria = resultados.find(r => r.nomeEmpresa === 'assessoria');
-if (resAssessoria && resAssessoria.regime === 'Lucro Real') {
-  const calcLinhas = [
-    ['APURAÇÃO PIS/COFINS — ASSESSORIA (Lucro Real, Regime de Caixa)'],
-    [`Mês de recebimento: ${MES_LABEL}`],
-    [`Alíquotas próprias: PIS 1,65% | COFINS 7,60%`],
-    [`Retenções dedutíveis: PIS 0,65% (tomadores federais) | COFINS 3,00% (tomadores federais)`],
-    [],
+  const colsNf = [
+    { key: 'contrato_ref',   header: 'Contrato Ref',         width: 28 },
+    { key: 'nf_num',         header: 'NF Nº',                width: 14 },
+    { key: 'tomador',        header: 'Tomador / Cliente',     width: 38 },
+    { key: 'cnpj_tomador',   header: 'CNPJ Tomador',         width: 18 },
+    { key: 'competencia',    header: 'Competência NF',        width: 16 },
+    { key: 'data_emissao',   header: 'Data Emissão',         width: 14 },
+    { key: 'data_pagto',     header: 'Data Pagamento',       width: 16 },
+    { key: 'ja_tributado',   header: 'Já Tributado?',        width: 22 },
+    { key: 'vbruto',         header: 'Valor Bruto (R$)',     width: 18, sum: true, numFmt: '#,##0.00' },
+    { key: 'viss',           header: 'ISS Retido (R$)',      width: 16, sum: true, numFmt: '#,##0.00' },
+    { key: 'vir',            header: 'IR Retido (R$)',       width: 15, sum: true, numFmt: '#,##0.00' },
+    { key: 'vcsll',          header: 'CSLL Retido (R$)',     width: 16, sum: true, numFmt: '#,##0.00' },
+    { key: 'vpis_ret',       header: 'PIS Retido (R$)',      width: 15, sum: true, numFmt: '#,##0.00' },
+    { key: 'vcofins_ret',    header: 'COFINS Retida (R$)',   width: 18, sum: true, numFmt: '#,##0.00' },
+    { key: 'vinss',          header: 'INSS Retido (R$)',     width: 16, sum: true, numFmt: '#,##0.00' },
+    { key: 'ret_total',      header: 'Total Retenções (R$)', width: 20, sum: true, numFmt: '#,##0.00' },
+    { key: 'vliq',           header: 'Vlr Líq. Recebido (R$)',width: 22, sum: true, numFmt: '#,##0.00' },
+    { key: 'pis_proprio',    header: `PIS ${(cfg.pisPct*100).toFixed(2)}% (R$)`,   width: 18, sum: true, numFmt: '#,##0.00' },
+    { key: 'cofins_prop',    header: `COFINS ${(cfg.cofinsPct*100).toFixed(2)}% (R$)`, width: 20, sum: true, numFmt: '#,##0.00' },
+    { key: 'pis_liq',        header: 'PIS Líq. a Pagar (R$)',   width: 20, sum: true, numFmt: '#,##0.00' },
+    { key: 'cofins_liq',     header: 'COFINS Líq. a Pagar (R$)',width: 22, sum: true, numFmt: '#,##0.00' },
+    { key: 'tipo_match',     header: 'Tipo Vinculação',      width: 20 },
+    { key: 'historico',      header: 'Histórico Banco',      width: 40 },
+    { key: 'discriminacao',  header: 'Discriminação NF',     width: 40 },
   ];
+  autoWidth(wsNfs, colsNf);
 
-  // Agrupar por situação tributária
-  const grupos = [
-    { label: `COMPETÊNCIA ${ANO_ARG} — TRIBUTAR AGORA`, filtro: l => l['Ano Competência'] === ANO_ARG },
-    { label: 'COMPETÊNCIA ANOS ANTERIORES — JÁ TRIBUTADO (verificar se havia retenção)', filtro: l => l['Ano Competência'] && l['Ano Competência'] < ANO_ARG },
+  const hdrNf = wsNfs.addRow(colsNf.map(c => c.header));
+  styleHeader(hdrNf);
+
+  let lastContrato = null;
+  rows.forEach((r, i) => {
+    const isNewContrato = r.contrato_ref !== lastContrato;
+    lastContrato = r.contrato_ref;
+    const rr = wsNfs.addRow(colsNf.map(c => r[c.key]));
+    colsNf.forEach((c, ci) => {
+      if (c.numFmt) { rr.getCell(ci+1).numFmt = c.numFmt; rr.getCell(ci+1).alignment = { horizontal: 'right' }; }
+    });
+    const bg = r.ja_tributado ? COR.tributado_fundo : (i%2===0 ? COR.tributar_fundo : 'E1F5E3');
+    applyRowStyle(rr, bg, 9);
+    // Destaca coluna "Já Tributado?"
+    const cellTribt = rr.getCell(8);
+    cellTribt.font = { bold: true, size: 9, name: 'Calibri', color: { argb: r.ja_tributado ? '7B6000' : '1B5E20' } };
+    if (isNewContrato && i > 0) {
+      // Linha separadora leve entre contratos
+      rr.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'ECEFF1' } };
+    }
+  });
+
+  if (rows.length) addTotalRow(wsNfs, 'TOTAL GERAL', colsNf, rows);
+
+  // ── Aba 3: APURAÇÃO FISCAL ─────────────────────────────────────────────────
+  const wsCalc = wb.addWorksheet('3. Apuração Fiscal');
+  freezeHeader(wsCalc);
+  wsCalc.views = [{ state: 'frozen', ySplit: 1, xSplit: 0, activeCell: 'A2' }];
+
+  const colsCalc = [
+    { key: 'competencia',  header: 'Competência NF',   width: 16 },
+    { key: 'contrato_ref', header: 'Contrato',         width: 26 },
+    { key: 'nf_num',       header: 'NF Nº',            width: 14 },
+    { key: 'tomador',      header: 'Tomador',          width: 35 },
+    { key: 'data_pagto',   header: 'Data Recebimento', width: 18 },
+    { key: 'vliq',         header: 'Base de Cálculo (R$)',    width: 22, sum: true, numFmt: '#,##0.00' },
+    { key: 'vpis_ret',     header: 'PIS Retido p/ Tomador (R$)', width: 24, sum: true, numFmt: '#,##0.00' },
+    { key: 'vcofins_ret',  header: 'COFINS Retida p/ Tomador (R$)', width: 28, sum: true, numFmt: '#,##0.00' },
+    { key: 'pis_proprio',  header: `PIS ${(cfg.pisPct*100).toFixed(2)}% s/ Base (R$)`, width: 24, sum: true, numFmt: '#,##0.00' },
+    { key: 'cofins_prop',  header: `COFINS ${(cfg.cofinsPct*100).toFixed(2)}% s/ Base (R$)`, width: 26, sum: true, numFmt: '#,##0.00' },
+    { key: 'pis_liq',      header: 'PIS Líq. a Recolher (R$)',    width: 24, sum: true, numFmt: '#,##0.00' },
+    { key: 'cofins_liq',   header: 'COFINS Líq. a Recolher (R$)', width: 26, sum: true, numFmt: '#,##0.00' },
+    { key: 'ja_tributado', header: 'Situação',         width: 20 },
   ];
+  autoWidth(wsCalc, colsCalc);
 
-  let totalPisAPagar = 0, totalCofinsAPagar = 0, totalBaseCalculo = 0;
+  const hdrCalc = wsCalc.addRow(colsCalc.map(c => c.header));
+  styleHeader(hdrCalc);
 
-  for (const grupo of grupos) {
-    const nfs = resAssessoria.linhas.filter(grupo.filtro);
-    if (!nfs.length) continue;
+  // Agrupa por situação: tributar agora (2026) primeiro, depois já tributados (2025)
+  const rowsOrdenados = [...rows].sort((a,b) => {
+    if (a.ja_tributado !== b.ja_tributado) return a.ja_tributado ? 1 : -1;
+    return (a.competencia||'').localeCompare(b.competencia||'') || (a.contrato_ref||'').localeCompare(b.contrato_ref||'');
+  });
 
-    calcLinhas.push([grupo.label]);
-    calcLinhas.push(['NF Nº', 'Tomador', 'Competência', 'Data Pgto', 'Valor Líq. (R$)', 'PIS Ret. (R$)', 'COFINS Ret. (R$)', 'PIS 1,65% (R$)', 'COFINS 7,60% (R$)', 'PIS Líq. (R$)', 'COFINS Líq. (R$)']);
-
-    let subPis = 0, subCofins = 0, subBase = 0;
-    for (const l of nfs) {
-      const vl     = R(parseFloat((l['Valor Líq. Recebido (R$)']||'0').replace(/\./g,'').replace(',','.')));
-      const pRet   = R(parseFloat((l['PIS Retido (R$)']||'0').replace(/\./g,'').replace(',','.')));
-      const cRet   = R(parseFloat((l['COFINS Retido (R$)']||'0').replace(/\./g,'').replace(',','.')));
-      const pProp  = vl * 0.0165;
-      const cProp  = vl * 0.0760;
-      const pLiq   = Math.max(0, pProp - pRet);
-      const cLiq   = Math.max(0, cProp - cRet);
-      subPis   += pLiq;
-      subCofins += cLiq;
-      subBase  += vl;
-      calcLinhas.push([l['NF Nº'], l['Tomador'], l['Competência NF'], l['Data Pagamento'],
-        fmtR(vl), fmtR(pRet), fmtR(cRet), fmtR(pProp), fmtR(cProp), fmtR(pLiq), fmtR(cLiq)]);
+  let secaoAtual = null;
+  rowsOrdenados.forEach((r, i) => {
+    const secao = r.ja_tributado ? 'JÁ TRIBUTADO' : 'TRIBUTAR AGORA';
+    if (secao !== secaoAtual) {
+      secaoAtual = secao;
+      const rSec = wsCalc.addRow([r.ja_tributado
+        ? `── COMPETÊNCIA ANOS ANTERIORES — JÁ TRIBUTADO (imposto declarado em ${r.ano_comp || 'ano anterior'})`
+        : `── COMPETÊNCIA ${ANO_ARG} — TRIBUTAR AGORA (incluir no DARF de ${MES_LABEL})`
+      ]);
+      wsCalc.mergeCells(`A${rSec.number}:M${rSec.number}`);
+      rSec.font   = { bold: true, size: 10, name: 'Calibri', color: { argb: r.ja_tributado ? '6B4F0C' : '1A5722' } };
+      rSec.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: r.ja_tributado ? 'FFF8E1' : 'E8F5E9' } };
+      rSec.height = 24;
     }
-    calcLinhas.push(['SUBTOTAL', '', '', '', fmtR(subBase), '', '', fmtR(subBase*0.0165), fmtR(subBase*0.0760), fmtR(subPis), fmtR(subCofins)]);
-    calcLinhas.push([]);
+    const rr = wsCalc.addRow(colsCalc.map(c => r[c.key]));
+    colsCalc.forEach((c, ci) => {
+      if (c.numFmt) { rr.getCell(ci+1).numFmt = c.numFmt; rr.getCell(ci+1).alignment = { horizontal: 'right' }; }
+    });
+    const bg = r.ja_tributado ? COR.tributado_fundo : (i%2===0 ? COR.tributar_fundo : 'E1F5E3');
+    applyRowStyle(rr, bg, 9);
+    const cellSit = rr.getCell(13);
+    cellSit.font = { bold: true, size: 9, name: 'Calibri', color: { argb: r.ja_tributado ? '7B6000' : '1B5E20' } };
+  });
 
-    // Acumula total apenas para NFs do ano corrente (tributar agora)
-    if (grupo.label.includes(ANO_ARG) && grupo.label.includes('TRIBUTAR')) {
-      totalBaseCalculo += subBase;
-      totalPisAPagar   += subPis;
-      totalCofinsAPagar += subCofins;
-    }
+  if (rows.length) addTotalRow(wsCalc, 'TOTAL GERAL', colsCalc, rows);
+
+  // ── Aba 4: CRÉDITOS SEM NF ────────────────────────────────────────────────
+  const wsSem = wb.addWorksheet('4. Créditos sem NF');
+  freezeHeader(wsSem);
+  const colsSem = [
+    { key: 'data',      header: 'Data',           width: 14 },
+    { key: 'valor',     header: 'Valor (R$)',      width: 18, sum: true, numFmt: '#,##0.00' },
+    { key: 'contrato',  header: 'Contrato',        width: 35 },
+    { key: 'historico', header: 'Histórico Banco', width: 60 },
+    { key: 'categoria', header: 'Categorização',   width: 55 },
+  ];
+  autoWidth(wsSem, colsSem);
+  const hdrSem = wsSem.addRow(colsSem.map(c => c.header));
+  styleHeader(hdrSem, COR.header_cinza);
+  semNfRows.forEach((r, i) => {
+    const rr = wsSem.addRow(colsSem.map(c => r[c.key]));
+    colsSem.forEach((c, ci) => {
+      if (c.numFmt) { rr.getCell(ci+1).numFmt = c.numFmt; rr.getCell(ci+1).alignment = { horizontal: 'right' }; }
+    });
+    applyRowStyle(rr, i%2===0 ? COR.alt_row : 'FFFFFF', 9);
+  });
+  if (semNfRows.length) addTotalRow(wsSem, 'TOTAL', colsSem, semNfRows);
+
+  // ── Salvar ─────────────────────────────────────────────────────────────────
+  const outDir  = path.join(__dirname, '..', 'relatorios');
+  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+  const outFile = path.join(outDir, `receita_federal_${nomeEmpresa}_${ANO_ARG}-${MES_ARG}.xlsx`);
+  await wb.xlsx.writeFile(outFile);
+  console.log(`  ✅ relatorios/receita_federal_${nomeEmpresa}_${ANO_ARG}-${MES_ARG}.xlsx`);
+  return outFile;
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+(async () => {
+  const empresasAlvo = EMPRESA_ARG === 'todas'
+    ? Object.keys(CONFIG_EMPRESAS)
+    : [EMPRESA_ARG];
+
+  for (const emp of empresasAlvo) {
+    const cfg = CONFIG_EMPRESAS[emp];
+    if (!cfg) { console.log(`  ⚠️  Empresa desconhecida: ${emp}`); continue; }
+    const data = buildEmpresaData(emp, cfg);
+    if (data) await gerarXlsxEmpresa(data);
   }
 
-  calcLinhas.push(['TOTAL A APURAR (competência ' + ANO_ARG + ')', '', '', '', fmtR(totalBaseCalculo), '', '', fmtR(totalBaseCalculo*0.0165), fmtR(totalBaseCalculo*0.0760), fmtR(totalPisAPagar), fmtR(totalCofinsAPagar)]);
-
-  const wsPis = XLSX.utils.aoa_to_sheet(calcLinhas);
-  wsPis['!cols'] = [{ wch: 16 }, { wch: 40 }, { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 20 }, { wch: 18 }, { wch: 20 }];
-  XLSX.utils.book_append_sheet(wb, wsPis, `${resultados.length + 2}. PIS-COFINS Assessoria`);
-}
-
-// ── Aba créditos sem NF ───────────────────────────────────────────────────────
-const todasSemNf = resultados.flatMap(r =>
-  r.linhasSemNf.map(l => ({ 'Empresa': r.nomeEmpresa, ...l }))
-);
-if (todasSemNf.length) {
-  addSheet(wb, todasSemNf, `${resultados.length + 3}. Creditos sem NF`);
-}
-
-// ── Salvar ─────────────────────────────────────────────────────────────────────
-const outDir = path.join(__dirname, '..', 'relatorios');
-if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-const suffix  = EMPRESA_ARG === 'todas' ? 'todas' : EMPRESA_ARG;
-const outFile = path.join(outDir, `receita_federal_${suffix}_${ANO_ARG}-${MES_ARG}.xlsx`);
-XLSX.writeFile(wb, outFile);
-
-console.log(`\n  ✅ Arquivo: relatorios/receita_federal_${suffix}_${ANO_ARG}-${MES_ARG}.xlsx\n`);
+  console.log('\n  ✔️  Concluído.\n');
+})();
