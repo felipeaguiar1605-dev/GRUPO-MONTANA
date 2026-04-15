@@ -181,7 +181,7 @@ function buildEmpresaData(nomeEmpresa, cfg) {
       cnpj_tomador: nf.cnpj_tomador || '',
       competencia:  compFinal,
       ano_comp:     anoComp,
-      ja_tributado: jaTribt,
+      ja_tributado: jaTribt ? 'SIM' : 'NÃO',
       data_emissao: fmtD(nf.data_emissao),
       data_pagto:   fmtD(extrato.data_iso),
       tipo_match:   tipo,
@@ -416,11 +416,11 @@ async function gerarXlsxEmpresa(empData) {
     colsNf.forEach((c, ci) => {
       if (c.numFmt) { rr.getCell(ci+1).numFmt = c.numFmt; rr.getCell(ci+1).alignment = { horizontal: 'right' }; }
     });
-    const bg = r.ja_tributado ? COR.tributado_fundo : (i%2===0 ? COR.tributar_fundo : 'E1F5E3');
+    const bg = r.ja_tributado === 'SIM' ? COR.tributado_fundo : (i%2===0 ? COR.tributar_fundo : 'E1F5E3');
     applyRowStyle(rr, bg, 9);
     // Destaca coluna "Já Tributado?"
     const cellTribt = rr.getCell(8);
-    cellTribt.font = { bold: true, size: 9, name: 'Calibri', color: { argb: r.ja_tributado ? '7B6000' : '1B5E20' } };
+    cellTribt.font = { bold: true, size: 9, name: 'Calibri', color: { argb: r.ja_tributado === 'SIM' ? '7B6000' : '1B5E20' } };
     if (isNewContrato && i > 0) {
       // Linha separadora leve entre contratos
       rr.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'ECEFF1' } };
@@ -456,32 +456,32 @@ async function gerarXlsxEmpresa(empData) {
 
   // Agrupa por situação: tributar agora (2026) primeiro, depois já tributados (2025)
   const rowsOrdenados = [...rows].sort((a,b) => {
-    if (a.ja_tributado !== b.ja_tributado) return a.ja_tributado ? 1 : -1;
+    if (a.ja_tributado !== b.ja_tributado) return a.ja_tributado === 'SIM' ? 1 : -1;
     return (a.competencia||'').localeCompare(b.competencia||'') || (a.contrato_ref||'').localeCompare(b.contrato_ref||'');
   });
 
   let secaoAtual = null;
   rowsOrdenados.forEach((r, i) => {
-    const secao = r.ja_tributado ? 'JÁ TRIBUTADO' : 'TRIBUTAR AGORA';
+    const secao = r.ja_tributado === 'SIM' ? 'JÁ TRIBUTADO' : 'TRIBUTAR AGORA';
     if (secao !== secaoAtual) {
       secaoAtual = secao;
-      const rSec = wsCalc.addRow([r.ja_tributado
+      const rSec = wsCalc.addRow([r.ja_tributado === 'SIM'
         ? `── COMPETÊNCIA ANOS ANTERIORES — JÁ TRIBUTADO (imposto declarado em ${r.ano_comp || 'ano anterior'})`
         : `── COMPETÊNCIA ${ANO_ARG} — TRIBUTAR AGORA (incluir no DARF de ${MES_LABEL})`
       ]);
       wsCalc.mergeCells(`A${rSec.number}:M${rSec.number}`);
-      rSec.font   = { bold: true, size: 10, name: 'Calibri', color: { argb: r.ja_tributado ? '6B4F0C' : '1A5722' } };
-      rSec.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: r.ja_tributado ? 'FFF8E1' : 'E8F5E9' } };
+      rSec.font   = { bold: true, size: 10, name: 'Calibri', color: { argb: r.ja_tributado === 'SIM' ? '6B4F0C' : '1A5722' } };
+      rSec.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: r.ja_tributado === 'SIM' ? 'FFF8E1' : 'E8F5E9' } };
       rSec.height = 24;
     }
     const rr = wsCalc.addRow(colsCalc.map(c => r[c.key]));
     colsCalc.forEach((c, ci) => {
       if (c.numFmt) { rr.getCell(ci+1).numFmt = c.numFmt; rr.getCell(ci+1).alignment = { horizontal: 'right' }; }
     });
-    const bg = r.ja_tributado ? COR.tributado_fundo : (i%2===0 ? COR.tributar_fundo : 'E1F5E3');
+    const bg = r.ja_tributado === 'SIM' ? COR.tributado_fundo : (i%2===0 ? COR.tributar_fundo : 'E1F5E3');
     applyRowStyle(rr, bg, 9);
     const cellSit = rr.getCell(13);
-    cellSit.font = { bold: true, size: 9, name: 'Calibri', color: { argb: r.ja_tributado ? '7B6000' : '1B5E20' } };
+    cellSit.font = { bold: true, size: 9, name: 'Calibri', color: { argb: r.ja_tributado === 'SIM' ? '7B6000' : '1B5E20' } };
   });
 
   if (rows.length) addTotalRow(wsCalc, 'TOTAL GERAL', colsCalc, rows);
