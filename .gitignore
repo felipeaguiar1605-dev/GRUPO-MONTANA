@@ -47,3 +47,7 @@ desktop.ini
 
 # Build
 dist/
+
+# Python
+__pycache__/
+*.pyc
