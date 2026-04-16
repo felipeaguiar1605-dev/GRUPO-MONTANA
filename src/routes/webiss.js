@@ -620,6 +620,7 @@ const certUpload = multer({
 });
 
 router.post('/upload-cert', certUpload.single('cert'), (req, res) => {
+  if (req.user?.role !== 'admin') return res.status(403).json({ ok: false, error: 'Somente administradores podem enviar certificados' });
   if (!req.file) return res.status(400).json({ ok: false, error: 'Nenhum arquivo enviado' });
 
   // Valida que o .pfx pode ser lido com a senha fornecida (se informada)
@@ -636,6 +637,9 @@ router.post('/upload-cert', certUpload.single('cert'), (req, res) => {
     _updateEnv(`WEBISS_CERT_SENHA_${req.companyKey.toUpperCase()}`, senha);
   }
 
+  // Restringe permissões do arquivo (somente leitura pelo dono)
+  try { fs.chmodSync(req.file.path, 0o600); } catch (_) {}
+
   res.json({ ok: true, certPath: req.file.path, size: req.file.size });
 });
 
@@ -643,11 +647,13 @@ router.post('/upload-cert', certUpload.single('cert'), (req, res) => {
  * POST /webiss/config-senha — salva login/senha WebISS e senha do certificado no .env
  */
 router.post('/config-senha', (req, res) => {
-  const { login, senha_login, senha_cert } = req.body;
+  if (req.user?.role !== 'admin') return res.status(403).json({ ok: false, error: 'Somente administradores podem alterar credenciais' });
+  const { login, senha_login, senha_cert, inscricao_municipal } = req.body;
   const key = req.companyKey.toUpperCase();
-  if (login)       _updateEnv(`WEBISS_LOGIN_${key}`, login);
-  if (senha_login) _updateEnv(`WEBISS_SENHA_${key}`, senha_login);
-  if (senha_cert)  _updateEnv(`WEBISS_CERT_SENHA_${key}`, senha_cert);
+  if (login)                _updateEnv(`WEBISS_LOGIN_${key}`, login);
+  if (senha_login)          _updateEnv(`WEBISS_SENHA_${key}`, senha_login);
+  if (senha_cert)           _updateEnv(`WEBISS_CERT_SENHA_${key}`, senha_cert);
+  if (inscricao_municipal)  _updateEnv(`WEBISS_INSC_${key}`, inscricao_municipal);
   res.json({ ok: true });
 });
 

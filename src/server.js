@@ -8,6 +8,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const compression = require('compression');
+const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
 // ── Log de erros em arquivo ───────────────────────────────────
@@ -20,6 +21,30 @@ const { authMiddleware, loginHandler } = require('./auth');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
+
+// ── Headers de segurança (Helmet) ────────────────────────────
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc:  ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+      styleSrc:   ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
+      fontSrc:    ["'self'", "https://fonts.gstatic.com", "https://cdn.jsdelivr.net"],
+      imgSrc:     ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false, // permite carregar CDNs
+}));
+
+// ── Forçar HTTPS em produção (trust proxy p/ Nginx/LB) ──────
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+  app.use((req, res, next) => {
+    if (req.secure || req.headers['x-forwarded-proto'] === 'https') return next();
+    return res.redirect(301, `https://${req.headers.host}${req.url}`);
+  });
+}
 
 // ── Compressão gzip/brotli em todas as respostas ──────────────
 app.use(compression());
@@ -34,6 +59,26 @@ const importLimiter = rateLimit({
 });
 app.use('/api/import', importLimiter);
 
+// ── Rate limit em endpoints sensíveis (login, config) ────────
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 min
+  max: 15,
+  message: { error: 'Muitas tentativas. Aguarde 15 minutos.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/auth/login', authLimiter);
+
+const configLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  message: { error: 'Muitas requisições de configuração. Aguarde 1 minuto.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/webiss/upload-cert', configLimiter);
+app.use('/api/webiss/config-senha', configLimiter);
+
 // Pre-carrega todos os bancos no startup
 for (const key of Object.keys(COMPANIES)) {
   try { getDb(key); } catch (e) { console.error(`  ⚠ DB [${key}]:`, e.message); }
@@ -43,10 +88,15 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// CORS — restrito a localhost (app local, sem acesso externo)
+// CORS — origens permitidas (localhost + domínio de produção)
 app.use((req, res, next) => {
   const origin = req.headers.origin || '';
-  if (!origin || /^https?:\/\/localhost(:\d+)?$/.test(origin) || /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin) || /^https?:\/\/104\.196\.22\.170(:\d+)?$/.test(origin)) {
+  const ALLOWED_DOMAIN = process.env.ALLOWED_ORIGIN || ''; // ex: https://erp.grupomontana.com.br
+  const allowed = !origin
+    || /^https?:\/\/localhost(:\d+)?$/.test(origin)
+    || /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)
+    || (ALLOWED_DOMAIN && origin === ALLOWED_DOMAIN);
+  if (allowed) {
     res.header('Access-Control-Allow-Origin', origin || '*');
   }
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
