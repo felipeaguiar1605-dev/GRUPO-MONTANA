@@ -33,6 +33,35 @@ module.exports = {
       // Graceful shutdown
       kill_timeout       : 5000,
       listen_timeout     : 8000,
+    },
+    {
+      name        : 'montana-intelligence',
+      script      : 'montana_intelligence/server.py',
+      interpreter : 'python3',
+      args        : '--port 8001',
+      cwd         : '/opt/montana/app_unificado',
+      instances   : 1,
+      exec_mode   : 'fork',
+      watch       : false,
+      max_memory_restart: '256M',
+
+      env: {
+        PYTHONUNBUFFERED: '1',
+      },
+
+      // Logs
+      out_file    : '/opt/montana/logs/mcp-out.log',
+      error_file  : '/opt/montana/logs/mcp-err.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+      merge_logs  : true,
+
+      // Restart automático
+      restart_delay      : 3000,
+      max_restarts       : 10,
+      min_uptime         : '10s',
+
+      kill_timeout       : 5000,
+      listen_timeout     : 8000,
     }
   ]
 };

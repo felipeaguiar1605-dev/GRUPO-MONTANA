@@ -1,4 +1,4 @@
-name: Deploy Montana App
+name: Deploy Montana App + Intelligence
 
 on:
   push:
@@ -6,6 +6,7 @@ on:
     paths:
       - 'src/**'
       - 'public/**'
+      - 'montana_intelligence/**'
       - 'package.json'
       - 'ecosystem.config.js'
 
@@ -29,13 +30,23 @@ jobs:
         run: |
           scp -i ~/.ssh/id_montana -r src/     diretoria@104.196.22.170:/opt/montana/app_unificado/
           scp -i ~/.ssh/id_montana -r public/  diretoria@104.196.22.170:/opt/montana/app_unificado/
+          scp -i ~/.ssh/id_montana -r montana_intelligence/ diretoria@104.196.22.170:/opt/montana/app_unificado/
           scp -i ~/.ssh/id_montana    package.json diretoria@104.196.22.170:/opt/montana/app_unificado/
           scp -i ~/.ssh/id_montana    ecosystem.config.js diretoria@104.196.22.170:/opt/montana/app_unificado/
 
-      - name: Instalar dependências e reiniciar
+      - name: Instalar dependências Node e reiniciar App
         run: |
           ssh -i ~/.ssh/id_montana diretoria@104.196.22.170 \
             "cd /opt/montana/app_unificado && npm install --production 2>&1 | tail -3 && pm2 restart montana-app"
+
+      - name: Instalar dependências Python e reiniciar MCP Server
+        run: |
+          ssh -i ~/.ssh/id_montana diretoria@104.196.22.170 \
+            "pip3 install fastapi uvicorn pydantic --break-system-packages -q 2>&1 | tail -2 && \
+             cd /opt/montana/app_unificado && python3 montana_intelligence/etl.py && \
+             (pm2 show montana-intelligence > /dev/null 2>&1 && pm2 restart montana-intelligence || \
+              pm2 start montana_intelligence/server.py --interpreter python3 --name montana-intelligence -- --port 8001) && \
+             pm2 save"
 
       - name: Verificar status
         run: |
