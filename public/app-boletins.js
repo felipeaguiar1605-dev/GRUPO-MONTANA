@@ -39,6 +39,9 @@ function renderBolLista() {
 
   // KPIs
   const ativos = _bolContratos.filter(c => c.ativo).length;
+  const inativos = _bolContratos.length - ativos;
+  if (!window._bolFiltroStatus) window._bolFiltroStatus = 'ATIVOS';
+  const fs = window._bolFiltroStatus;
   let kpisHtml = `
     <div class="kpi-row" style="margin-bottom:16px">
       <div class="kpi-card" style="border-left:4px solid #2563eb">
@@ -49,6 +52,10 @@ function renderBolLista() {
         <div class="kpi-v" style="color:#15803d">${ativos}</div>
         <div class="kpi-l">Ativos</div>
       </div>
+      <div class="kpi-card" style="border-left:4px solid #ef4444">
+        <div class="kpi-v" style="color:#dc2626">${inativos}</div>
+        <div class="kpi-l">Encerrados</div>
+      </div>
     </div>
   `;
 
@@ -56,7 +63,14 @@ function renderBolLista() {
   let tableHtml = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <h3 style="margin:0;font-size:16px">📋 Contratos de Vigilância</h3>
-      <button class="btn btn-primary" onclick="bolNovoContrato()">+ Novo Contrato</button>
+      <div style="display:flex;gap:6px;align-items:center">
+        <div class="btn-group" style="display:flex;gap:0">
+          <button class="btn btn-sm${fs==='ATIVOS'?' btn-primary':''}" onclick="window._bolFiltroStatus='ATIVOS';renderBolLista()">Ativos</button>
+          <button class="btn btn-sm${fs==='TODOS'?' btn-primary':''}" onclick="window._bolFiltroStatus='TODOS';renderBolLista()">Todos</button>
+          <button class="btn btn-sm${fs==='ENCERRADOS'?' btn-primary':''}" onclick="window._bolFiltroStatus='ENCERRADOS';renderBolLista()">Encerrados</button>
+        </div>
+        <button class="btn btn-primary" onclick="bolNovoContrato()">+ Novo Contrato</button>
+      </div>
     </div>
     <table class="tbl">
       <thead><tr>
@@ -76,15 +90,22 @@ function renderBolLista() {
     </td></tr>`;
   }
 
-  for (const c of _bolContratos) {
+  const filtered = _bolContratos.filter(c => {
+    if (fs === 'ATIVOS') return c.ativo;
+    if (fs === 'ENCERRADOS') return !c.ativo;
+    return true;
+  });
+
+  for (const c of filtered) {
     const statusBadge = c.ativo
       ? '<span class="badge badge-ok">Ativo</span>'
       : '<span class="badge badge-warn">Inativo</span>';
+    const postosCount = (c.postos || []).length;
     tableHtml += `<tr>
       <td><a href="#" onclick="bolAbrirContrato(${c.id});return false" style="color:#2563eb;font-weight:600">${c.nome}</a></td>
       <td>${c.contratante}</td>
       <td>${c.numero_contrato}</td>
-      <td style="text-align:center">—</td>
+      <td style="text-align:center">${postosCount || '—'}</td>
       <td>${statusBadge}</td>
       <td>
         <button class="btn btn-sm" onclick="bolGerarBoletim(${c.id})" title="Gerar Boletim">📄 Gerar</button>
