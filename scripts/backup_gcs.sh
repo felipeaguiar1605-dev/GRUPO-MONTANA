@@ -6,12 +6,12 @@
 
 PROJECT="propane-highway-492418-d0"
 BUCKET="gs://montana-backups"
-APP_DIR="/home/diretoria/montana"
-LOG="$APP_DIR/logs/backup.log"
+APP_DIR="/opt/montana/app_unificado"
+LOG="/opt/montana/logs/backup_gcs.log"
 DATE=$(date +%Y-%m-%d)
 HOUR=$(date +%H%M)
 
-mkdir -p "$APP_DIR/logs"
+mkdir -p /opt/montana/logs
 echo "=== BACKUP $DATE $HOUR ===" >> "$LOG"
 
 EMPRESAS=("assessoria" "seguranca" "portodovau" "mustang")

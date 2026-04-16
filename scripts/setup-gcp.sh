@@ -1,6 +1,11 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════
 #  Montana App — Setup inicial do servidor GCP
+#  Instância: montana-app  |  Zona: us-east1-b
+#  Projeto:   propane-highway-492418-d0
+#  IP:        104.196.22.170
+#  Domínio:   sistema.grupomontanasec.com
+#
 #  Execute UMA VEZ após criar a VM:
 #    chmod +x setup-gcp.sh && sudo bash setup-gcp.sh
 # ═══════════════════════════════════════════════════════════════════
@@ -47,7 +52,7 @@ echo "▶ Configurando Nginx..."
 cat > /etc/nginx/sites-available/montana << 'NGINX'
 server {
     listen 80;
-    server_name _;   # substitua pelo domínio: app.grupomontanasec.com.br
+    server_name sistema.grupomontanasec.com;
 
     # Logs
     access_log /var/log/nginx/montana-access.log;
@@ -122,5 +127,5 @@ echo "  Próximos passos:"
 echo "  1. Envie o código:  bash deploy.sh"
 echo "  2. Inicie o app:    cd /opt/montana/app_unificado && npm install && pm2 start ecosystem.config.js"
 echo "  3. Configure PM2:   pm2 save && pm2 startup"
-echo "  4. SSL (opcional):  certbot --nginx -d app.grupomontanasec.com.br"
+echo "  4. SSL (opcional):  bash /opt/montana/app_unificado/scripts/setup-ssl.sh"
 echo "═══════════════════════════════════════════"

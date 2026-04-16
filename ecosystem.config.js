@@ -1,4 +1,5 @@
 // PM2 Ecosystem Config — Montana App Unificado
+// GCP: montana-app | us-east1-b | propane-highway-492418-d0
 // Uso: pm2 start ecosystem.config.js
 //      pm2 save   (persiste após reinício do servidor)
 //      pm2 startup (configura inicio automático no boot)

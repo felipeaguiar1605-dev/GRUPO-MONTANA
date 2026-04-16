@@ -43,10 +43,16 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// CORS — restrito a localhost (app local, sem acesso externo)
+// CORS — localhost + IP do servidor GCP + domínio de produção
+const ALLOWED_ORIGINS = [
+  /^https?:\/\/localhost(:\d+)?$/,
+  /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+  /^https?:\/\/104\.196\.22\.170(:\d+)?$/,
+  /^https:\/\/sistema\.grupomontanasec\.com$/,
+];
 app.use((req, res, next) => {
   const origin = req.headers.origin || '';
-  if (!origin || /^https?:\/\/localhost(:\d+)?$/.test(origin) || /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin) || /^https?:\/\/104\.196\.22\.170(:\d+)?$/.test(origin)) {
+  if (!origin || ALLOWED_ORIGINS.some(r => r.test(origin))) {
     res.header('Access-Control-Allow-Origin', origin || '*');
   }
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
