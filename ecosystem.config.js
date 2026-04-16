@@ -35,19 +35,14 @@ module.exports = {
       listen_timeout     : 8000,
     },
     {
-      name        : 'montana-intelligence',
-      script      : 'montana_intelligence/server.py',
-      interpreter : 'python3',
-      args        : '--port 8001',
-      cwd         : '/opt/montana/app_unificado',
+      name        : 'montana-mcp',
+      script      : 'mcp_server.py',
+      interpreter : '/usr/bin/python3',
+      cwd         : '/opt/montana/mcp-server',
       instances   : 1,
       exec_mode   : 'fork',
       watch       : false,
       max_memory_restart: '256M',
-
-      env: {
-        PYTHONUNBUFFERED: '1',
-      },
 
       // Logs
       out_file    : '/opt/montana/logs/mcp-out.log',

@@ -1,4 +1,4 @@
-name: Deploy Montana App + Intelligence
+name: Deploy Montana App + MCP Server
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
     paths:
       - 'src/**'
       - 'public/**'
-      - 'montana_intelligence/**'
+      - 'mcp-server/**'
       - 'package.json'
       - 'ecosystem.config.js'
 
@@ -26,27 +26,25 @@ jobs:
           chmod 600 ~/.ssh/id_montana
           ssh-keyscan -H 104.196.22.170 >> ~/.ssh/known_hosts
 
-      - name: Enviar código para o servidor
+      - name: Enviar App Montana
         run: |
           scp -i ~/.ssh/id_montana -r src/     diretoria@104.196.22.170:/opt/montana/app_unificado/
           scp -i ~/.ssh/id_montana -r public/  diretoria@104.196.22.170:/opt/montana/app_unificado/
-          scp -i ~/.ssh/id_montana -r montana_intelligence/ diretoria@104.196.22.170:/opt/montana/app_unificado/
           scp -i ~/.ssh/id_montana    package.json diretoria@104.196.22.170:/opt/montana/app_unificado/
           scp -i ~/.ssh/id_montana    ecosystem.config.js diretoria@104.196.22.170:/opt/montana/app_unificado/
 
-      - name: Instalar dependências Node e reiniciar App
+      - name: Enviar MCP Server
         run: |
-          ssh -i ~/.ssh/id_montana diretoria@104.196.22.170 \
-            "cd /opt/montana/app_unificado && npm install --production 2>&1 | tail -3 && pm2 restart montana-app"
+          ssh -i ~/.ssh/id_montana diretoria@104.196.22.170 "mkdir -p /opt/montana/mcp-server"
+          scp -i ~/.ssh/id_montana mcp-server/mcp_server.py diretoria@104.196.22.170:/opt/montana/mcp-server/
+          scp -i ~/.ssh/id_montana mcp-server/requirements.txt diretoria@104.196.22.170:/opt/montana/mcp-server/
 
-      - name: Instalar dependências Python e reiniciar MCP Server
+      - name: Instalar dependências e reiniciar
         run: |
           ssh -i ~/.ssh/id_montana diretoria@104.196.22.170 \
-            "pip3 install fastapi uvicorn pydantic --break-system-packages -q 2>&1 | tail -2 && \
-             cd /opt/montana/app_unificado && python3 montana_intelligence/etl.py && \
-             (pm2 show montana-intelligence > /dev/null 2>&1 && pm2 restart montana-intelligence || \
-              pm2 start montana_intelligence/server.py --interpreter python3 --name montana-intelligence -- --port 8001) && \
-             pm2 save"
+            "cd /opt/montana/app_unificado && npm install --production 2>&1 | tail -3 && pm2 restart montana-app && \
+             pip3 install -r /opt/montana/mcp-server/requirements.txt --break-system-packages -q 2>&1 | tail -2 && \
+             pm2 restart montana-mcp && pm2 save"
 
       - name: Verificar status
         run: |
