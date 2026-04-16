@@ -71,9 +71,12 @@ console.log('\n─── 1. CBMTO Limpeza (Assessoria id=17) ───');
 encerrarContrato(17, 'Contrato de limpeza encerrado — apenas Segurança permanece no CBMTO');
 
 // Remover parcela mar/26 FUTURO
-const parcelasFuturo = db.prepare(
-  "SELECT id, competencia, status FROM parcelas WHERE contrato_id = 17 AND status = 'FUTURO'"
-).all();
+// parcelas usa contrato_num (FK para contratos.numContrato), não contrato_id
+const cbmContrato = db.prepare('SELECT numContrato FROM contratos WHERE id = 17').get();
+const cbmNum = cbmContrato?.numContrato || '';
+const parcelasFuturo = cbmNum
+  ? db.prepare("SELECT id, competencia, status FROM parcelas WHERE contrato_num = ? AND status = 'FUTURO'").all(cbmNum)
+  : [];
 if (parcelasFuturo.length > 0) {
   console.log(`\n     Parcelas FUTURO encontradas: ${parcelasFuturo.length}`);
   for (const p of parcelasFuturo) {
