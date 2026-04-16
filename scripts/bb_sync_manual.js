@@ -1,8 +1,8 @@
 'use strict';
 /**
- * Sync manual de extratos BB — Montana Segurança
- * Uso: node scripts/bb_sync_manual.js [dias] (padrão: 90)
- * Ex:  node scripts/bb_sync_manual.js 180
+ * Sync manual de extratos BB
+ * Uso: node scripts/bb_sync_manual.js [dias] [--empresa=seguranca|assessoria] (padrão: 90 dias / seguranca)
+ * Ex:  node scripts/bb_sync_manual.js 180 --empresa=assessoria
  */
 const path  = require('path');
 const https = require('https');
@@ -10,7 +10,13 @@ const fs    = require('fs');
 const Database = require('better-sqlite3');
 
 const ROOT = path.join(__dirname, '..');
-const db   = new Database(path.join(ROOT, 'data', 'seguranca', 'montana.db'));
+const empresaArg = (process.argv.find(a => a.startsWith('--empresa=')) || '--empresa=seguranca').split('=')[1];
+if (!['assessoria','seguranca'].includes(empresaArg)) {
+  console.error(`Empresa inválida: ${empresaArg}. Use --empresa=assessoria ou --empresa=seguranca`);
+  process.exit(1);
+}
+const db   = new Database(path.join(ROOT, 'data', empresaArg, 'montana.db'));
+const EMPRESA_NOME = empresaArg === 'assessoria' ? 'Montana Assessoria' : 'Montana Segurança';
 
 const get = k => db.prepare('SELECT valor FROM configuracoes WHERE chave=?').get(k)?.valor || '';
 
@@ -24,7 +30,8 @@ const cfg = {
   key_path:      get('bb_key_path'),
 };
 
-const DIAS = parseInt(process.argv[2] || '90', 10);
+const diasArg = process.argv.slice(2).find(a => !a.startsWith('--') && /^\d+$/.test(a));
+const DIAS = parseInt(diasArg || '90', 10);
 const hoje  = new Date();
 const ini   = new Date(hoje); ini.setDate(ini.getDate() - DIAS);
 const fmt   = d => d.toISOString().split('T')[0];
@@ -54,7 +61,7 @@ function httpsReq(urlStr, { method = 'GET', headers = {}, body = null, cert, key
 }
 
 async function main() {
-  console.log(`\n  🏦 BB Sync — Montana Segurança`);
+  console.log(`\n  🏦 BB Sync — ${EMPRESA_NOME}`);
   console.log(`  Período: ${dataInicio} → ${dataFim} (${DIAS} dias)\n`);
 
   // 1. OAuth

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "montana": {
+      "command": "python3",
+      "args": [
+        "/opt/montana/app_unificado/montana_intelligence/server.py",
+        "--stdio"
+      ],
+      "env": {
+        "MONTANA_TOKEN": "SUBSTITUIR_PELO_TOKEN_DO_SETUP"
+      }
+    }
+  }
+}

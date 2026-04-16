@@ -37,6 +37,12 @@ const EMPRESAS = {
     cnpj: '14.092.519/0001-51',
     db:   path.join(__dirname, '../data/assessoria/montana.db'),
     simples_cnpjs: new Set(['32062391000165','39775237000180']), // Nevada, Montreal
+    regime: 'Lucro Real — Não Cumulativo',
+    pis_aliq:    0.0165,   // 1,65%
+    cofins_aliq: 0.0760,   // 7,60%
+    darf_pis:    '6912',   // PIS não-cumulativo
+    darf_cofins: '5856',   // COFINS não-cumulativo
+    gera_credito_fornecedor: true,   // pode creditar PIS/COFINS de fornecedores não-Simples
   },
   seguranca: {
     key:  'seguranca',
@@ -44,6 +50,12 @@ const EMPRESAS = {
     cnpj: '19.200.109/0001-09',
     db:   path.join(__dirname, '../data/seguranca/montana.db'),
     simples_cnpjs: new Set(),
+    regime: 'Lucro Real Anual — Cumulativo',
+    pis_aliq:    0.0065,   // 0,65%
+    cofins_aliq: 0.03,     // 3,00%
+    darf_pis:    '8109',   // PIS cumulativo
+    darf_cofins: '2172',   // COFINS cumulativo
+    gera_credito_fornecedor: false,  // cumulativo → não há crédito de PIS/COFINS
   },
 };
 
@@ -246,8 +258,8 @@ async function gerarRelatorio(empresa) {
     return acc;
   }, {inss:0,ir:0,iss:0,csll:0,pis:0,cofins:0,total:0});
 
-  const pisBruto    = +(sumNFsPagasBruto * 0.0165).toFixed(2);
-  const cofinsBruto = +(sumNFsPagasBruto * 0.076).toFixed(2);
+  const pisBruto    = +(sumNFsPagasBruto * empresa.pis_aliq).toFixed(2);
+  const cofinsBruto = +(sumNFsPagasBruto * empresa.cofins_aliq).toFixed(2);
   const pisLiq      = Math.max(+(pisBruto  - ret.pis).toFixed(2), 0);
   const cofinsLiq   = Math.max(+(cofinsBruto - ret.cofins).toFixed(2), 0);
 
@@ -316,7 +328,7 @@ async function gerarRelatorio(empresa) {
 
   ws1.mergeCells(r,1,r,4);
   const rCell = ws1.getRow(r).getCell(1);
-  rCell.value = `Regime: Lucro Real — Não Cumulativo  |  PIS 1,65% + COFINS 7,60%  |  Base: NFs PAGAS em ${COMP_LABEL} — Lei 10.833/2003 art. 10 §2°${usouTodasNFs ? '  |  ⚠️ Sem conciliação — NFs emitidas usadas como proxy' : ''}`;
+  rCell.value = `Regime: ${empresa.regime}  |  PIS ${(empresa.pis_aliq*100).toFixed(2).replace('.',',')}% + COFINS ${(empresa.cofins_aliq*100).toFixed(2).replace('.',',')}%  |  Base: NFs PAGAS em ${COMP_LABEL} — Lei 10.833/2003 art. 10 §2°${usouTodasNFs ? '  |  ⚠️ Sem conciliação — NFs emitidas usadas como proxy' : ''}`;
   rCell.font  = {size:9, italic:true, color:{argb:GRAY}};
   rCell.alignment = {horizontal:'center'};
   ws1.getRow(r).height = 18; r += 2;
@@ -375,7 +387,7 @@ async function gerarRelatorio(empresa) {
   setCell(ws1,r,2,'',null,LGRAY); setMoney(ws1,r,3,ret.total,LGRAY,GRAY,true); setCell(ws1,r,4,'',null,LGRAY); r+=2;
 
   // Apuração
-  hdrRow(ws1,r,['APURAÇÃO PIS/COFINS PRÓPRIOS','PIS 1,65% (R$)','COFINS 7,60% (R$)','Total (R$)'],GREEN,WHITE); r++;
+  hdrRow(ws1,r,['APURAÇÃO PIS/COFINS PRÓPRIOS',`PIS ${(empresa.pis_aliq*100).toFixed(2).replace('.',',')}% (R$)`,`COFINS ${(empresa.cofins_aliq*100).toFixed(2).replace('.',',')}% (R$)`,'Total (R$)'],GREEN,WHITE); r++;
   [
     [`Base — NFs pagas em ${COMP_LABEL}`, sumNFsPagasBruto, sumNFsPagasBruto, sumNFsPagasBruto],
     ['(×) Alíquota',                      pisBruto, cofinsBruto, pisBruto+cofinsBruto],
@@ -387,7 +399,7 @@ async function gerarRelatorio(empresa) {
     setMoney(ws1,r,2,p,bg,fc,isT); setMoney(ws1,r,3,c,bg,fc,isT); setMoney(ws1,r,4,tot,bg,fc,isT); r++;
   });
   if (pisLiq>0||cofinsLiq>0) {
-    setCell(ws1,r,1,'  Código DARF — PIS: 6912  |  COFINS: 2172',null,LGREEN,GREEN);
+    setCell(ws1,r,1,`  Código DARF — PIS: ${empresa.darf_pis}  |  COFINS: ${empresa.darf_cofins}`,null,LGREEN,GREEN);
     setCell(ws1,r,2,'',null,LGREEN); setCell(ws1,r,3,'',null,LGREEN); setCell(ws1,r,4,'',null,LGREEN); r++;
   }
   r++;
@@ -398,12 +410,17 @@ async function gerarRelatorio(empresa) {
     ws1.mergeCells(r,1,r,4); setCell(ws1,r,1,'  Nenhuma despesa registrada no período',null,LGRAY,GRAY); r++;
   } else {
     fornOrdenados.forEach(f => {
-      const bg  = f.isSimples ? LRED   : LGREEN;
-      const fc  = f.isSimples ? RED    : GREEN;
+      // No regime cumulativo (Segurança) NENHUM fornecedor gera crédito PIS/COFINS
+      const geraCredito = empresa.gera_credito_fornecedor && !f.isSimples;
+      const bg  = geraCredito ? LGREEN : LRED;
+      const fc  = geraCredito ? GREEN  : RED;
+      const motivo = !empresa.gera_credito_fornecedor
+        ? '❌ NÃO — regime cumulativo'
+        : (f.isSimples ? '❌ NÃO — art. 23 LC 123/2006' : '✅ Verificar NF');
       setCell(ws1,r,1,`  ${f.nome}  (CNPJ ${f.cnpj||'—'})`,null,bg,fc);
       setCell(ws1,r,2,f.isSimples?'Simples Nacional':'Verificar',null,bg,fc);
       setMoney(ws1,r,3,f.total,bg,fc);
-      setCell(ws1,r,4,f.isSimples?'❌ NÃO — art. 23 LC 123/2006':'✅ Verificar NF',null,bg,fc,true); r++;
+      setCell(ws1,r,4,motivo,null,bg,fc,true); r++;
     });
   }
   ws1.mergeCells(r,1,r,4);
