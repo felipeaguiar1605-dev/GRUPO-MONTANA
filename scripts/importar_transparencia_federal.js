@@ -146,30 +146,33 @@ async function buscarNotas(cnpj, ano) {
 
 async function buscarDespesas(cnpj, ano) {
   console.log(`  💰 Despesas por favorecido ${ano}:`);
-  // 403 em alguns endpoints — tenta alternativas
+  // endpoint agregado — retorna totais por fase/orgao para o ano todo
   const regs = await paginar(pg => `/api-de-dados/despesas/por-favorecido?cpfCnpj=${cnpj}&ano=${ano}&pagina=${pg}`);
   console.log(`    ${regs.length} despesas totalizadas.`);
   return regs;
 }
 
-async function buscarDocumentos(cnpj, ano) {
-  console.log(`  📄 Documentos de despesa ${ano} (empenho/liq/pgto):`);
-  // /despesas/documentos exige `dataEmissao` — itera mês a mês
+async function buscarDocumentos(cnpj, ano, db) {
+  console.log(`  📄 Documentos de despesa ${ano} (empenho/liquidação/pagamento):`);
+  // Endpoint correto: /despesas/documentos-por-favorecido
+  //   codigoPessoa (CNPJ) + fase (1=EMP, 2=LIQ, 3=PAG) + ano + pagina
   const todos = [];
-  for (let m = 1; m <= 12; m++) {
-    const dtIni = `01/${String(m).padStart(2,'0')}/${ano}`;
-    const lastDay = new Date(parseInt(ano), m, 0).getDate();
-    const dtFim = `${lastDay}/${String(m).padStart(2,'0')}/${ano}`;
-    const path = `/api-de-dados/despesas/documentos?codigoPessoaJuridica=${cnpj}&dataEmissaoInicio=${dtIni}&dataEmissaoFim=${dtFim}&pagina=1`;
-    const { err, data } = await getJson(path);
-    if (err) { console.log(`    ⚠️ ${m}/${ano}: ${err}`); continue; }
-    if (Array.isArray(data) && data.length) {
-      todos.push(...data);
-      console.log(`    ${String(m).padStart(2,'0')}/${ano}: ${data.length} docs`);
-    }
-    await new Promise(r => setTimeout(r, 2100));
+  const FASES = [
+    { id: 1, nome: 'Empenho' },
+    { id: 2, nome: 'Liquidação' },
+    { id: 3, nome: 'Pagamento' },
+  ];
+  for (const f of FASES) {
+    const regs = await paginar(
+      pg => `/api-de-dados/despesas/documentos-por-favorecido?codigoPessoa=${cnpj}&fase=${f.id}&ano=${ano}&pagina=${pg}`,
+      100
+    );
+    // anota a fase diretamente nos registros (a API já devolve, mas garantimos)
+    regs.forEach(r => { r._fase_id = f.id; r._fase_nome = f.nome; });
+    todos.push(...regs);
+    console.log(`    ${f.nome.padEnd(12)} ${regs.length} docs`);
   }
-  console.log(`    Total: ${todos.length} documentos.`);
+  console.log(`    Total: ${todos.length} documentos (${ano}).`);
   return todos;
 }
 
@@ -232,7 +235,26 @@ function persistirContratos(db, contratos) {
   return inseridos;
 }
 
-function persistirDocumentos(db, documentos) {
+function dmy2iso(dmy) {
+  if (!dmy) return '';
+  const m = String(dmy).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : String(dmy);
+}
+
+function parseValorBR(v) {
+  if (v === null || v === undefined) return 0;
+  if (typeof v === 'number') return v;
+  // "12.733,81" → 12733.81 | "1.234.567,89" → 1234567.89
+  const s = String(v).replace(/\./g, '').replace(',', '.').replace(/[^\d\.\-]/g, '');
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
+function persistirDocumentos(db, documentos, cnpjFavorecido) {
+  // Garante índice/coluna auxiliar
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_pp_fornec ON pagamentos_portal(cnpj);`);
+  } catch (_) {}
   const stmt = db.prepare(`
     INSERT OR IGNORE INTO pagamentos_portal
       (portal, gestao, fornecedor, cnpj, cnpj_raiz, empenho,
@@ -244,23 +266,32 @@ function persistirDocumentos(db, documentos) {
   let inseridos = 0;
   db.transaction(() => {
     for (const d of documentos) {
-      const cnpj = (d.favorecido?.cnpjFormatado || d.favorecido?.codigo || '').replace(/\D/g, '');
-      const valorPago = Number(d.valor || d.valorPago || 0);
+      // favorecido vem como string ou objeto dependendo do endpoint
+      const cnpj = cnpjFavorecido ||
+        (typeof d.favorecido === 'string'
+          ? (d.favorecido.match(/\d{14}/) || [d.favorecido.replace(/\D/g,'').substring(0,14)])[0]
+          : (d.favorecido?.codigo || d.favorecido?.cnpjFormatado || '').replace(/\D/g, ''));
+      const valor = parseValorBR(d.valor || d.valorDocumento || d.valorEmpenho || 0);
+      const dataIso = dmy2iso(d.data);
+      const fase = d._fase_nome || d.fase || '';
+      // Distribui data por fase
+      const dtEmp = fase === 'Empenho' ? dataIso : '';
+      const dtLiq = fase === 'Liquidação' ? dataIso : '';
+      const dtPg  = fase === 'Pagamento' ? dataIso : '';
       const hash = crypto.createHash('md5')
-        .update(`federal|${d.documentoResumido || d.numero || ''}|${d.data || ''}|${valorPago}|${cnpj}`)
+        .update(`federal|${fase}|${d.documento || d.documentoResumido || ''}|${dataIso}|${valor}|${cnpj}`)
         .digest('hex');
       const r = stmt.run({
-        gestao: d.unidadeGestora?.nome || d.orgao?.nome || '',
-        fornecedor: d.favorecido?.nome || '',
+        gestao:     d.unidadeGestora || d.orgao || d.orgaoSuperior || '',
+        fornecedor: typeof d.favorecido === 'string' ? d.favorecido : (d.favorecido?.nome || ''),
         cnpj, cnpj_raiz: cnpj.substring(0, 8),
-        empenho: d.documentoResumido || d.numero || '',
-        dtEmp: d.dataEmissao || '',
-        dtLiq: d.dataLiquidacao || '',
-        dtPg:  d.data || d.dataPagamento || '',
-        valor: valorPago,
-        elemento: d.elementoDespesa?.descricao || d.elementoDespesa?.codigo || '',
-        fonte:    d.fonteDeRecursos?.descricao || d.fonteDeRecursos?.codigo || '',
-        hash, raw: JSON.stringify(d),
+        empenho:   d.documentoResumido || d.documento || '',
+        dtEmp, dtLiq, dtPg,
+        valor,
+        elemento:  d.elementoDespesa || '',
+        fonte:     d.fonteRecurso || d.fonteDeRecursos || '',
+        hash,
+        raw:       JSON.stringify(d),
       });
       if (r.changes > 0) inseridos++;
     }
@@ -291,7 +322,7 @@ async function main() {
       if (secao === 'contratos')  resultados.contratos  = await buscarContratos(cnpjArg);
       if (secao === 'notas')      resultados.notas      = await buscarNotas(cnpjArg, anoArg);
       if (secao === 'despesas')   resultados.despesas   = await buscarDespesas(cnpjArg, anoArg);
-      if (secao === 'documentos') resultados.documentos = await buscarDocumentos(cnpjArg, anoArg);
+      if (secao === 'documentos') resultados.documentos = await buscarDocumentos(cnpjArg, anoArg, db);
     } catch (e) {
       console.log(`  ❌ Erro em ${secao}: ${e.message}`);
     }
@@ -325,7 +356,7 @@ async function main() {
       console.log(`\n  ✅ Contratos upserted: ${n}`);
     }
     if (resultados.documentos?.length) {
-      const n = persistirDocumentos(db, resultados.documentos);
+      const n = persistirDocumentos(db, resultados.documentos, cnpjArg);
       console.log(`  ✅ Documentos → pagamentos_portal: ${n} novos (ignorados dup: ${resultados.documentos.length - n})`);
       totInseridos += n;
     }
