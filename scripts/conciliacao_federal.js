@@ -58,10 +58,14 @@ function main() {
     WHERE portal='federal' AND data_pagamento_iso <> '' AND valor_pago > 0 ${whereAno}
     ORDER BY data_pagamento_iso, valor_pago DESC
   `).all();
-  const obs       = obsAll.filter(r => !String(r.empenho).match(/DF\d/));
-  const retencoes = obsAll.filter(r =>  String(r.empenho).match(/DF\d/));
-  console.log(`  OBs a conciliar: ${obs.length} (R$ ${fmt(obs.reduce((a, r) => a + r.valor_pago, 0))})`);
-  console.log(`  Retenções DF (excluídas — vão para cofres públicos): ${retencoes.length} (R$ ${fmt(retencoes.reduce((a, r) => a + r.valor_pago, 0))})\n`);
+  // EXCLUI DF (retenções IR/INSS/PIS/COFINS) e DR (DARFs de IR sobre rendimentos)
+  // Ambos são recolhidos diretamente pelo Tesouro/UG; nunca tocam contas da empresa.
+  const obs           = obsAll.filter(r => !String(r.empenho).match(/D[FR]\d/));
+  const retencoesDF   = obsAll.filter(r =>  String(r.empenho).match(/DF\d/));
+  const retencoesDR   = obsAll.filter(r =>  String(r.empenho).match(/DR\d/));
+  console.log(`  OBs principais (pagamentos efetivos): ${obs.length} (R$ ${fmt(obs.reduce((a, r) => a + r.valor_pago, 0))})`);
+  console.log(`  DF retenções tributárias (Tesouro): ${retencoesDF.length} (R$ ${fmt(retencoesDF.reduce((a, r) => a + r.valor_pago, 0))})`);
+  console.log(`  DR DARF IR rendimentos (Tesouro):   ${retencoesDR.length} (R$ ${fmt(retencoesDR.reduce((a, r) => a + r.valor_pago, 0))})\n`);
 
   // Puxa extratos dedupados + indexa por chave
   const extRaw = db.prepare(`
@@ -70,11 +74,43 @@ function main() {
     WHERE credito > 0 ${anoFilter ? ` AND substr(data_iso,1,4)='${anoFilter}'` : ''}
     GROUP BY data_iso, credito, historico
   `).all();
-  console.log(`  Extratos candidatos (dedupados): ${extRaw.length}\n`);
+  // PLUS: extratos da conta vinculada
+  //   - Para OBs comuns: bater com CRÉDITOS (depósitos do tomador / rendimentos)
+  //   - Para DR (retenções/resgates): bater com DÉBITOS (resgate na conta vinculada)
+  let extVincC = [], extVincD = [];
+  try {
+    extVincC = db.prepare(`
+      SELECT id, data_iso, credito as valor, historico, conta_vinculada, nome_convenente
+      FROM extratos_vinculada
+      WHERE credito > 0 AND tipo='CREDITO'
+        ${anoFilter ? ` AND substr(data_iso,1,4)='${anoFilter}'` : ''}
+    `).all();
+    extVincD = db.prepare(`
+      SELECT id, data_iso, debito as valor, historico, conta_vinculada, nome_convenente
+      FROM extratos_vinculada
+      WHERE debito > 0 AND tipo='DEBITO'
+        ${anoFilter ? ` AND substr(data_iso,1,4)='${anoFilter}'` : ''}
+    `).all();
+  } catch (e) { /* tabela pode não existir */ }
+  console.log(`  Extratos candidatos: ${extRaw.length} bancários + ${extVincC.length} créditos vinc + ${extVincD.length} débitos vinc\n`);
 
-  // Indexa por data → [extratos]
+  // Indexa por data → [extratos] (origem='ext' bancário, 'vincC' crédito vinc, 'vincD' débito vinc)
+  // Para a busca, normalizamos para field `credito` (mesmo que seja débito da conta vinculada)
   const extByDate = new Map();
   for (const e of extRaw) {
+    e._origem = 'ext';
+    if (!extByDate.has(e.data_iso)) extByDate.set(e.data_iso, []);
+    extByDate.get(e.data_iso).push(e);
+  }
+  for (const e of extVincC) {
+    e._origem = 'vincC';
+    e.credito = e.valor;
+    if (!extByDate.has(e.data_iso)) extByDate.set(e.data_iso, []);
+    extByDate.get(e.data_iso).push(e);
+  }
+  for (const e of extVincD) {
+    e._origem = 'vincD';
+    e.credito = e.valor;
     if (!extByDate.has(e.data_iso)) extByDate.set(e.data_iso, []);
     extByDate.get(e.data_iso).push(e);
   }
@@ -87,17 +123,21 @@ function main() {
 
   function tentarMatch(ob, toleranciaPct, janelaDias) {
     const vTarget = ob.valor_pago;
+    // OBs reais batem com extrato bancário OU crédito da conta vinculada (depósitos do tomador)
+    const origensValidas = new Set(['ext', 'vincC']);
     let melhor = null;
     for (let d = -janelaDias; d <= janelaDias; d++) {
       const dt = addDias(ob.data_pagamento_iso, d);
       const cands = extByDate.get(dt) || [];
       for (const e of cands) {
-        if (usados.has(e.id)) continue;
+        if (!origensValidas.has(e._origem)) continue;
+        const usadoKey = `${e._origem}-${e.id}`;
+        if (usados.has(usadoKey)) continue;
         const diff = Math.abs(e.credito - vTarget);
         const pct = diff / vTarget;
         if (pct > toleranciaPct) continue;
         if (!melhor || pct < melhor.pct || (pct === melhor.pct && Math.abs(d) < Math.abs(melhor.diasDiff))) {
-          melhor = { ext: e, pct, diasDiff: d };
+          melhor = { ext: e, pct, diasDiff: d, key: usadoKey };
         }
       }
     }
@@ -108,7 +148,7 @@ function main() {
   for (const ob of obs) {
     const m = tentarMatch(ob, 0.005, 5);
     if (m) {
-      usados.add(m.ext.id);
+      usados.add(m.key);
       matches.push({ ob, ext: m.ext, regra: 'P1', pct: m.pct, diasDiff: m.diasDiff });
     } else pendentes.push(ob);
   }
@@ -119,7 +159,7 @@ function main() {
   for (const ob of pendentes) {
     const m = tentarMatch(ob, 0.03, 10);
     if (m) {
-      usados.add(m.ext.id);
+      usados.add(m.key);
       matches.push({ ob, ext: m.ext, regra: 'P2', pct: m.pct, diasDiff: m.diasDiff });
     } else ainda.push(ob);
   }
@@ -160,25 +200,50 @@ function main() {
     console.log(`    ${String(v.qtd).padStart(4)}x R$ ${fmt(v.total).padStart(16)} ${ug.substring(0, 60)}`);
   });
 
+  // Breakdown matches por origem
+  const porOrigem = matches.reduce((a, m) => {
+    a[m.ext._origem || 'ext'] = (a[m.ext._origem || 'ext'] || { qtd: 0, total: 0 });
+    a[m.ext._origem || 'ext'].qtd++;
+    a[m.ext._origem || 'ext'].total += m.ob.valor_pago;
+    return a;
+  }, {});
+  console.log('\n  Matches por origem:');
+  Object.entries(porOrigem).forEach(([o, v]) => {
+    const nome = o === 'vincC' ? 'Vinculada (crédito)'
+               : o === 'vincD' ? 'Vinculada (débito DR)'
+               : 'Extrato Bancário';
+    console.log(`    ${nome.padEnd(22)} ${String(v.qtd).padStart(4)}x | R$ ${fmt(v.total).padStart(15)}`);
+  });
+
   // Apply
   if (APLICAR) {
     console.log('\n  💾 Aplicando status_conciliacao...');
-    const upd = db.prepare(`
+    const updExt = db.prepare(`
       UPDATE extratos
       SET status_conciliacao = ?,
           obs = CASE WHEN obs IS NULL OR obs='' THEN ? ELSE obs || ' | ' || ? END
       WHERE id = ?
     `);
-    let applied = 0;
+    const updVinc = db.prepare(`
+      UPDATE extratos_vinculada
+      SET status_conciliacao = ?
+      WHERE id = ?
+    `);
+    let appliedExt = 0, appliedVinc = 0;
     db.transaction(() => {
       for (const m of matches) {
-        const status = `FEDERAL_${m.ob.empenho || 'OB'}`;
-        const tag = `FED ${m.ob.empenho || ''} UG ${String(m.ob.gestao || '').substring(0, 40)} ${m.regra} Δ${m.diasDiff}d`;
-        const r = upd.run(status.substring(0, 60), tag, tag, m.ext.id);
-        if (r.changes > 0) applied++;
+        const status = `FEDERAL_${m.ob.empenho || 'OB'}`.substring(0, 60);
+        if (m.ext._origem === 'vincC' || m.ext._origem === 'vincD') {
+          const r = updVinc.run(status, m.ext.id);
+          if (r.changes > 0) appliedVinc++;
+        } else {
+          const tag = `FED ${m.ob.empenho || ''} UG ${String(m.ob.gestao || '').substring(0, 40)} ${m.regra} Δ${m.diasDiff}d`;
+          const r = updExt.run(status, tag, tag, m.ext.id);
+          if (r.changes > 0) appliedExt++;
+        }
       }
     })();
-    console.log(`  ✅ ${applied} extratos marcados como conciliados com OB federal.`);
+    console.log(`  ✅ ${appliedExt} extratos bancários + ${appliedVinc} extratos conta vinculada marcados.`);
   } else {
     console.log('\n  (dry-run — use --apply para marcar status_conciliacao)');
   }
