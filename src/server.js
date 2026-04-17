@@ -96,6 +96,9 @@ app.use('/api/webiss',       require('./routes/webiss'));
 // ─── Módulo Transparência Palmas (conciliação com portal) ────────
 app.use('/api/transparencia', require('./routes/transparencia'));
 
+// ─── Módulo Conciliação Robusta (pagador_alias + sugestões) ─────
+app.use('/api/conciliacao-robusta', require('./routes/conciliacao-robusta'));
+
 // ─── Módulo Assistente IA (Claude) ──────────────────────────────
 app.use('/api/ia',           require('./routes/ia'));
 

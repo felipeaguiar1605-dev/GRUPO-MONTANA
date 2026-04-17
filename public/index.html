@@ -136,6 +136,7 @@
       <div class="tab" data-tab="fluxo" onclick="navGo('fluxo',this)">📈 Fluxo de Caixa</div>
       <div class="tab" data-tab="conta-vinculada" onclick="navGo('conta-vinculada',this)">🏦 Conta Vinculada</div>
       <div class="tab" data-tab="conciliacao3v" onclick="navGo('conciliacao3v',this)">🔗 Conciliação 3V</div>
+      <div class="tab" data-tab="concilia-robusta" onclick="navGo('concilia-robusta',this);setTimeout(()=>crInit&&crInit(),50)">🧩 Conciliação IA</div>
       <div class="tab" data-tab="import" onclick="navGo('import',this)">📥 Importar</div>
     </div>
   </div>
@@ -1778,6 +1779,58 @@
   </div>
 </div>
 
+<!-- F-1b: Conciliação Robusta (pagador_alias + sugestões) -->
+<div id="pg-concilia-robusta" class="pg">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+    <div>
+      <h2 style="font-size:16px;font-weight:800;color:#0f172a">🧩 Conciliação IA — Extratos sem NF</h2>
+      <p style="font-size:11px;color:#64748b">Identifica pagador em extratos TED/PIX via CNPJ + sugere NFs candidatas. Match 1:1 e em lote.</p>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <input type="month" id="cr-mes" style="padding:5px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px">
+      <input type="number" id="cr-valor-min" placeholder="Valor mín" value="1000" style="padding:5px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;width:90px">
+      <select id="cr-pagador-filtro" style="padding:5px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;min-width:160px">
+        <option value="">Todos pagadores</option>
+      </select>
+      <button onclick="crLoad()" style="padding:6px 14px;font-size:11px;font-weight:700;background:#059669;color:#fff;border:none;border-radius:6px;cursor:pointer">🔄 Atualizar</button>
+      <button onclick="crReidentificar()" style="padding:6px 10px;font-size:11px;font-weight:700;background:#7c3aed;color:#fff;border:none;border-radius:6px;cursor:pointer" title="Re-executa identificação de pagador nos extratos">🔎 Re-identificar</button>
+      <button onclick="crReconciliar()" style="padding:6px 10px;font-size:11px;font-weight:700;background:#0ea5e9;color:#fff;border:none;border-radius:6px;cursor:pointer" title="Re-executa match NF↔extrato">🧮 Reconciliar</button>
+      <button onclick="crAbrirAliases()" style="padding:6px 10px;font-size:11px;font-weight:700;background:#f59e0b;color:#fff;border:none;border-radius:6px;cursor:pointer" title="Gerenciar pagador_alias">⚙️ Aliases</button>
+    </div>
+  </div>
+
+  <!-- KPIs -->
+  <div class="kpis" id="cr-kpis" style="grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px"></div>
+
+  <!-- Grupos por pagador -->
+  <div id="cr-grupos"><div class="muted" style="text-align:center;padding:40px">Clique em Atualizar para carregar</div></div>
+
+  <!-- Modal sugestões (aparece ao clicar em extrato) -->
+  <div id="cr-modal-sug" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:1000;align-items:center;justify-content:center;padding:20px">
+    <div style="background:#fff;border-radius:12px;max-width:900px;width:100%;max-height:88vh;overflow-y:auto;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h3 id="cr-modal-titulo" style="font-size:14px;font-weight:800;color:#0f172a;margin:0">Sugestões de NF para extrato</h3>
+        <button onclick="crFecharModal()" style="background:#f1f5f9;border:none;border-radius:8px;padding:5px 12px;font-weight:700;cursor:pointer">✕</button>
+      </div>
+      <div id="cr-modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Modal aliases -->
+  <div id="cr-modal-alias" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:1000;align-items:center;justify-content:center;padding:20px">
+    <div style="background:#fff;border-radius:12px;max-width:1100px;width:100%;max-height:88vh;overflow-y:auto;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h3 style="font-size:14px;font-weight:800;color:#0f172a;margin:0">⚙️ Pagador Alias (catálogo de pagadores)</h3>
+        <div>
+          <button onclick="crReseedAliases()" style="background:#dbeafe;color:#1d4ed8;border:none;padding:5px 12px;border-radius:6px;font-weight:700;font-size:11px;cursor:pointer;margin-right:6px">🌱 Re-seed</button>
+          <button onclick="crFecharModalAlias()" style="background:#f1f5f9;border:none;border-radius:8px;padding:5px 12px;font-weight:700;cursor:pointer">✕</button>
+        </div>
+      </div>
+      <div id="cr-alias-body"></div>
+    </div>
+  </div>
+</div>
+
 <!-- A-2: Keywords de Auto-Vinculação -->
 <div id="pg-keywords" class="pg">
   <div style="max-width:700px">
@@ -2968,5 +3021,6 @@
 <script src="/app-compras-supervisor.js"></script>
 <script src="/app-ia.js"></script>
 <script src="/app-bb.js"></script>
+<script src="/app-concilia-robusta.js"></script>
 </body>
 </html>

@@ -551,6 +551,32 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_sup_oc_data ON sup_ocorrencias(data_ocorrencia_iso);
   CREATE INDEX IF NOT EXISTS idx_sup_oc_contrato ON sup_ocorrencias(contrato_ref);
   CREATE INDEX IF NOT EXISTS idx_sup_cl_data ON sup_checklist(data_iso);
+
+  -- ═══════════════════════════════════════════════════════════════
+  --  MÓDULO CONCILIAÇÃO ROBUSTA — PAGADOR ALIAS
+  --  Mapeia CNPJs / padrões de histórico → nome canônico + contrato dono
+  --  Permite identificar pagador em extratos TED/PIX e fazer match por lote
+  -- ═══════════════════════════════════════════════════════════════
+  CREATE TABLE IF NOT EXISTS pagador_alias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cnpj TEXT DEFAULT '',                      -- só dígitos (14 chars) quando conhecido
+    cnpj_raiz TEXT DEFAULT '',                 -- 8 primeiros dígitos (raiz, une filiais)
+    padrao_historico TEXT DEFAULT '',          -- regex/substring como fallback
+    nome_canonico TEXT NOT NULL,               -- ex: 'MUNICIPIO DE PALMAS'
+    tomador_match TEXT DEFAULT '',             -- nome em notas_fiscais.tomador p/ LIKE
+    contrato_default TEXT DEFAULT '',          -- numContrato sugerido (pode ser vazio)
+    empresa_dono TEXT DEFAULT '',              -- 'assessoria' | 'seguranca' | '' (ambos)
+    janela_dias INTEGER DEFAULT 90,            -- janela de match emissão→pagamento
+    tolerancia_pct REAL DEFAULT 0.05,          -- tolerância de match individual
+    ativo INTEGER DEFAULT 1,
+    prioridade INTEGER DEFAULT 100,            -- menor = avaliado primeiro
+    obs TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_pagador_cnpj ON pagador_alias(cnpj);
+  CREATE INDEX IF NOT EXISTS idx_pagador_raiz ON pagador_alias(cnpj_raiz);
+  CREATE INDEX IF NOT EXISTS idx_pagador_ativo ON pagador_alias(ativo);
 `;
 
 const MIGRATIONS = [
@@ -577,6 +603,48 @@ const MIGRATIONS = [
   // Centro de custo para despesas sem vínculo contratual (rateio e dividendos)
   "ALTER TABLE despesas ADD COLUMN centro_custo TEXT DEFAULT ''",
   "CREATE INDEX IF NOT EXISTS idx_desp_cc ON despesas(centro_custo)",
+  // Conciliação robusta: identificação de pagador em extratos (Sprint 2)
+  "ALTER TABLE extratos ADD COLUMN pagador_identificado TEXT DEFAULT ''",
+  "ALTER TABLE extratos ADD COLUMN pagador_cnpj TEXT DEFAULT ''",
+  "ALTER TABLE extratos ADD COLUMN pagador_metodo TEXT DEFAULT ''", // 'cnpj' | 'regex' | 'manual'
+  "CREATE INDEX IF NOT EXISTS idx_ext_pagador ON extratos(pagador_identificado)",
+  "CREATE INDEX IF NOT EXISTS idx_ext_pagador_cnpj ON extratos(pagador_cnpj)",
+  // data_pagamento em NFs (alimentado por conciliacao_robusta)
+  "ALTER TABLE notas_fiscais ADD COLUMN data_pagamento TEXT DEFAULT ''",
+  "ALTER TABLE notas_fiscais ADD COLUMN extrato_id INTEGER DEFAULT NULL",
+  "CREATE INDEX IF NOT EXISTS idx_nfs_extrato ON notas_fiscais(extrato_id)",
+  // Sprint 4: Pagamentos de portais de transparência (Palmas, TCE/TO, etc.)
+  `CREATE TABLE IF NOT EXISTS pagamentos_portal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    portal TEXT NOT NULL,                 -- 'palmas' | 'tceto' | 'stn' | ...
+    gestao TEXT DEFAULT '',
+    gestao_codigo TEXT DEFAULT '',
+    fornecedor TEXT DEFAULT '',
+    cnpj TEXT DEFAULT '',
+    cnpj_raiz TEXT DEFAULT '',
+    processo TEXT DEFAULT '',
+    empenho TEXT DEFAULT '',
+    data_empenho_iso TEXT DEFAULT '',
+    data_liquidacao_iso TEXT DEFAULT '',
+    data_pagamento_iso TEXT DEFAULT '',
+    valor_pago REAL DEFAULT 0,
+    fonte TEXT DEFAULT '',
+    fonte_det TEXT DEFAULT '',
+    elemento_desp TEXT DEFAULT '',
+    subnatureza TEXT DEFAULT '',
+    pronto_pgto TEXT DEFAULT '',
+    obs TEXT DEFAULT '',
+    extrato_id INTEGER DEFAULT NULL,
+    nf_id INTEGER DEFAULT NULL,
+    status_match TEXT DEFAULT 'PENDENTE',  -- PENDENTE | MATCH | SEM_NF | DIVERGENCIA
+    hash_unico TEXT DEFAULT '',            -- portal+gestao+empenho+data+valor
+    raw_json TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
+  )`,
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_pgpt_hash ON pagamentos_portal(hash_unico)",
+  "CREATE INDEX IF NOT EXISTS idx_pgpt_cnpj ON pagamentos_portal(cnpj)",
+  "CREATE INDEX IF NOT EXISTS idx_pgpt_data ON pagamentos_portal(data_pagamento_iso)",
+  "CREATE INDEX IF NOT EXISTS idx_pgpt_portal ON pagamentos_portal(portal)",
 ];
 
 function getDb(companyKey) {
