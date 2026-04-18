@@ -5,7 +5,15 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { getDb, COMPANIES } = require('./db');
+
+// ─── ANTI-DUPLICAÇÃO ─────────────────────────────────────────────
+// Hash determinístico para deduplicação de despesas
+// Campos: empresa | data_iso | valor_bruto | fornecedor | descricao
+function dedupHash(...parts) {
+  return crypto.createHash('md5').update(parts.map(String).join('|')).digest('hex').slice(0, 32);
+}
 
 const router = express.Router();
 
@@ -2419,23 +2427,31 @@ router.post('/despesas', (req, res) => {
   ret.total_retencao = +(ret.irrf + ret.csll + ret.pis_retido + ret.cofins_retido + ret.inss_retido + ret.iss_retido).toFixed(2);
   ret.valor_liquido = +(valor_bruto - ret.total_retencao).toFixed(2);
 
+  const data_iso_val = parseDateBR(data_despesa || '');
+  const dedup_hash_val = dedupHash(req.companyKey, data_iso_val, valor_bruto, fornecedor || '', descricao || '');
+
   const r = req.db.prepare(`
-    INSERT INTO despesas (categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, data_iso, competencia,
+    INSERT OR IGNORE INTO despesas (categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, data_iso, competencia,
       valor_bruto, irrf, csll, pis_retido, cofins_retido, inss_retido, iss_retido, total_retencao, valor_liquido,
-      status, obs, contrato_ref, centro_custo)
+      status, obs, contrato_ref, centro_custo, dedup_hash)
     VALUES (@categoria, @descricao, @fornecedor, @cnpj, @nf, @data, @data_iso, @comp,
       @vbruto, @irrf, @csll, @pis, @cofins, @inss, @iss, @total_ret, @vliq,
-      @status, @obs, @contrato_ref, @centro_custo)
+      @status, @obs, @contrato_ref, @centro_custo, @dedup_hash)
   `).run({
     categoria: categoria || 'FORNECEDOR', descricao: descricao || '', fornecedor: fornecedor || '',
     cnpj: cnpj_fornecedor || '', nf: nf_numero || '', data: data_despesa || '',
-    data_iso: parseDateBR(data_despesa || ''), comp: competencia || '',
+    data_iso: data_iso_val, comp: competencia || '',
     vbruto: valor_bruto, ...ret, irrf: ret.irrf, csll: ret.csll, pis: ret.pis_retido,
     cofins: ret.cofins_retido, inss: ret.inss_retido, iss: ret.iss_retido,
     total_ret: ret.total_retencao, vliq: ret.valor_liquido,
     status: req.body.status || 'PENDENTE', obs: obs || '',
     contrato_ref: contrato_ref || '', centro_custo: centro_custo || '',
+    dedup_hash: dedup_hash_val,
   });
+
+  if (r.changes === 0) {
+    return res.status(409).json({ ok: false, error: 'Despesa duplicada detectada (mesma data, valor, fornecedor e descrição)' });
+  }
 
   res.json({ ok: true, id: r.lastInsertRowid, retencoes: ret });
 });
@@ -2488,10 +2504,10 @@ router.post('/import/despesas', (req, res, next) => getUpload(req).single('file'
 
     const header = lines[0].split(';').map(h => h.trim().replace(/"/g, ''));
     const insert = req.db.prepare(`
-      INSERT INTO despesas (categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, data_iso, competencia,
-        valor_bruto, irrf, csll, pis_retido, cofins_retido, inss_retido, iss_retido, total_retencao, valor_liquido, status, obs, contrato_ref)
+      INSERT OR IGNORE INTO despesas (categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, data_iso, competencia,
+        valor_bruto, irrf, csll, pis_retido, cofins_retido, inss_retido, iss_retido, total_retencao, valor_liquido, status, obs, contrato_ref, dedup_hash)
       VALUES (@categoria, @descricao, @fornecedor, @cnpj, @nf, @data, @data_iso, @comp,
-        @vbruto, @irrf, @csll, @pis, @cofins, @inss, @iss, @total_ret, @vliq, @status, @obs, @contrato_ref)
+        @vbruto, @irrf, @csll, @pis, @cofins, @inss, @iss, @total_ret, @vliq, @status, @obs, @contrato_ref, @dedup_hash)
     `);
 
     let imported = 0;
@@ -2505,15 +2521,19 @@ router.post('/import/despesas', (req, res, next) => getUpload(req).single('file'
         const cat = (row.categoria || row.tipo || 'FORNECEDOR').toUpperCase();
         const vbruto = parseDecimalBR(row['valor bruto'] || row.valor_bruto || row.valor || '0');
         const auto = calcRetencoes(cat, vbruto);
+        const data_iso_row = parseDateBR(row.data || row.data_despesa || '');
+        const fornecedor_row = row.fornecedor || '';
+        const descricao_row = row.descricao || row['descrição'] || '';
+        const dedup_hash_row = dedupHash(req.companyKey, data_iso_row, vbruto, fornecedor_row, descricao_row);
 
-        insert.run({
+        const r = insert.run({
           categoria: cat,
-          descricao: row.descricao || row['descrição'] || '',
-          fornecedor: row.fornecedor || '',
+          descricao: descricao_row,
+          fornecedor: fornecedor_row,
           cnpj: row.cnpj || row.cnpj_fornecedor || '',
           nf: row.nf || row.nf_numero || row['nota fiscal'] || '',
           data: row.data || row.data_despesa || '',
-          data_iso: parseDateBR(row.data || row.data_despesa || ''),
+          data_iso: data_iso_row,
           comp: row.competencia || row.comp || '',
           vbruto, ...auto,
           irrf: parseDecimalBR(row.irrf) || auto.irrf,
@@ -2526,9 +2546,10 @@ router.post('/import/despesas', (req, res, next) => getUpload(req).single('file'
           vliq: auto.valor_liquido,
           status: row.status || 'PENDENTE',
           obs: row.obs || '',
-          contrato_ref: row.contrato || row.contrato_ref || ''
+          contrato_ref: row.contrato || row.contrato_ref || '',
+          dedup_hash: dedup_hash_row,
         });
-        imported++;
+        if (r.changes > 0) imported++;
       }
     });
     batch();
@@ -4847,33 +4868,64 @@ router.get('/supervisor/checklist', (req, res) => {
     const clause = where.length ? 'WHERE ' + where.join(' AND ') : '';
     const rows = db.prepare(`
       SELECT * FROM sup_checklist ${clause}
-      ORDER BY created_at DESC LIMIT 200
+      ORDER BY data_iso DESC, id DESC
     `).all(...params);
     res.json({ data: rows, total: rows.length });
   } catch(e) { errRes(res, e, 'supervisor/checklist GET'); }
 });
 
-// Salvar checklist
+// Registrar checklist
 router.post('/supervisor/checklist', (req, res) => {
   try {
     const db = req.db;
-    const { contrato_ref, posto, data_iso, turno, supervisor, itens_json, observacoes, assinatura } = req.body;
-
+    const { contrato_ref, posto, data_iso, turno, supervisor,
+            itens_json, observacoes, assinatura } = req.body;
+    if (!contrato_ref || !data_iso) {
+      return res.status(400).json({ error: 'contrato_ref e data_iso são obrigatórios' });
+    }
     const info = db.prepare(`
       INSERT INTO sup_checklist
         (contrato_ref, posto, data_iso, turno, supervisor, itens_json, observacoes, assinatura)
       VALUES (?,?,?,?,?,?,?,?)
     `).run(
-      contrato_ref || '', posto || '',
-      data_iso || new Date().toISOString().substring(0, 10),
-      turno || 'DIURNO', supervisor || '',
-      typeof itens_json === 'string' ? itens_json : JSON.stringify(itens_json || []),
-      observacoes || '', assinatura || ''
+      contrato_ref, posto || '', data_iso,
+      turno || 'DIURNO', supervisor || req.user?.login || '',
+      itens_json || '[]', observacoes || '', assinatura || ''
     );
-
-    audit(req, 'INSERT', 'sup_checklist', info.lastInsertRowid, `${data_iso} ${posto}`);
+    audit(req, 'INSERT', 'sup_checklist', info.lastInsertRowid, contrato_ref);
     res.json({ id: info.lastInsertRowid, ok: true });
   } catch(e) { errRes(res, e, 'supervisor/checklist POST'); }
+});
+
+// Atualizar checklist
+router.put('/supervisor/checklist/:id', (req, res) => {
+  try {
+    const db = req.db;
+    const id = Number(req.params.id);
+    const { itens_json, observacoes, assinatura, turno, supervisor } = req.body;
+    const fields = [], params = [];
+    if (itens_json  !== undefined) { fields.push('itens_json = ?');  params.push(itens_json); }
+    if (observacoes !== undefined) { fields.push('observacoes = ?'); params.push(observacoes); }
+    if (assinatura  !== undefined) { fields.push('assinatura = ?');  params.push(assinatura); }
+    if (turno       !== undefined) { fields.push('turno = ?');       params.push(turno); }
+    if (supervisor  !== undefined) { fields.push('supervisor = ?');  params.push(supervisor); }
+    if (!fields.length) return res.status(400).json({ error: 'Nenhum campo para atualizar' });
+    params.push(id);
+    db.prepare(`UPDATE sup_checklist SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+    audit(req, 'UPDATE', 'sup_checklist', id, '');
+    res.json({ ok: true });
+  } catch(e) { errRes(res, e, 'supervisor/checklist PUT'); }
+});
+
+// Excluir checklist
+router.delete('/supervisor/checklist/:id', (req, res) => {
+  try {
+    const db = req.db;
+    const id = Number(req.params.id);
+    db.prepare('DELETE FROM sup_checklist WHERE id = ?').run(id);
+    audit(req, 'DELETE', 'sup_checklist', id, '');
+    res.json({ ok: true });
+  } catch(e) { errRes(res, e, 'supervisor/checklist DELETE'); }
 });
 
 module.exports = router;

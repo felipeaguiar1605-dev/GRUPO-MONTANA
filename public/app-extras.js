@@ -18,6 +18,7 @@
     if (id === 'conta-vinculada') loadContaVinculada();
     if (id === 'consolidado')     loadConsolidadoResumo();
     if (id === 'desp')            loadSubcontratados();
+    if (id === 'piscofins-seg')   initPisCofinsSeg();
   };
 })();
 
@@ -3358,4 +3359,147 @@ async function autoVincularNFs() {
   } catch (e) {
     toast('Erro: ' + e.message, 'error');
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PIS/COFINS SEGURANÇA — Apuração Mensal (Cumulativo, Caixa)
+// ═══════════════════════════════════════════════════════════════
+
+let _pcDados = null;  // cache da última apuração
+
+function initPisCofinsSeg() {
+  const inp = document.getElementById('pc-mes');
+  if (inp && !inp.value) {
+    const now = new Date();
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    inp.value = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}`;
+  }
+}
+
+async function loadPisCofinsSeg() {
+  const anoMes = document.getElementById('pc-mes')?.value;
+  if (!anoMes) return;
+
+  document.getElementById('pc-loading').textContent = 'Calculando…';
+  document.getElementById('pc-loading').style.display = 'block';
+  document.getElementById('pc-cards').style.display = 'none';
+
+  try {
+    const data = await api(`/piscofins-seguranca/${anoMes}`);
+    if (!data.ok) throw new Error(data.error || 'Erro');
+    _pcDados = data.dados;
+
+    document.getElementById('pc-loading').style.display = 'none';
+    document.getElementById('pc-cards').style.display = 'block';
+    document.getElementById('pc-btn-excel').style.display = '';
+
+    renderPcKpis(_pcDados);
+    renderPcTabela('tributaveis', _pcDados.tributaveis);
+    renderPcTabela('excluidos',   _pcDados.excluidos);
+    renderPcTabela('nao_tributa', _pcDados.nao_tributa);
+    renderPcTabela('pendentes',   _pcDados.pendentes);
+
+    // Atualiza labels dos botões com contagens
+    document.getElementById('pc-tab-tributaveis').textContent =
+      `✅ Tributáveis (${_pcDados.resumo.qtd_tributaveis})`;
+    document.getElementById('pc-tab-excluidos').textContent =
+      `🚫 Excluídos (${_pcDados.resumo.qtd_excluidos})`;
+    document.getElementById('pc-tab-nao_tributa').textContent =
+      `⛔ Não Tributa (${_pcDados.resumo.qtd_nao_tributa})`;
+    document.getElementById('pc-tab-pendentes').textContent =
+      `⚠ Pendentes (${_pcDados.resumo.qtd_pendentes})`;
+
+    // Alerta pendentes
+    const alertEl = document.getElementById('pc-alerta-pendentes');
+    if (_pcDados.resumo.tem_pendentes) {
+      alertEl.style.display = 'block';
+      alertEl.textContent =
+        `⚠ ${_pcDados.resumo.qtd_pendentes} crédito(s) sem NF vinculada — verifique no Portal da Transparência e vincule no ERP antes de emitir o DARF.`;
+    } else {
+      alertEl.style.display = 'none';
+    }
+
+    pcShowTab('tributaveis');
+  } catch (e) {
+    document.getElementById('pc-loading').textContent = 'Erro: ' + e.message;
+  }
+}
+
+function renderPcKpis(d) {
+  const cards = [
+    { label: 'Base Tributável',       val: brl(d.base_tributavel), bg: '#dbeafe', bold: true },
+    { label: `PIS 0,65% (DARF ${d.darf_pis})`,   val: brl(d.pis),   bg: '#d1fae5' },
+    { label: `COFINS 3,00% (DARF ${d.darf_cofins})`, val: brl(d.cofins), bg: '#d1fae5' },
+    { label: 'Total a Recolher',      val: brl(d.total_darf),      bg: '#d1fae5', bold: true },
+    { label: 'Vencimento DARF',       val: d.vencimento,           bg: '#fef3c7' },
+  ];
+  document.getElementById('pc-kpis').innerHTML = cards.map(c => `
+    <div style="background:${c.bg};border-radius:10px;padding:12px 14px;border:1px solid #e2e8f0">
+      <div style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px">${c.label}</div>
+      <div style="font-size:${c.bold?'17px':'15px'};font-weight:${c.bold?800:600};color:#0f172a">${c.val}</div>
+    </div>
+  `).join('');
+}
+
+const PC_COLS = [
+  ['data_iso',             'Data'],
+  ['historico',            'Histórico'],
+  ['pagador_identificado', 'Pagador'],
+  ['credito',              'Valor Crédito'],
+  ['nf_numero',            'NF Nº'],
+  ['data_emissao',         'Emissão NF'],
+  ['tomador',              'Tomador'],
+  ['status_conciliacao',   'Status'],
+];
+const PC_COLS_SIMPLES = [
+  ['data_iso',  'Data'],
+  ['historico', 'Histórico'],
+  ['credito',   'Valor Crédito'],
+];
+const PC_COLS_PEND = [
+  ['data_iso',             'Data'],
+  ['historico',            'Histórico'],
+  ['pagador_identificado', 'Pagador'],
+  ['credito',              'Valor Crédito'],
+  ['status_conciliacao',   'Status'],
+];
+
+function renderPcTabela(tipo, rows) {
+  const cols = tipo === 'nao_tributa' ? PC_COLS_SIMPLES
+             : tipo === 'pendentes'   ? PC_COLS_PEND
+             : PC_COLS;
+
+  const thead = document.getElementById(`pc-thead-${tipo}`);
+  const tbody = document.getElementById(`pc-tbody-${tipo}`);
+  if (!thead || !tbody) return;
+
+  thead.innerHTML = `<tr>${cols.map(([,t]) =>
+    `<th style="font-size:10px;font-weight:700;color:#fff;background:#1e293b;padding:7px 10px;text-align:left">${t}</th>`
+  ).join('')}</tr>`;
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="${cols.length}" style="padding:16px;text-align:center;color:#94a3b8;font-size:12px">Nenhum lançamento nesta categoria.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.map(r => `<tr>${cols.map(([k]) => {
+    let v = r[k] ?? '';
+    if (k === 'credito' || k === 'nf_valor_bruto' || k === 'nf_valor_liquido') {
+      v = brl(v);
+    }
+    return `<td style="font-size:11px;padding:5px 10px;border-bottom:1px solid #f1f5f9;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${String(v).replace(/"/g,'')}">${v}</td>`;
+  }).join('')}</tr>`).join('');
+}
+
+function pcShowTab(tipo) {
+  ['tributaveis','excluidos','nao_tributa','pendentes'].forEach(t => {
+    const panel = document.getElementById(`pc-panel-${t}`);
+    if (panel) panel.style.display = t === tipo ? '' : 'none';
+  });
+}
+
+async function exportarPisCofinsExcel() {
+  const anoMes = document.getElementById('pc-mes')?.value;
+  if (!anoMes) return;
+  window.open(`/api/piscofins-seguranca/${anoMes}/excel?company=${window.currentCompany}`, '_blank');
 }

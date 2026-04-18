@@ -117,6 +117,9 @@ app.use('/api/volus',        require('./routes/volus'));
 // ─── Módulo Jurídico ─────────────────────────────────────────
 app.use('/api/juridico',     require('./routes/juridico'));
 
+// ─── Apuração PIS/COFINS Segurança ───────────────────────────
+app.use('/api/piscofins-seguranca', require('./routes/piscofins-seguranca'));
+
 // ─── Diagnóstico Noturno ──────────────────────────────────────
 app.get('/api/diagnostico/ultimo', (req, res) => {
   const diagFile = path.join(__dirname, '..', 'data', 'diagnostico_noturno.json');
@@ -215,7 +218,7 @@ app.use((err, req, res, next) => {
 // ─── CRON: Alertas automáticos diários às 08:00 ──────────────────
 try {
   const cron = require('node-cron');
-  const { enviarAlertasEmpresa } = require('./routes/notificacoes');
+  const { enviarAlertasEmpresa, verificarDuplicatas, enviarAlertaDedup } = require('./routes/notificacoes');
 
   async function dispararAlertasDiarios() {
     for (const key of Object.keys(COMPANIES)) {
@@ -368,6 +371,32 @@ try {
     }
   });
   console.log('  ⏰ Cron apuração mensal configurado: dia 1 às 06:00 (America/Araguaina)');
+
+  // ── Verificação de Duplicatas (Fase 3) — todo dia às 02:00 ───
+  cron.schedule('0 2 * * *', async () => {
+    console.log('[CRON] Iniciando verificação anti-duplicatas (Fase 3)...');
+    for (const key of Object.keys(COMPANIES)) {
+      try {
+        const db = getDb(key);
+        const relatorio = verificarDuplicatas(db, COMPANIES[key]);
+        if (!relatorio.temDuplicatas) {
+          console.log(`  ✅ Anti-dedup [${key}]: nenhuma duplicata`);
+          continue;
+        }
+        const tot = relatorio.extratos.length + relatorio.notas.length + relatorio.despesas.length;
+        console.warn(`  ⚠ Anti-dedup [${key}]: ${tot} tipo(s) de duplicata detectados`);
+        const envio = await enviarAlertaDedup(db, COMPANIES[key], relatorio);
+        if (envio.enviado) {
+          console.log(`  📧 Alerta dedup enviado [${key}]`);
+        } else {
+          console.warn(`  ⚠ Alerta dedup [${key}] não enviado: ${envio.motivo || 'SMTP não configurado'}`);
+        }
+      } catch(e) {
+        console.error(`  ⚠ Anti-dedup [${key}]:`, e.message);
+      }
+    }
+  }, { timezone: 'America/Araguaina' });
+  console.log('  ⏰ Cron anti-dedup configurado: todo dia 02:00 (America/Araguaina)');
 
 } catch (e) {
   console.warn('  ⚠ node-cron não disponível:', e.message);
