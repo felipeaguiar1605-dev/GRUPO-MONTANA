@@ -3162,6 +3162,80 @@
 <!-- Toast -->
 <div id="toast" class="toast"></div>
 
+<!-- ══ Assistente IA + Google Drive ══════════════════════════════════ -->
+<!-- Floating Action Buttons -->
+<div style="position:fixed;bottom:22px;right:22px;z-index:9998;display:flex;flex-direction:column;gap:10px">
+  <button id="ia-fab" onclick="iaToggle()" title="Assistente IA"
+          style="width:56px;height:56px;border-radius:50%;border:none;cursor:pointer;
+                 background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;font-size:26px;
+                 box-shadow:0 6px 20px rgba(99,102,241,.45);transition:transform .15s"
+          onmouseover="this.style.transform='scale(1.07)'" onmouseout="this.style.transform='scale(1)'">🤖</button>
+  <button id="ia-drive-fab" onclick="iaDrivePanel()" title="Google Drive"
+          style="width:48px;height:48px;border-radius:50%;border:none;cursor:pointer;
+                 background:#fff;color:#4285f4;font-size:20px;
+                 box-shadow:0 4px 14px rgba(0,0,0,.15);transition:transform .15s"
+          onmouseover="this.style.transform='scale(1.07)'" onmouseout="this.style.transform='scale(1)'">☁</button>
+</div>
+
+<!-- Chat Sidebar -->
+<div id="ia-sidebar" style="display:none;position:fixed;bottom:95px;right:22px;width:380px;height:520px;
+     background:#fff;border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.22);z-index:9997;
+     flex-direction:column;overflow:hidden;border:1px solid #e2e8f0">
+  <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;padding:12px 14px;
+              display:flex;align-items:center;justify-content:space-between">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:18px">🤖</span>
+      <div>
+        <div style="font-size:13px;font-weight:700">Assistente Montana</div>
+        <div style="font-size:10px;opacity:.85">Claude Haiku 4.5</div>
+      </div>
+    </div>
+    <button onclick="iaToggle()" style="background:transparent;border:none;color:#fff;font-size:18px;cursor:pointer;padding:4px 8px">✕</button>
+  </div>
+  <div id="ia-msgs" style="flex:1;padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:8px"></div>
+  <div id="ia-chips" style="padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px;border-top:1px solid #f1f5f9">
+    <button class="ia-chip" onclick="iaEnviar('Resumo financeiro do mês atual')"
+            style="font-size:10px;padding:5px 10px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:14px;cursor:pointer">📊 Resumo do mês</button>
+    <button class="ia-chip" onclick="iaEnviar('Quais NFs estão pendentes de pagamento?')"
+            style="font-size:10px;padding:5px 10px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:14px;cursor:pointer">🧾 NFs pendentes</button>
+    <button class="ia-chip" onclick="iaEnviar('Certidões vencendo em 30 dias')"
+            style="font-size:10px;padding:5px 10px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:14px;cursor:pointer">📋 Certidões</button>
+    <button class="ia-chip" onclick="iaEnviar('Exposição intragrupo — quanto a Assessoria deve para Nevada/Montreal?')"
+            style="font-size:10px;padding:5px 10px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:14px;cursor:pointer">🔗 Intragrupo</button>
+  </div>
+  <div style="padding:10px 12px;border-top:1px solid #e2e8f0;display:flex;gap:8px">
+    <input id="ia-input" type="text" placeholder="Pergunte algo…" onkeypress="if(event.key==='Enter')iaEnviar()"
+           style="flex:1;padding:8px 12px;border:1px solid #e2e8f0;border-radius:20px;font-size:12px;outline:none">
+    <button onclick="iaEnviar()" style="background:#6366f1;color:#fff;border:none;border-radius:50%;width:34px;height:34px;cursor:pointer;font-size:15px">→</button>
+  </div>
+</div>
+
+<!-- Drive Panel -->
+<div id="ia-drive-panel" style="display:none;position:fixed;bottom:95px;right:22px;width:380px;height:520px;
+     background:#fff;border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.22);z-index:9997;
+     flex-direction:column;overflow:hidden;border:1px solid #e2e8f0">
+  <div style="background:linear-gradient(135deg,#4285f4,#0f9d58);color:#fff;padding:12px 14px;
+              display:flex;align-items:center;justify-content:space-between">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:18px">☁</span>
+      <div>
+        <div style="font-size:13px;font-weight:700">Google Drive + IA</div>
+        <div id="ia-drive-status-bar" style="font-size:10px;opacity:.85">Verificando…</div>
+      </div>
+    </div>
+    <button onclick="iaDrivePanel()" style="background:transparent;border:none;color:#fff;font-size:18px;cursor:pointer;padding:4px 8px">✕</button>
+  </div>
+  <div style="padding:10px 12px;display:flex;gap:6px;border-bottom:1px solid #e2e8f0;flex-wrap:wrap">
+    <input id="drive-busca" type="text" placeholder="Buscar arquivo no Drive…"
+           onkeypress="if(event.key==='Enter')driveBuscar()"
+           style="flex:1 1 170px;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;outline:none">
+    <button onclick="driveBuscar()" style="font-size:11px;padding:6px 10px;background:#4285f4;color:#fff;border:none;border-radius:6px;cursor:pointer">🔍 Buscar</button>
+    <button onclick="driveSugestoes()" style="font-size:11px;padding:6px 10px;background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:6px;cursor:pointer">✨ Sugestões IA</button>
+    <button id="drive-connect-btn" style="font-size:11px;padding:6px 10px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer">Conectar Drive</button>
+  </div>
+  <div id="ia-drive-results" style="flex:1;padding:8px 12px;overflow-y:auto"></div>
+</div>
+
 <script src="/app.js"></script>
 <script src="/app-extras.js"></script>
 <script src="/app-boletins.js"></script>
