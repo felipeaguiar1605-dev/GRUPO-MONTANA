@@ -392,6 +392,9 @@ async function loadDashboard(){
   // ─── Apuração por Tomador (Regime de Caixa) ───
   loadApuracaoCaixa();
 
+  // ─── Exposição Intragrupo (NFs entre empresas do grupo) ───
+  loadExposicaoIntragrupo();
+
   // ─── Donut Visual de Conciliação ───
   const cs = d.concStatus;
   const totalConc = cs.conciliados + cs.pendentes + cs.parciais + cs.a_identificar;
@@ -584,6 +587,61 @@ function renderExtFilters(){
 }
 
 // ─── Apuração por Tomador (Regime de Caixa) ──────────────────────
+async function loadExposicaoIntragrupo(){
+  const body = document.getElementById('dash-intragrupo-body');
+  const resumo = document.getElementById('dash-intragrupo-resumo');
+  if(!body) return;
+  let d;
+  try {
+    d = await api('/dashboard/exposicao-intragrupo');
+  } catch(e) {
+    body.innerHTML = '<div class="muted" style="padding:16px;font-size:11px;text-align:center">Falha ao carregar exposição intragrupo.</div>';
+    return;
+  }
+  const rows = (d.exposicao || []).filter(r => r.v_aberto > 0 || r.q_aberto > 0);
+  if(rows.length === 0){
+    body.innerHTML = '<div style="padding:16px;text-align:center;font-size:11px;color:#15803d">✅ Nenhuma NF intragrupo em aberto</div>';
+    if(resumo) resumo.textContent = '';
+    return;
+  }
+  const r = d.resumo || {};
+  if(resumo) resumo.textContent = `${r.q_aberto||0} NFs · ${brl(r.total_aberto||0)} em aberto · maior atraso ${r.maior_atraso_dias||0}d`;
+
+  const corAlerta = a => a==='critico' ? '#dc2626' : a==='atencao' ? '#d97706' : '#15803d';
+  const emojiAlerta = a => a==='critico' ? '🔴' : a==='atencao' ? '🟡' : '🟢';
+
+  let html = `<div style="overflow-x:auto"><table class="tw" style="width:100%;font-size:11px">
+    <thead><tr>
+      <th style="text-align:left">Devedor</th>
+      <th style="text-align:left">Credor (intragrupo)</th>
+      <th style="text-align:right">NFs abertas</th>
+      <th style="text-align:right">R$ em aberto</th>
+      <th style="text-align:right">R$ pago</th>
+      <th style="text-align:center">Atraso máx</th>
+      <th style="text-align:center">NF mais antiga</th>
+    </tr></thead><tbody>`;
+  for(const x of rows){
+    const pago = (x.v_total || 0) - (x.v_aberto || 0);
+    html += `<tr>
+      <td style="padding:6px 8px">${x.empresa_devedora||''}</td>
+      <td style="padding:6px 8px;font-weight:600">${x.credor||''}</td>
+      <td style="padding:6px 8px;text-align:right;font-family:monospace">${(x.q_aberto||0).toLocaleString('pt-BR')}</td>
+      <td style="padding:6px 8px;text-align:right;font-family:monospace;font-weight:700;color:${corAlerta(x.alerta)}">${brl(x.v_aberto||0)}</td>
+      <td style="padding:6px 8px;text-align:right;font-family:monospace;color:#64748b">${brl(pago)}</td>
+      <td style="padding:6px 8px;text-align:center;color:${corAlerta(x.alerta)};font-weight:600">${emojiAlerta(x.alerta)} ${x.dias_max_aberto||0}d</td>
+      <td style="padding:6px 8px;text-align:center;font-size:10px;color:#64748b">${x.mais_antiga_aberto||'—'}</td>
+    </tr>`;
+  }
+  html += `</tbody></table></div>`;
+  // Legenda
+  html += `<div style="margin-top:8px;font-size:10px;color:#64748b;padding:8px;background:#f8fafc;border-radius:6px;line-height:1.5">
+    🟢 até 30 dias &nbsp;·&nbsp; 🟡 30–60 dias &nbsp;·&nbsp; 🔴 acima de 60 dias &nbsp;&nbsp;|&nbsp;&nbsp;
+    <strong>Observação:</strong> NFs intragrupo em aberto geram <strong>DAS no Simples</strong> (Nevada, Montreal, Porto do Vau, Mustang) sobre receita emitida, mesmo sem caixa entrar.
+    Recomenda-se quitação mensal ou contrato de mútuo intercompany.
+  </div>`;
+  body.innerHTML = html;
+}
+
 async function loadApuracaoCaixa(){
   if(!_from || !_to){
     const body = document.getElementById('dash-apuracao-body');

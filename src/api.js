@@ -688,6 +688,90 @@ router.get('/dashboard/apuracao-caixa', (req, res) => {
   } catch(e) { errRes(res, e); }
 });
 
+// ─── EXPOSIÇÃO INTRAGRUPO ────────────────────────────────────────
+// Consolida NFs emitidas por empresas do grupo (Nevada, Montreal, Porto do Vau, Mustang,
+// Montana) que ainda estão em aberto (sem extrato vinculado). Cruza as 4 bases.
+router.get('/dashboard/exposicao-intragrupo', (_req, res) => {
+  try {
+    const GRUPO = [
+      { pat: 'NEVADA',       nome: 'Nevada Embalagens/Limpeza' },
+      { pat: 'MONTREAL',     nome: 'Montreal Máq./Ferramentas' },
+      { pat: 'PORTO DO VAU', nome: 'Porto do Vau' },
+      { pat: 'MUSTANG',      nome: 'Mustang' },
+      { pat: 'MONTANA S',    nome: 'Montana Segurança' },
+      { pat: 'MONTANA ASS',  nome: 'Montana Assessoria' },
+    ];
+    const hoje = new Date().toISOString().slice(0, 10);
+
+    const exposicao = [];
+    for (const [empKey, empMeta] of Object.entries(COMPANIES)) {
+      let dbEmp;
+      try { dbEmp = getDb(empKey); } catch { continue; }
+      // Verifica se tabela despesas existe e tem linhas
+      const hasTab = dbEmp.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='despesas'`).get();
+      if (!hasTab) continue;
+
+      const selfName = (empMeta.nomeAbrev || '').toUpperCase();
+      for (const grp of GRUPO) {
+        // Pula self-match (ex: padrão "MONTANA ASS" no DB Assessoria, "MONTANA S" no DB Segurança)
+        if (selfName.includes(grp.pat)) continue;
+        const row = dbEmp.prepare(`
+          SELECT
+            COUNT(*) q_total,
+            COALESCE(SUM(valor_liquido),0) v_total,
+            COUNT(CASE WHEN extrato_id IS NULL THEN 1 END) q_aberto,
+            COALESCE(SUM(CASE WHEN extrato_id IS NULL THEN valor_liquido END),0) v_aberto,
+            MIN(CASE WHEN extrato_id IS NULL THEN data_iso END) mais_antiga,
+            MAX(CASE WHEN extrato_id IS NULL THEN data_iso END) mais_recente
+          FROM despesas
+          WHERE UPPER(COALESCE(fornecedor,'') || ' ' || COALESCE(descricao,'')) LIKE '%' || @pat || '%'
+        `).get({ pat: grp.pat });
+
+        if (row.q_total === 0) continue;
+        // Calcula idade (dias) da NF mais antiga em aberto
+        let diasMax = 0;
+        if (row.mais_antiga) {
+          diasMax = Math.floor((new Date(hoje) - new Date(row.mais_antiga)) / 86400000);
+        }
+        exposicao.push({
+          empresa_devedora: empMeta.nomeAbrev || empKey,
+          empresa_devedora_key: empKey,
+          credor: grp.nome,
+          credor_pat: grp.pat,
+          q_total: row.q_total,
+          v_total: row.v_total,
+          q_aberto: row.q_aberto,
+          v_aberto: row.v_aberto,
+          mais_antiga_aberto: row.mais_antiga,
+          mais_recente_aberto: row.mais_recente,
+          dias_max_aberto: diasMax,
+          alerta: diasMax >= 60 ? 'critico' : diasMax >= 30 ? 'atencao' : 'ok',
+        });
+      }
+    }
+
+    // Rank por valor em aberto
+    exposicao.sort((a, b) => b.v_aberto - a.v_aberto);
+
+    const total_aberto = exposicao.reduce((s, r) => s + r.v_aberto, 0);
+    const total_pago   = exposicao.reduce((s, r) => s + (r.v_total - r.v_aberto), 0);
+    const q_aberto     = exposicao.reduce((s, r) => s + r.q_aberto, 0);
+    const maior_atraso = exposicao.reduce((m, r) => r.dias_max_aberto > m ? r.dias_max_aberto : m, 0);
+
+    res.json({
+      exposicao,
+      resumo: {
+        total_aberto,
+        total_pago,
+        q_aberto,
+        q_linhas: exposicao.length,
+        maior_atraso_dias: maior_atraso,
+        ref: hoje,
+      },
+    });
+  } catch(e) { errRes(res, e); }
+});
+
 // ─── EXTRATOS ────────────────────────────────────────────────────
 // Meses disponíveis no banco para o período selecionado (para botões dinâmicos)
 router.get('/extratos/meses', (req, res) => {
