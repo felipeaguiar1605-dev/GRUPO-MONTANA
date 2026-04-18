@@ -431,12 +431,49 @@ router.get('/dashboard', (req, res) => {
   if (from) { dateFilter += ' AND e.data_iso >= @from'; params.from = from; }
   if (to) { dateFilter += ' AND e.data_iso <= @to'; params.to = to; }
 
+  // Contas vinculadas (IN SEGES/MP 05/2017) — não são fluxo operacional.
+  // Assessoria: conta BRB 031.015.240-2 (UFT). Ajustar conforme outras forem descobertas.
+  const CONTAS_VINCULADAS = ["'031.015.240-2'"]; // extensível
+  const CONTA_VINC_FILTER = ` AND (conta IS NULL OR conta NOT IN (${CONTAS_VINCULADAS.join(',')}))`;
+
+  // Status que NUNCA entram no fluxo operacional (mesmo que o valor tenha entrado na conta)
+  const STATUS_NAO_OPERACIONAL = `'INTERNO','INVESTIMENTO','TRANSFERENCIA','DEVOLVIDO','CONTA_VINCULADA'`;
+
+  // Palavras no histórico que indicam movimentação não-operacional mesmo quando status ainda não classificado
+  const HIST_NAO_OPERACIONAL = `(
+    UPPER(historico) LIKE '%TED DEVOLVIDA%' OR
+    UPPER(historico) LIKE '%BOLETO DEVOLVIDO%' OR
+    UPPER(historico) LIKE '%DESBL JUDICIAL%' OR
+    UPPER(historico) LIKE '%BACEN JUD%' OR
+    UPPER(historico) LIKE '%ESTORNO%' OR
+    UPPER(historico) LIKE '%RESGATE DEP%' OR
+    UPPER(historico) LIKE '%TRANSFERIDO DA POUPAN%' OR
+    UPPER(historico) LIKE '%MONTANA S LTDA%' OR
+    UPPER(historico) LIKE '%MONTANA ASS%' OR
+    UPPER(historico) LIKE '%NEVADA M LIMPEZA%' OR
+    UPPER(historico) LIKE '%PORTO DO VAU%' OR
+    UPPER(historico) LIKE '%MUSTANG%'
+  )`;
+
   // 1. Totais gerais dos extratos
   const totais = req.db.prepare(`
     SELECT
       COUNT(*) as total,
       COALESCE(SUM(credito), 0) as total_creditos,
       COALESCE(SUM(debito), 0) as total_debitos,
+      /* Receita operacional: exclui transferências internas, investimentos, devoluções, conta vinculada */
+      COALESCE(SUM(CASE
+        WHEN credito > 0
+         AND (status_conciliacao IS NULL OR status_conciliacao NOT IN (${STATUS_NAO_OPERACIONAL}))
+         AND NOT ${HIST_NAO_OPERACIONAL}
+         ${CONTA_VINC_FILTER.replace(/AND /, 'AND ')}
+        THEN credito END), 0) as receita_operacional,
+      /* Quebra: quanto foi excluído e por qual motivo */
+      COALESCE(SUM(CASE WHEN credito > 0 AND status_conciliacao = 'INTERNO'       THEN credito END), 0) as cr_interno,
+      COALESCE(SUM(CASE WHEN credito > 0 AND status_conciliacao = 'INVESTIMENTO'  THEN credito END), 0) as cr_investimento,
+      COALESCE(SUM(CASE WHEN credito > 0 AND status_conciliacao = 'TRANSFERENCIA' THEN credito END), 0) as cr_transferencia,
+      COALESCE(SUM(CASE WHEN credito > 0 AND status_conciliacao = 'DEVOLVIDO'     THEN credito END), 0) as cr_devolvido,
+      COALESCE(SUM(CASE WHEN credito > 0 AND conta IN (${CONTAS_VINCULADAS.join(',')}) THEN credito END), 0) as cr_conta_vinculada,
       COUNT(CASE WHEN status_conciliacao = 'CONCILIADO' THEN 1 END) as conciliados,
       COUNT(CASE WHEN status_conciliacao = 'PENDENTE' THEN 1 END) as pendentes,
       COUNT(CASE WHEN status_conciliacao = 'PARCIAL' THEN 1 END) as parciais,
@@ -473,8 +510,10 @@ router.get('/dashboard', (req, res) => {
   const despesas = req.db.prepare(`SELECT COUNT(*) as total, COALESCE(SUM(valor_bruto),0) as total_bruto, COALESCE(SUM(valor_liquido),0) as total_liquido, COALESCE(SUM(CASE WHEN UPPER(categoria) IN ('IMPOSTOS','DARF','FGTS','INSS') THEN valor_bruto ELSE 0 END),0) as total_impostos FROM despesas WHERE 1=1 ${despDateFilter}`).get(despParams);
 
   // 7. Fluxo mensal — filtrado pelo período quando informado, senão últimos 6 meses
-  // Exclui créditos classificados como INTERNO (transferências entre contas) ou INVESTIMENTO (resgates)
-  const EXCLUIR_FLUXO = `AND status_conciliacao NOT IN ('INTERNO','INVESTIMENTO')`;
+  // Aplica os mesmos filtros da receita_operacional (status, histórico, conta vinculada)
+  const EXCLUIR_FLUXO = `AND (status_conciliacao IS NULL OR status_conciliacao NOT IN (${STATUS_NAO_OPERACIONAL}))
+     AND NOT ${HIST_NAO_OPERACIONAL}
+     ${CONTA_VINC_FILTER}`;
   const fluxoFilter = (from ? ' AND data_iso >= @from' : '') + (to ? ' AND data_iso <= @to' : '');
   const fluxoMensal = from || to
     ? req.db.prepare(`
@@ -555,6 +594,97 @@ router.get('/dashboard', (req, res) => {
   };
   dashCacheSet(cacheKey, result);
   res.json(result);
+  } catch(e) { errRes(res, e); }
+});
+
+// ─── DASHBOARD: APURAÇÃO POR TOMADOR (Regime de Caixa) ───────────
+// Base: Lei 10.833/2003 art. 10 §2° — considera NFs PAGAS no período (não emitidas).
+// NFs são consideradas pagas quando: status_conciliacao='CONCILIADO' E
+//   - data_pagamento BETWEEN from..to (preferencial), OU
+//   - extrato_id → extratos.data_iso BETWEEN from..to (fallback)
+router.get('/dashboard/apuracao-caixa', (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from e to obrigatórios (YYYY-MM-DD)' });
+
+    // Usa COALESCE: prefere data_pagamento; cai em data_iso do extrato vinculado se faltar
+    const rows = req.db.prepare(`
+      SELECT
+        COALESCE(NULLIF(nf.contrato_ref,''), '(sem contrato)') as contrato_ref,
+        COALESCE(NULLIF(nf.tomador,''),      '—')              as tomador,
+        COUNT(*)                                                as qtd,
+        COALESCE(SUM(nf.valor_bruto), 0)                        as total_bruto,
+        COALESCE(SUM(nf.valor_liquido), 0)                      as total_liquido,
+        COALESCE(SUM(nf.retencao), 0)                           as total_retencao,
+        COALESCE(SUM(nf.iss), 0)                                as total_iss,
+        COALESCE(SUM(nf.inss), 0)                               as total_inss,
+        COALESCE(SUM(nf.ir), 0)                                 as total_ir,
+        COALESCE(SUM(nf.csll), 0)                               as total_csll,
+        COALESCE(SUM(nf.pis), 0)                                as total_pis_ret,
+        COALESCE(SUM(nf.cofins), 0)                             as total_cofins_ret
+      FROM notas_fiscais nf
+      LEFT JOIN extratos e ON e.id = nf.extrato_id
+      WHERE nf.status_conciliacao = 'CONCILIADO'
+        AND (
+          (NULLIF(nf.data_pagamento,'') IS NOT NULL AND nf.data_pagamento BETWEEN @from AND @to)
+          OR
+          (NULLIF(nf.data_pagamento,'') IS NULL AND e.data_iso BETWEEN @from AND @to)
+        )
+      GROUP BY contrato_ref, tomador
+      ORDER BY total_bruto DESC
+    `).all({ from, to });
+
+    // Totais e apuração tributária (aplicável apenas à Assessoria — Lucro Real)
+    const totalBruto    = rows.reduce((s, r) => s + (r.total_bruto || 0), 0);
+    const totalLiquido  = rows.reduce((s, r) => s + (r.total_liquido || 0), 0);
+    const totalRetencao = rows.reduce((s, r) => s + (r.total_retencao || 0), 0);
+
+    const isAssessoria = req.companyKey === 'assessoria';
+    // Lucro Real não-cumulativo: 1,65% PIS + 7,60% COFINS sobre receita
+    // Lucro Real Anual cumulativo (Segurança): 0,65% PIS + 3,00% COFINS
+    const aliq = isAssessoria
+      ? { pis: 0.0165, cofins: 0.0760, regime: 'Lucro Real — não-cumulativo' }
+      : req.companyKey === 'seguranca'
+        ? { pis: 0.0065, cofins: 0.0300, regime: 'Lucro Real — cumulativo' }
+        : { pis: 0,      cofins: 0,     regime: 'Simples Nacional (sem PIS/COFINS próprio)' };
+
+    const pisDevido    = +(totalBruto * aliq.pis).toFixed(2);
+    const cofinsDevido = +(totalBruto * aliq.cofins).toFixed(2);
+
+    // Retenções na fonte (apenas federais: UFT, UFNT) atuam como crédito
+    const pisRetido    = rows.reduce((s, r) => s + (r.total_pis_ret    || 0), 0);
+    const cofinsRetido = rows.reduce((s, r) => s + (r.total_cofins_ret || 0), 0);
+
+    res.json({
+      periodo: { from, to },
+      empresa: req.companyKey,
+      regime: aliq.regime,
+      tomadores: rows.map(r => ({
+        contrato_ref:    r.contrato_ref,
+        tomador:         r.tomador,
+        qtd:             r.qtd,
+        total_bruto:     +(+r.total_bruto).toFixed(2),
+        total_liquido:   +(+r.total_liquido).toFixed(2),
+        total_retencao:  +(+r.total_retencao).toFixed(2),
+        pct_retencao:    r.total_bruto > 0 ? +((r.total_retencao / r.total_bruto) * 100).toFixed(2) : 0,
+      })),
+      totais: {
+        qtd_nfs:        rows.reduce((s, r) => s + r.qtd, 0),
+        total_bruto:    +totalBruto.toFixed(2),
+        total_liquido:  +totalLiquido.toFixed(2),
+        total_retencao: +totalRetencao.toFixed(2),
+      },
+      apuracao: {
+        pis_aliquota:      aliq.pis,
+        cofins_aliquota:   aliq.cofins,
+        pis_devido:        pisDevido,
+        cofins_devido:     cofinsDevido,
+        pis_retido_fonte:  +pisRetido.toFixed(2),
+        cofins_retido_fonte: +cofinsRetido.toFixed(2),
+        pis_a_pagar:       +(pisDevido - pisRetido).toFixed(2),
+        cofins_a_pagar:    +(cofinsDevido - cofinsRetido).toFixed(2),
+      },
+    });
   } catch(e) { errRes(res, e); }
 });
 

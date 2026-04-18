@@ -39,7 +39,17 @@ function applyCompanyTheme() {
 }
 
 // ─── State ───────────────────────────────────────────────────────
-let _from='', _to='';
+// Por padrão, dashboard abre com o MÊS ATUAL (prioridade operacional do financeiro).
+// Pode ser alterado pelo filtro global (mes/trimestre/ano/custom) ou limpado.
+function _mesAtualRange(){
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = (d.getMonth()+1).toString().padStart(2,'0');
+  const ultimo = new Date(y, d.getMonth()+1, 0).getDate().toString().padStart(2,'0');
+  return { from: `${y}-${m}-01`, to: `${y}-${m}-${ultimo}` };
+}
+const _mesInicial = _mesAtualRange();
+let _from = _mesInicial.from, _to = _mesInicial.to;
 let _contratos=[];
 let _contratosEmpresa='';
 let _vinculacoes={};
@@ -284,6 +294,22 @@ async function loadDashboard(){
   const saldo = e.total_creditos - e.total_debitos;
   const pctConc = e.total > 0 ? ((e.conciliados / e.total) * 100).toFixed(1) : 0;
 
+  // Receita operacional = créditos - INTERNO - INVESTIMENTO - TRANSFERENCIA - DEVOLVIDO - CONTA VINCULADA - hist. não-operacional
+  const recOp = e.receita_operacional || 0;
+  const excInt = e.cr_interno || 0;
+  const excInv = e.cr_investimento || 0;
+  const excTrf = e.cr_transferencia || 0;
+  const excDev = e.cr_devolvido || 0;
+  const excCV  = e.cr_conta_vinculada || 0;
+  const totalExc = excInt + excInv + excTrf + excDev + excCV;
+  const tooltipExc = [
+    excInt && `INTERNO: ${brl(excInt)}`,
+    excInv && `INVESTIMENTO: ${brl(excInv)}`,
+    excTrf && `TRANSFERÊNCIA: ${brl(excTrf)}`,
+    excDev && `DEVOLVIDO: ${brl(excDev)}`,
+    excCV  && `CONTA VINCULADA: ${brl(excCV)}`,
+  ].filter(Boolean).join(' · ') || 'Nenhuma exclusão';
+
   // ─── KPIs Linha 1 ───
   document.getElementById('dash-kpis').innerHTML=`
     <div class="kpi" style="border-left:4px solid #1d4ed8">
@@ -291,10 +317,10 @@ async function loadDashboard(){
       <div class="kpi-v blue">${e.total}</div>
       <div class="kpi-s">extratos bancários</div>
     </div>
-    <div class="kpi" style="border-left:4px solid #15803d">
-      <div class="kpi-l">💰 Total Créditos</div>
-      <div class="kpi-v green">${brl(e.total_creditos)}</div>
-      <div class="kpi-s">entradas</div>
+    <div class="kpi" style="border-left:4px solid #15803d" title="${tooltipExc}">
+      <div class="kpi-l">💰 Receita Operacional</div>
+      <div class="kpi-v green">${brl(recOp)}</div>
+      <div class="kpi-s">bruto ${brl(e.total_creditos)}${totalExc>0?` · excluído ${brl(totalExc)}`:''}</div>
     </div>
     <div class="kpi" style="border-left:4px solid #dc2626">
       <div class="kpi-l">📤 Total Débitos</div>
@@ -302,7 +328,7 @@ async function loadDashboard(){
       <div class="kpi-s">saídas</div>
     </div>
     <div class="kpi" style="border-left:4px solid ${saldo>=0?'#15803d':'#dc2626'}">
-      <div class="kpi-l">📈 Saldo</div>
+      <div class="kpi-l">📈 Saldo (bruto)</div>
       <div class="kpi-v" style="color:${saldo>=0?'#15803d':'#dc2626'}">${brl(saldo)}</div>
       <div class="kpi-s">${saldo>=0?'positivo':'negativo'}</div>
     </div>
@@ -362,6 +388,9 @@ async function loadDashboard(){
   });
   document.getElementById('dash-chart').innerHTML = chartHtml || '<div class="muted" style="padding:40px;text-align:center">Sem dados de fluxo</div>';
   document.getElementById('dash-chart-labels').innerHTML = labelsHtml;
+
+  // ─── Apuração por Tomador (Regime de Caixa) ───
+  loadApuracaoCaixa();
 
   // ─── Donut Visual de Conciliação ───
   const cs = d.concStatus;
@@ -552,6 +581,98 @@ function renderExtFilters(){
       ${botoesHtml}
       <span style="margin-left:12px;font-size:10px;color:#94a3b8" id="ext-mes-info"></span>
     </div>`;
+}
+
+// ─── Apuração por Tomador (Regime de Caixa) ──────────────────────
+async function loadApuracaoCaixa(){
+  if(!_from || !_to){
+    const body = document.getElementById('dash-apuracao-body');
+    if(body) body.innerHTML = '<div class="muted" style="padding:16px;font-size:11px;text-align:center">Selecione um período para ver a apuração.</div>';
+    return;
+  }
+  let d;
+  try {
+    d = await api(`/dashboard/apuracao-caixa?from=${_from}&to=${_to}`);
+  } catch(e) {
+    document.getElementById('dash-apuracao-body').innerHTML =
+      `<div style="padding:16px;color:#dc2626;font-size:11px">Erro ao carregar apuração: ${e.message||e}</div>`;
+    return;
+  }
+  const regimeEl = document.getElementById('dash-apuracao-regime');
+  if(regimeEl) regimeEl.textContent = d.regime || '';
+
+  const body = document.getElementById('dash-apuracao-body');
+  if(!d.tomadores || d.tomadores.length === 0){
+    body.innerHTML = `<div class="muted" style="padding:24px;text-align:center;font-size:11px">Nenhuma NF paga (conciliada) encontrada no período.</div>`;
+    return;
+  }
+
+  const linhas = d.tomadores.map(t => `
+    <tr>
+      <td style="font-weight:700;font-size:11px;color:#0f172a">${t.contrato_ref||'—'}</td>
+      <td style="font-size:10px;color:#475569;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${t.tomador||''}">${t.tomador||'—'}</td>
+      <td style="text-align:right;font-size:11px;color:#334155">${t.qtd}</td>
+      <td style="text-align:right;font-weight:700;font-size:11px;color:#15803d">${brl(t.total_bruto)}</td>
+      <td style="text-align:right;font-size:10px;color:#64748b">${brl(t.total_retencao)}<br><span style="font-size:9px;color:#94a3b8">${t.pct_retencao}%</span></td>
+      <td style="text-align:right;font-weight:700;font-size:11px;color:#1d4ed8">${brl(t.total_liquido)}</td>
+    </tr>`).join('');
+
+  const a = d.apuracao;
+  const apuracaoHtml = (a.pis_aliquota>0 || a.cofins_aliquota>0) ? `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px">
+      <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:8px">
+        <div style="font-size:9px;font-weight:700;color:#78350f;text-transform:uppercase">PIS devido (${(a.pis_aliquota*100).toFixed(2)}%)</div>
+        <div style="font-size:14px;font-weight:800;color:#92400e;margin-top:2px">${brl(a.pis_devido)}</div>
+        <div style="font-size:9px;color:#78350f;margin-top:1px">– retido: ${brl(a.pis_retido_fonte)}</div>
+        <div style="font-size:10px;font-weight:700;color:${a.pis_a_pagar>0?'#dc2626':'#15803d'};margin-top:2px">= a pagar: ${brl(a.pis_a_pagar)}</div>
+      </div>
+      <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:8px">
+        <div style="font-size:9px;font-weight:700;color:#78350f;text-transform:uppercase">COFINS devida (${(a.cofins_aliquota*100).toFixed(2)}%)</div>
+        <div style="font-size:14px;font-weight:800;color:#92400e;margin-top:2px">${brl(a.cofins_devido)}</div>
+        <div style="font-size:9px;color:#78350f;margin-top:1px">– retido: ${brl(a.cofins_retido_fonte)}</div>
+        <div style="font-size:10px;font-weight:700;color:${a.cofins_a_pagar>0?'#dc2626':'#15803d'};margin-top:2px">= a pagar: ${brl(a.cofins_a_pagar)}</div>
+      </div>
+      <div style="background:#dbeafe;border:1px solid #93c5fd;border-radius:6px;padding:8px">
+        <div style="font-size:9px;font-weight:700;color:#1e3a8a;text-transform:uppercase">Receita bruta</div>
+        <div style="font-size:14px;font-weight:800;color:#1e40af;margin-top:2px">${brl(d.totais.total_bruto)}</div>
+        <div style="font-size:9px;color:#1e3a8a;margin-top:1px">${d.totais.qtd_nfs} NFs pagas</div>
+      </div>
+      <div style="background:#dcfce7;border:1px solid #86efac;border-radius:6px;padding:8px">
+        <div style="font-size:9px;font-weight:700;color:#14532d;text-transform:uppercase">Líquido recebido</div>
+        <div style="font-size:14px;font-weight:800;color:#166534;margin-top:2px">${brl(d.totais.total_liquido)}</div>
+        <div style="font-size:9px;color:#14532d;margin-top:1px">retenções: ${brl(d.totais.total_retencao)}</div>
+      </div>
+    </div>` : `
+    <div style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;padding:10px;margin-top:10px;font-size:11px;color:#475569">
+      Receita bruta: <strong>${brl(d.totais.total_bruto)}</strong> · Líquido: <strong>${brl(d.totais.total_liquido)}</strong> · ${d.totais.qtd_nfs} NFs pagas · <em>${d.regime}</em>
+    </div>`;
+
+  body.innerHTML = `
+    <div class="tw" style="max-height:320px;overflow-y:auto">
+      <table>
+        <thead>
+          <tr>
+            <th style="text-align:left">Contrato / Órgão</th>
+            <th style="text-align:left">Tomador</th>
+            <th style="text-align:right">NFs</th>
+            <th style="text-align:right">Valor Bruto</th>
+            <th style="text-align:right">Retenção</th>
+            <th style="text-align:right">Líquido</th>
+          </tr>
+        </thead>
+        <tbody>${linhas}</tbody>
+        <tfoot>
+          <tr style="background:#f8fafc;font-weight:800">
+            <td colspan="2" style="font-size:11px;color:#0f172a">TOTAL</td>
+            <td style="text-align:right;font-size:11px">${d.totais.qtd_nfs}</td>
+            <td style="text-align:right;font-size:11px;color:#15803d">${brl(d.totais.total_bruto)}</td>
+            <td style="text-align:right;font-size:11px;color:#64748b">${brl(d.totais.total_retencao)}</td>
+            <td style="text-align:right;font-size:11px;color:#1d4ed8">${brl(d.totais.total_liquido)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    ${apuracaoHtml}`;
 }
 
 async function loadExtratos(){
@@ -2338,16 +2459,20 @@ async function api(url, opts) {
 }
 
 applyCompanyTheme();
-// Inicializa o filtro de período com o ANO corrente ao abrir o sistema
+// Inicializa o filtro de período com o MÊS corrente (prioridade do financeiro)
 (function initDefaultPeriod(){
-  const anoAtual = new Date().getFullYear().toString();
-  document.getElementById('gf-tipo').value = 'ano';
+  const d = new Date();
+  const anoAtual = d.getFullYear().toString();
+  const mesYM    = d.toISOString().slice(0,7);                                  // YYYY-MM
+  const ultimo   = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate()
+                   .toString().padStart(2,'0');
+  document.getElementById('gf-tipo').value = 'mes';
+  document.getElementById('gf-mes').value  = mesYM;
   document.getElementById('gf-ano').value  = anoAtual;
-  document.getElementById('gf-mes').value  = new Date().toISOString().slice(0,7);
-  _from = anoAtual + '-01-01';
-  _to   = anoAtual + '-12-31';
-  document.getElementById('gf-ano-wrap').style.display = 'block';
-  document.getElementById('gf-label').innerHTML = `<strong>${_from} a ${_to}</strong>`;
+  _from = `${mesYM}-01`;
+  _to   = `${mesYM}-${ultimo}`;
+  document.getElementById('gf-mes-wrap').style.display = 'block';
+  document.getElementById('gf-label').innerHTML = `<strong>${_from} a ${_to}</strong> <em style="color:#64748b;font-size:11px">(mês atual)</em>`;
 })();
 initAuth();
 
