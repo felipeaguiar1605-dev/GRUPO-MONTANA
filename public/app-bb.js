@@ -388,7 +388,7 @@ async function bbSyncManual() {
         res.innerHTML = r.contas.map(c => `
           <div style="padding:3px 0;border-bottom:1px solid #f1f5f9">
             ${c.erro
-              ? `❌ Conta ${c.conta}: <span style="color:#ef4444">${c.erro.substring(0,80)}</span>`
+              ? `❌ Conta ${c.conta}: <span style="color:#ef4444" title="${(c.erro || '').replace(/"/g,'&quot;')}">${c.erro.substring(0,300)}</span>`
               : `✅ Conta ${c.conta} (${c.descricao}): <b>+${c.imported}</b> importados${c.skipped ? ` · ${c.skipped} existentes` : ''}`
             }
           </div>

@@ -3724,18 +3724,44 @@ router.get('/conciliacao/tres-vias', (req, res) => {
       `SELECT ob, gestao, favorecido, data_pagamento, valor_pago FROM pagamentos WHERE ${pgWhere} ORDER BY data_pagamento_iso DESC LIMIT 500`
     ).all(pgP);
 
-    // 4. Resumo por contrato: agrupa pelas chaves usadas nas próprias NFs/extratos
-    // (NFs e extratos usam identificadores históricos que podem diferir do numContrato atual)
+    // 4. Resumo por contrato: agrupa pelas chaves usadas nas próprias NFs/extratos.
+    // Normaliza labels históricos para numContrato canônico e descarta:
+    //   - marcador "⚠️ CONTAMINADA" (NFs pertencentes a outra empresa)
+    //   - labels técnicos não-contrato (JUROS, SALDO, TRANSFERÊNCIA, PIX REJEITADO, Montana Segurança/Assessoria)
+    const contratosCanon = new Set(
+      req.db.prepare('SELECT numContrato FROM contratos').all().map(r => r.numContrato)
+    );
+    // Mapeamento de labels históricos → numContrato atual (mesma empresa).
+    // Preenchido manualmente conforme contaminação identificada nos bancos.
+    const ALIAS = {
+      'DETRAN 02/2024 + 2°TA': 'DETRAN 41/2023 + 2°TA',
+      'UFT 29/2022 + 9°TA': 'UFNT 30/2022',
+      'UFT 29/2022 + 9°TA (Conta Vinculada)': 'UFNT 30/2022',
+    };
+    const LABELS_DESCARTAVEIS = new Set([
+      'JUROS', 'SALDO', 'TRANSFERÊNCIA', 'TRANSFERENCIA', 'PIX REJEITADO',
+      'Montana Segurança', 'Montana Assessoria', '(sem contrato)',
+    ]);
+    const isContaminada = (s) => typeof s === 'string' && s.indexOf('⚠️') !== -1;
+    const isDescartavel = (s) => LABELS_DESCARTAVEIS.has(s) || isContaminada(s);
+    const normalizar = (s) => {
+      if (!s) return '(sem contrato)';
+      if (ALIAS[s]) return ALIAS[s];
+      return s;
+    };
+
     const mapaChaves = {};
     nfs.forEach(n => {
-      const k = n.contrato_ref || '(sem contrato)';
-      if (!mapaChaves[k]) mapaChaves[k] = { contrato: k, numContrato: k, qtdNFs: 0, totalNFs: 0, qtdExtratos: 0, totalExtrato: 0 };
+      const k = normalizar(n.contrato_ref);
+      if (isDescartavel(k) || isContaminada(n.contrato_ref)) return;
+      if (!mapaChaves[k]) mapaChaves[k] = { contrato: k, numContrato: k, qtdNFs: 0, totalNFs: 0, qtdExtratos: 0, totalExtrato: 0, canonico: contratosCanon.has(k) };
       mapaChaves[k].qtdNFs++;
       mapaChaves[k].totalNFs += n.valor_bruto || 0;
     });
     extratos.forEach(e => {
-      const k = e.contrato_vinculado || '(sem contrato)';
-      if (!mapaChaves[k]) mapaChaves[k] = { contrato: k, numContrato: k, qtdNFs: 0, totalNFs: 0, qtdExtratos: 0, totalExtrato: 0 };
+      const k = normalizar(e.contrato_vinculado);
+      if (isDescartavel(k) || isContaminada(e.contrato_vinculado)) return;
+      if (!mapaChaves[k]) mapaChaves[k] = { contrato: k, numContrato: k, qtdNFs: 0, totalNFs: 0, qtdExtratos: 0, totalExtrato: 0, canonico: contratosCanon.has(k) };
       mapaChaves[k].qtdExtratos++;
       mapaChaves[k].totalExtrato += e.credito || 0;
     });
