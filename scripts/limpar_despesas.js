@@ -37,16 +37,28 @@ const REMOVER = [
     pattern: "descricao LIKE 'BB Rende F%' OR descricao LIKE '%Rende Facil%' OR descricao LIKE '%CDB BB%'",
   },
   {
-    descricao: 'Transferência interna — Montana Serviços',
-    pattern: "descricao LIKE '%MONTANA SERVICOS%' OR descricao LIKE '%MONTANA SERVI%'",
+    descricao: 'Transferência intragrupo — Montana Serviços / Assessoria / Segurança / S LTDA',
+    pattern: "descricao LIKE '%MONTANA SERVICOS%' OR descricao LIKE '%MONTANA SERVI%' OR descricao LIKE '%MONTANA ASS%' OR descricao LIKE '%MONTANA SEG%' OR descricao LIKE '%MONTANA S LTDA%' OR descricao LIKE '%MONTANA S/ASS%'",
+  },
+  {
+    descricao: 'Transferência intragrupo — Nevada (M Limpeza / Embalagens)',
+    pattern: "descricao LIKE '%NEVADA M LIMPEZA%' OR descricao LIKE '%NEVADA EMBALAGENS%' OR descricao LIKE '%NEVADA M LIMP%'",
+  },
+  {
+    descricao: 'Transferência intragrupo — Mustang G E EIRELI',
+    pattern: "descricao LIKE '%MUSTANG%'",
+  },
+  {
+    descricao: 'Transferência intragrupo — Porto do Vau Serviços Privados',
+    pattern: "descricao LIKE '%PORTO V S PR%' OR descricao LIKE '%PORTO DO VAU%' OR descricao LIKE '%PORTO VAU%'",
   },
   {
     descricao: 'TED para conta própria da empresa',
-    pattern: "descricao LIKE 'TED - 070 0031 014092519000151 MONT%'",
+    pattern: "descricao LIKE 'TED - 070 0031 014092519000151 MONT%' OR descricao LIKE '%TRANSFER.INTERNA%' OR descricao LIKE '%ENTRE CONTAS PROP%' OR descricao LIKE '%TED ENTRE CONTAS%'",
   },
   {
     descricao: 'Resgate de aplicação (crédito de volta)',
-    pattern: "descricao LIKE '%Aplicacao%Resgate%' OR descricao LIKE '%Resg Rende%'",
+    pattern: "descricao LIKE '%Aplicacao%Resgate%' OR descricao LIKE '%Resg Rende%' OR descricao LIKE '%APLIC.AUTOM%' OR descricao LIKE '%RESG.AUTOM%'",
   },
 ];
 
