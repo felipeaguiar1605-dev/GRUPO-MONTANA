@@ -120,6 +120,12 @@ app.use('/api/juridico',     require('./routes/juridico'));
 // ─── Apuração PIS/COFINS Segurança ───────────────────────────
 app.use('/api/piscofins-seguranca', require('./routes/piscofins-seguranca'));
 
+// ─── INSS Retido / S-1300 (Assessoria) ───────────────────────
+app.use('/api/inss-retido', require('./routes/inss-retido'));
+
+// ─── Painel de Pagamentos por Contrato ───────────────────────
+app.use('/api/pagamentos-contrato', require('./routes/pagamentos-contrato'));
+
 // ─── Diagnóstico Noturno ──────────────────────────────────────
 app.get('/api/diagnostico/ultimo', (req, res) => {
   const diagFile = path.join(__dirname, '..', 'data', 'diagnostico_noturno.json');

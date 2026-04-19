@@ -185,6 +185,7 @@ function showTab(id,el){
   if(id==='juridico')  window.juridicoInit   && window.juridicoInit();
   if(id==='compras')   window.comprasInit    && window.comprasInit();
   if(id==='supervisor')window.supervisorInit && window.supervisorInit();
+  if(id==='painel-pgto') window.painelPgtoInit && window.painelPgtoInit();
 }
 
 // ─── Global Period Filter ────────────────────────────────────────
@@ -950,37 +951,115 @@ function parcStatusBadge(st){
 }
 
 // ─── Estado de filtro da aba Contratos ───────────────────────────
-let _contFiltroStatus = 'ATIVOS'; // 'ATIVOS' | 'TODOS' | 'ENCERRADOS'
+let _contFiltroStatus = 'ATIVOS'; // 'ATIVOS' | 'TODOS' | 'ENCERRADOS' | 'VENCENDO'
+let _contBusca = '';
+let _contSort = 'nome';       // 'nome' | 'valor' | 'pct' | 'vigencia' | 'saldo'
+let _contAgruparOrgao = false;
+let _contPeriodo = 'ano';     // 'ano' (padrão — ano corrente) | 'mes' | 'todos' | 'global'
+let _saudeByNum = {};          // {numContrato: statusSaude} — populado por loadSaudeContratos
+let _saudeDataByNum = {};      // dados completos /contratos/saude
+let _saudeResumo = null;       // resumo da última carga (para KPIs do topo)
+
+// Retorna {from, to, label} conforme _contPeriodo
+function getContPeriodo(){
+  const hoje = new Date();
+  const y = hoje.getFullYear();
+  if (_contPeriodo === 'mes') {
+    const m = String(hoje.getMonth()+1).padStart(2,'0');
+    const last = new Date(y, hoje.getMonth()+1, 0).getDate();
+    return { from: `${y}-${m}-01`, to: `${y}-${m}-${last}`, label: `${m}/${y}` };
+  }
+  if (_contPeriodo === 'todos') {
+    return { from: '', to: '', label: 'Histórico completo' };
+  }
+  if (_contPeriodo === 'global') {
+    return { from: _from||'', to: _to||'', label: (_from||'...')+' a '+(_to||'...') };
+  }
+  // 'ano' (padrão)
+  return { from: `${y}-01-01`, to: `${y}-12-31`, label: `Ano ${y}` };
+}
 
 async function loadContratos(){
   const d=await api('/contratos');
   const todos = d.data || [];
   const s=d.summary||{soma_pago:0,soma_aberto:0,total_contratos:0};
 
-  // Aplica filtro
-  const lista = _contFiltroStatus === 'ATIVOS'
-    ? todos.filter(c => !c.status.includes('ENCERRADO') && !c.status.includes('RESCINDIDO'))
-    : _contFiltroStatus === 'ENCERRADOS'
-    ? todos.filter(c => c.status.includes('ENCERRADO') || c.status.includes('RESCINDIDO'))
-    : todos;
+  const hoje = new Date();
+  const vigenciaDias = (c) => {
+    if (!c.vigencia_fim) return null;
+    return Math.floor((new Date(c.vigencia_fim) - hoje) / 86400000);
+  };
+
+  // Aplica filtro de status
+  let lista;
+  if (_contFiltroStatus === 'ATIVOS') {
+    lista = todos.filter(c => !c.status.includes('ENCERRADO') && !c.status.includes('RESCINDIDO'));
+  } else if (_contFiltroStatus === 'ENCERRADOS') {
+    lista = todos.filter(c => c.status.includes('ENCERRADO') || c.status.includes('RESCINDIDO'));
+  } else if (_contFiltroStatus === 'VENCENDO') {
+    lista = todos.filter(c => {
+      const dias = vigenciaDias(c);
+      return dias !== null && dias <= 60; // inclui vencidos (dias < 0)
+    });
+  } else {
+    lista = todos;
+  }
+
+  // Aplica busca textual
+  if (_contBusca) {
+    const q = _contBusca.toLowerCase();
+    lista = lista.filter(c =>
+      (c.numContrato||'').toLowerCase().includes(q) ||
+      (c.contrato||'').toLowerCase().includes(q) ||
+      (c.orgao||'').toLowerCase().includes(q)
+    );
+  }
+
+  // Aplica ordenação
+  const pctOf = c => { const t=c.total_pago+c.total_aberto; return t>0?c.total_pago/t:0; };
+  lista.sort((a,b) => {
+    switch(_contSort){
+      case 'valor':    return (b.valor_mensal_bruto||0) - (a.valor_mensal_bruto||0);
+      case 'pct':      return pctOf(b) - pctOf(a);
+      case 'saldo':    return (b.total_aberto||0) - (a.total_aberto||0);
+      case 'vigencia': {
+        const da = vigenciaDias(a), db = vigenciaDias(b);
+        if (da===null && db===null) return 0;
+        if (da===null) return 1;
+        if (db===null) return -1;
+        return da - db;
+      }
+      default: return (a.contrato||'').localeCompare(b.contrato||'', 'pt-BR');
+    }
+  });
 
   const pctGeral=s.soma_pago+s.soma_aberto>0?((s.soma_pago/(s.soma_pago+s.soma_aberto))*100).toFixed(1):0;
   const emDia=todos.filter(c=>c.status.includes('EM DIA')).length;
   const criticos=todos.filter(c=>c.status.includes('CRÍTICO')).length;
 
-  // Alerta de vigência: contratos vencendo em até 60 dias
-  const hoje = new Date();
+  // Alerta de vigência: contratos vencendo em até 60 dias (+ vencidos)
   const alertaVig = todos.filter(c => {
-    if (!c.vigencia_fim) return false;
-    const dias = Math.floor((new Date(c.vigencia_fim) - hoje) / 86400000);
-    return dias >= 0 && dias <= 60;
+    const dias = vigenciaDias(c);
+    return dias !== null && dias <= 60 && !c.status.includes('ENCERRADO');
+  }).length;
+  const vencidos = todos.filter(c => {
+    const dias = vigenciaDias(c);
+    return dias !== null && dias < 0 && !c.status.includes('ENCERRADO');
   }).length;
 
+  const vigActivo = _contFiltroStatus === 'VENCENDO' ? 'outline:2px solid #dc2626;' : '';
+  // Se já temos dados de saúde carregados, usa-os (respeita período); senão mostra fallback
+  const per = getContPeriodo();
+  const periodoBadge = `<span style="font-size:9px;background:#f1f5f9;color:#475569;padding:2px 8px;border-radius:10px;font-weight:700;margin-left:6px">${per.label}</span>`;
+  const recebidoPeriodo = _saudeResumo ? _saudeResumo.total_recebido : s.soma_pago;
+  const abertoPeriodo   = _saudeResumo ? Math.max(0, _saudeResumo.total_saldo) : s.soma_aberto;
+  const nfsPeriodo      = _saudeResumo ? _saudeResumo.total_nfs : (s.soma_pago + s.soma_aberto);
+  const pctPeriodo      = nfsPeriodo>0 ? Math.round(recebidoPeriodo/nfsPeriodo*100) : 0;
   document.getElementById('cont-kpis').innerHTML=`
     <div class="kpi"><div class="kpi-l">Contratos Ativos</div><div class="kpi-v blue">${todos.filter(c=>!c.status.includes('ENCERRADO')).length}</div><div class="kpi-s">${emDia} em dia · ${criticos} críticos</div></div>
-    <div class="kpi"><div class="kpi-l">Total Recebido</div><div class="kpi-v green">${brl(s.soma_pago)}</div><div class="kpi-s">valores pagos</div></div>
-    <div class="kpi"><div class="kpi-l">Total Em Aberto</div><div class="kpi-v red">${brl(s.soma_aberto)}</div><div class="kpi-s">a receber / em atraso</div></div>
-    <div class="kpi ${alertaVig>0?'':''}"><div class="kpi-l">Vigências</div><div class="kpi-v ${alertaVig>0?'red':'green'}">${alertaVig>0?alertaVig+' ⚠':'✅'}</div><div class="kpi-s">${alertaVig>0?alertaVig+' vencendo em 60 dias':'todas em vigor'}</div></div>
+    <div class="kpi"><div class="kpi-l">Recebido ${periodoBadge}</div><div class="kpi-v green">${brl(recebidoPeriodo)}</div><div class="kpi-s">${pctPeriodo}% do faturado no período</div></div>
+    <div class="kpi"><div class="kpi-l">Em Aberto ${periodoBadge}</div><div class="kpi-v red">${brl(abertoPeriodo)}</div><div class="kpi-s">NFs sem conciliar no período</div></div>
+    <div class="kpi" style="cursor:pointer;${vigActivo}" onclick="_contFiltroStatus=(_contFiltroStatus==='VENCENDO'?'ATIVOS':'VENCENDO');loadContratos()" title="Clique para filtrar"><div class="kpi-l">Vigências ⚠</div><div class="kpi-v ${alertaVig>0?'red':'green'}">${alertaVig>0?alertaVig:'✅'}</div><div class="kpi-s">${vencidos>0?vencidos+' vencidos · ':''}${alertaVig>0?'vence em ≤60d':'todas em vigor'}</div></div>
   `;
 
   // Popula filtro de contrato na aba de Conciliação 3V
@@ -989,7 +1068,7 @@ async function loadContratos(){
     todos.forEach(c => { const o=document.createElement('option'); o.value=c.numContrato; o.textContent=c.numContrato+' — '+c.contrato; c3vSel.appendChild(o); });
   }
 
-  const cards=lista.map(c=>{
+  const cardsArr=lista.map(c=>{
     const total=c.total_pago+c.total_aberto;
     const pct=total>0?((c.total_pago/total)*100).toFixed(1):0;
     const barColor=pct>=80?'#15803d':pct>=50?'#d97706':'#dc2626';
@@ -1005,11 +1084,19 @@ async function loadContratos(){
       else if (dias <= 60) vigAlerta = `<span style="font-size:9px;background:#fef9c3;color:#92400e;padding:1px 6px;border-radius:8px;font-weight:700">⚠️ Vence em ${dias}d</span>`;
     }
 
-    return `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:12px;overflow:hidden">
+    // Saúde badge (se já carregado de /contratos/saude)
+    const saude = _saudeByNum[c.numContrato];
+    const saudeBadgeHtml = saude ? saudeBadge(saude) : '';
+    const sd = _saudeDataByNum[c.numContrato];
+    const receitaMedia = sd && sd.receita_mensal_media > 0 ? brl(sd.receita_mensal_media) : null;
+    const desvioMes = sd && c.valor_mensal_bruto > 0 && sd.receita_mensal_media > 0
+      ? Math.round((sd.receita_mensal_media / c.valor_mensal_bruto - 1) * 100) : null;
+
+    return `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:12px;overflow:hidden" class="cont-card">
       <div style="padding:16px;cursor:pointer" onclick="toggleParcelas('${id}','${encodeURIComponent(c.numContrato)}')">
         <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:8px;margin-bottom:10px">
           <div style="flex:1;min-width:200px">
-            <div style="font-size:14px;font-weight:700;color:#0f172a">${c.contrato} ${vigAlerta}</div>
+            <div style="font-size:14px;font-weight:700;color:#0f172a">${c.contrato} ${vigAlerta} ${saudeBadgeHtml}</div>
             <div style="font-size:10px;color:#94a3b8;margin-top:2px">Contrato: ${c.numContrato}${c.orgao?' · '+c.orgao:''}${c.vigencia_inicio?' · Vigência: '+c.vigencia_inicio+' a '+c.vigencia_fim:''}</div>
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
@@ -1023,11 +1110,12 @@ async function loadContratos(){
             <span style="font-size:18px;color:#94a3b8;transition:.2s" id="arrow-${id}">&#9660;</span>
           </div>
         </div>
-        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px">
+        <div class="cont-card-nums" style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px">
           <div style="min-width:120px"><div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Mensal Líquido</div><div style="font-size:14px;font-weight:700;color:#1d4ed8">${brl(c.valor_mensal_liquido)}</div></div>
           <div style="min-width:120px"><div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Mensal Bruto</div><div style="font-size:14px;font-weight:700;color:#475569">${brl(c.valor_mensal_bruto)}</div></div>
           <div style="min-width:120px"><div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Total Pago</div><div style="font-size:14px;font-weight:700;color:#15803d">${brl(c.total_pago)}</div></div>
           <div style="min-width:120px"><div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Em Aberto</div><div style="font-size:14px;font-weight:700;color:${c.total_aberto>0?'#dc2626':'#15803d'}">${brl(c.total_aberto)}</div></div>
+          ${receitaMedia ? `<div style="min-width:120px" title="Receita média efetiva / mês — baseado em NFs conciliadas"><div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Receita Média/mês</div><div style="font-size:14px;font-weight:700;color:${desvioMes !== null && desvioMes < -20 ? '#dc2626' : desvioMes !== null && desvioMes > 10 ? '#15803d' : '#475569'}">${receitaMedia}${desvioMes !== null ? ` <span style="font-size:9px;font-weight:600">(${desvioMes>0?'+':''}${desvioMes}%)</span>` : ''}</div></div>` : ''}
           <div style="min-width:80px"><div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Parcelas</div><div style="font-size:14px;font-weight:700;color:#475569">${c.qtd_parcelas}</div></div>
         </div>
         <div style="background:#f1f5f9;border-radius:6px;height:8px;overflow:hidden">
@@ -1040,22 +1128,203 @@ async function loadContratos(){
       </div>
       <div id="parc-${id}" style="display:none;border-top:1px solid #e2e8f0;background:#f8fafc;padding:0"></div>
     </div>`;
-  }).join('');
+  });
+  const cards = cardsArr.join('');
 
-  // Barra de ações no topo
-  const acoes = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
-    <button onclick="abrirNovoContrato()" style="padding:5px 14px;font-size:11px;border:none;border-radius:6px;background:#15803d;color:#fff;cursor:pointer;font-weight:700">➕ Novo Contrato</button>
-    <button onclick="classificarTodosCreditos()" style="padding:5px 14px;font-size:11px;border:1px solid #7c3aed;border-radius:6px;background:#f5f3ff;color:#7c3aed;cursor:pointer;font-weight:600">🏷 Classificar Todos</button>
-    <button onclick="exportarExcel('contratos')" style="padding:5px 14px;font-size:11px;border:1px solid #1d4ed8;border-radius:6px;background:#eff6ff;color:#1d4ed8;cursor:pointer;font-weight:600">⬇ Excel</button>
-    <div style="margin-left:auto;display:flex;gap:4px">
-      ${['ATIVOS','TODOS','ENCERRADOS'].map(f=>`<button onclick="_contFiltroStatus='${f}';loadContratos()" style="padding:3px 10px;font-size:10px;border:1px solid ${_contFiltroStatus===f?'#1d4ed8':'#e2e8f0'};border-radius:5px;background:${_contFiltroStatus===f?'#eff6ff':'#fff'};color:${_contFiltroStatus===f?'#1d4ed8':'#64748b'};cursor:pointer;font-weight:600">${f}</button>`).join('')}
+  // Barra de ações + busca + ordenação
+  const sortOpts = [
+    {k:'nome',     l:'Nome A→Z'},
+    {k:'valor',    l:'Mensal (maior)'},
+    {k:'pct',      l:'% Pago (maior)'},
+    {k:'saldo',    l:'Em Aberto (maior)'},
+    {k:'vigencia', l:'Vigência (próxima)'},
+  ];
+  const filtros = [
+    {k:'ATIVOS',l:'Ativos'},
+    {k:'VENCENDO',l:'Vencendo ≤60d'},
+    {k:'TODOS',l:'Todos'},
+    {k:'ENCERRADOS',l:'Encerrados'},
+  ];
+  const periodos = [
+    {k:'ano',   l:`Ano ${new Date().getFullYear()}`},
+    {k:'mes',   l:'Mês atual'},
+    {k:'global',l:'Período global'},
+    {k:'todos', l:'Histórico'},
+  ];
+  const acoes = `
+  <div class="cont-toolbar" style="margin-bottom:12px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+      <button onclick="abrirNovoContrato()" style="padding:5px 14px;font-size:11px;border:none;border-radius:6px;background:#15803d;color:#fff;cursor:pointer;font-weight:700">➕ Novo Contrato</button>
+      <button onclick="classificarTodosCreditos()" style="padding:5px 14px;font-size:11px;border:1px solid #7c3aed;border-radius:6px;background:#f5f3ff;color:#7c3aed;cursor:pointer;font-weight:600">🏷 Classificar Todos</button>
+      <button onclick="exportarExcel('contratos')" style="padding:5px 14px;font-size:11px;border:1px solid #1d4ed8;border-radius:6px;background:#eff6ff;color:#1d4ed8;cursor:pointer;font-weight:600">⬇ Excel</button>
+      <button onclick="_contAgruparOrgao=!_contAgruparOrgao;loadContratos()" style="padding:5px 14px;font-size:11px;border:1px solid ${_contAgruparOrgao?'#0891b2':'#e2e8f0'};border-radius:6px;background:${_contAgruparOrgao?'#ecfeff':'#fff'};color:${_contAgruparOrgao?'#0891b2':'#64748b'};cursor:pointer;font-weight:600">📁 Agrupar por Órgão</button>
+      <button onclick="document.getElementById('cont-saude-panel').style.display=(document.getElementById('cont-saude-panel').style.display==='none'?'block':'none')" style="padding:5px 14px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;color:#64748b;cursor:pointer;font-weight:600" title="Mostrar/ocultar tabela comparativa">📊 Tabela Saúde</button>
     </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="cont-busca" type="search" placeholder="🔎 Buscar por nome, órgão ou número…" value="${(_contBusca||'').replace(/"/g,'&quot;')}" oninput="clearTimeout(window._cbt);window._cbt=setTimeout(()=>{_contBusca=this.value;loadContratos()},250)" style="flex:1;min-width:200px;padding:6px 10px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px">
+      <select onchange="_contSort=this.value;loadContratos()" style="padding:6px 10px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;cursor:pointer">
+        ${sortOpts.map(o=>`<option value="${o.k}"${_contSort===o.k?' selected':''}>Ordenar: ${o.l}</option>`).join('')}
+      </select>
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
+        ${filtros.map(f=>`<button onclick="_contFiltroStatus='${f.k}';loadContratos()" style="padding:3px 10px;font-size:10px;border:1px solid ${_contFiltroStatus===f.k?'#1d4ed8':'#e2e8f0'};border-radius:5px;background:${_contFiltroStatus===f.k?'#eff6ff':'#fff'};color:${_contFiltroStatus===f.k?'#1d4ed8':'#64748b'};cursor:pointer;font-weight:600">${f.l}</button>`).join('')}
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px">
+      <span style="font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase">Período dos valores:</span>
+      ${periodos.map(p=>`<button onclick="_contPeriodo='${p.k}';_saudeResumo=null;loadContratos()" style="padding:3px 10px;font-size:10px;border:1px solid ${_contPeriodo===p.k?'#15803d':'#e2e8f0'};border-radius:5px;background:${_contPeriodo===p.k?'#dcfce7':'#fff'};color:${_contPeriodo===p.k?'#15803d':'#64748b'};cursor:pointer;font-weight:600">${p.l}</button>`).join('')}
+      <span style="font-size:10px;color:#94a3b8">(Recebido/Em aberto/Saúde respeitam este período)</span>
+    </div>
+    ${(_contBusca || _contFiltroStatus!=='ATIVOS') ? `<div style="margin-top:6px;font-size:10px;color:#64748b">${lista.length} de ${todos.length} contratos · <a href="#" onclick="event.preventDefault();_contBusca='';_contFiltroStatus='ATIVOS';loadContratos()" style="color:#1d4ed8">limpar filtros</a></div>`:''}
   </div>`;
 
-  document.getElementById('cont-cards').innerHTML = acoes + (lista.length ? cards : '<div style="padding:24px;text-align:center;color:#94a3b8;font-size:12px">Nenhum contrato encontrado.</div>');
+  // Agrupamento (opcional) por órgão
+  let cardsOut = cards;
+  if (_contAgruparOrgao && lista.length) {
+    const grupos = {};
+    lista.forEach((c,i) => { const g = c.orgao || '(Sem órgão)'; (grupos[g] = grupos[g] || []).push(i); });
+    cardsOut = Object.keys(grupos).sort().map(g => {
+      const idx = grupos[g];
+      const totalMensal = idx.reduce((s,i)=>s+(lista[i].valor_mensal_bruto||0),0);
+      const totalPago = idx.reduce((s,i)=>s+(lista[i].total_pago||0),0);
+      const totalAberto = idx.reduce((s,i)=>s+(lista[i].total_aberto||0),0);
+      return `<div style="margin-bottom:18px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:6px 4px;border-bottom:2px solid #e2e8f0;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+          <div style="font-size:12px;font-weight:800;color:#0f172a">${g} <span style="font-size:10px;color:#94a3b8;font-weight:600">· ${idx.length} contrato(s)</span></div>
+          <div style="font-size:10px;color:#64748b">Mensal: <b>${brl(totalMensal)}</b> · Pago: <b style="color:#15803d">${brl(totalPago)}</b> · Aberto: <b style="color:${totalAberto>0?'#dc2626':'#15803d'}">${brl(totalAberto)}</b></div>
+        </div>
+        ${idx.map(i => cardsArr[i]).join('')}
+      </div>`;
+    }).join('');
+  }
 
-  // Carrega o painel de saúde assincronamente
+  const focoBusca = document.activeElement && document.activeElement.id === 'cont-busca';
+  const buscaSelStart = focoBusca ? document.activeElement.selectionStart : null;
+  const buscaSelEnd   = focoBusca ? document.activeElement.selectionEnd : null;
+
+  document.getElementById('cont-cards').innerHTML = acoes + (lista.length ? cardsOut : '<div style="padding:24px;text-align:center;color:#94a3b8;font-size:12px">Nenhum contrato encontrado com os filtros aplicados.</div>');
+
+  // Restaura foco no input de busca (se estava focado)
+  if (focoBusca) {
+    const el = document.getElementById('cont-busca');
+    if (el) { el.focus(); try { el.setSelectionRange(buscaSelStart, buscaSelEnd); } catch(_) {} }
+  }
+
+  // Carrega o painel de saúde assincronamente (e re-renderiza cards quando chegar, pra mostrar badges)
   loadSaudeContratos();
+  // Carrega lista de NFs em aberto do período
+  loadNfsAbertasContratos();
+}
+
+// ─── Painel: NFs em aberto no período ────────────────────────────
+let _contAbertasAberto = true; // expandido por padrão
+async function loadNfsAbertasContratos(){
+  const panel = document.getElementById('cont-abertas-panel');
+  if (!panel) return;
+  const per = getContPeriodo();
+  panel.innerHTML = `<div style="color:#94a3b8;font-size:11px;padding:8px">Carregando NFs em aberto do período...</div>`;
+  try {
+    const qs = ['aberto=1','limit=500'];
+    if (per.from) qs.push('from='+per.from);
+    if (per.to)   qs.push('to='+per.to);
+    const d = await api('/nfs?'+qs.join('&'));
+    const rows = d.data || [];
+    const total = d.total || 0;
+    const soma = d.soma_liquido || 0;
+
+    if (!total) {
+      panel.innerHTML = `
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px 18px">
+          <span style="font-size:12px;font-weight:700;color:#15803d">✅ Nenhuma NF em aberto em ${per.label}</span>
+          <span style="font-size:10px;color:#64748b;margin-left:8px">Todas conciliadas com extratos bancários.</span>
+        </div>`;
+      return;
+    }
+
+    const hojeIso = new Date().toISOString().slice(0,10);
+    const diasAberto = (emissao) => {
+      if (!emissao) return null;
+      return Math.max(0, Math.floor((new Date(hojeIso)-new Date(emissao))/86400000));
+    };
+
+    // Agrupa por tomador
+    const grupos = {};
+    rows.forEach(nf => {
+      const t = nf.tomador || '(sem tomador)';
+      (grupos[t] = grupos[t] || { qtd:0, total:0, nfs:[] });
+      grupos[t].qtd++;
+      grupos[t].total += (nf.valor_liquido || 0);
+      grupos[t].nfs.push(nf);
+    });
+    const gruposOrd = Object.keys(grupos).sort((a,b)=> grupos[b].total - grupos[a].total);
+
+    const thSt = 'background:#1e293b;color:#fff;padding:6px 10px;font-size:9px;font-weight:700;text-transform:uppercase;white-space:nowrap';
+    const tdSt = 'padding:5px 10px;border-bottom:1px solid #e2e8f0;font-size:11px';
+
+    const headerHtml = `
+      <div onclick="_contAbertasAberto=!_contAbertasAberto;loadNfsAbertasContratos()" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding:4px 0;margin-bottom:${_contAbertasAberto?'12px':'0'}">
+        <h3 style="margin:0;font-size:13px;color:#0f172a;font-weight:700">
+          📋 NFs em aberto
+          <span style="font-size:10px;font-weight:600;color:#dc2626;background:#fee2e2;padding:2px 8px;border-radius:10px;margin-left:4px">${total} NFs · ${brl(soma)}</span>
+          <span style="font-size:10px;font-weight:600;color:#15803d;background:#dcfce7;padding:2px 8px;border-radius:10px;margin-left:4px">${per.label}</span>
+        </h3>
+        <span style="font-size:16px;color:#94a3b8">${_contAbertasAberto?'▼':'▶'}</span>
+      </div>`;
+
+    if (!_contAbertasAberto) {
+      panel.innerHTML = `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 16px">${headerHtml}</div>`;
+      return;
+    }
+
+    const tabelaHtml = `
+      <div style="overflow-x:auto;max-height:440px;overflow-y:auto">
+        <table style="width:100%;border-collapse:collapse">
+          <thead style="position:sticky;top:0;z-index:1"><tr>
+            <th style="${thSt};text-align:left">Tomador / NF</th>
+            <th style="${thSt};text-align:center">Data Emissão</th>
+            <th style="${thSt};text-align:center">Dias</th>
+            <th style="${thSt};text-align:right">Valor Líquido</th>
+            <th style="${thSt};text-align:left">Competência</th>
+            <th style="${thSt};text-align:left">Status</th>
+          </tr></thead>
+          <tbody>
+            ${gruposOrd.map(t => {
+              const g = grupos[t];
+              return `
+                <tr style="background:#f1f5f9">
+                  <td style="${tdSt};font-weight:800;color:#0f172a" colspan="3">${t} <span style="font-size:10px;color:#64748b;font-weight:600">· ${g.qtd} NFs</span></td>
+                  <td style="${tdSt};text-align:right;font-weight:800;color:#dc2626;font-family:monospace">${brl(g.total)}</td>
+                  <td style="${tdSt}" colspan="2"></td>
+                </tr>
+                ${g.nfs.map(nf => {
+                  const dias = diasAberto(nf.data_emissao);
+                  const diasCor = dias===null ? '#94a3b8' : dias>120 ? '#dc2626' : dias>60 ? '#d97706' : '#64748b';
+                  const dataBr = nf.data_emissao ? new Date(nf.data_emissao).toLocaleDateString('pt-BR') : '—';
+                  return `<tr>
+                    <td style="${tdSt};padding-left:24px;color:#475569">NF ${nf.numero||'?'} <span style="font-size:9px;color:#94a3b8">${nf.discriminacao ? '· '+nf.discriminacao.slice(0,50) : ''}</span></td>
+                    <td style="${tdSt};text-align:center;color:#64748b">${dataBr}</td>
+                    <td style="${tdSt};text-align:center;color:${diasCor};font-weight:600">${dias!==null?dias+'d':'—'}</td>
+                    <td style="${tdSt};text-align:right;font-family:monospace;color:#dc2626;font-weight:600">${brl(nf.valor_liquido||0)}</td>
+                    <td style="${tdSt};color:#64748b">${nf.competencia||'—'}</td>
+                    <td style="${tdSt};color:#94a3b8;font-size:10px">${nf.status_conciliacao||'PENDENTE'}</td>
+                  </tr>`;
+                }).join('')}
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+
+    panel.innerHTML = `
+      <div style="background:#fff;border:1px solid #fecaca;border-radius:10px;padding:12px 16px">
+        ${headerHtml}
+        <div style="font-size:10px;color:#94a3b8;margin-bottom:8px">
+          💡 NFs emitidas no período e ainda não conciliadas com extrato. Agrupadas por tomador, ordenadas por valor.
+        </div>
+        ${tabelaHtml}
+      </div>`;
+  } catch(e) {
+    panel.innerHTML = `<div style="color:#dc2626;font-size:11px;padding:8px">Erro ao carregar NFs em aberto: ${e.message}</div>`;
+  }
 }
 
 // ─── Novo Contrato: modal de criação ─────────────────────────────
@@ -1312,9 +1581,23 @@ async function loadSaudeContratos(){
   if(!panel) return;
   panel.innerHTML=`<div style="color:#94a3b8;font-size:11px;padding:8px">Carregando análise de saúde...</div>`;
   try {
-    const d = await api('/contratos/saude');
+    const per = getContPeriodo();
+    let url = '/contratos/saude';
+    const qs = [];
+    if (per.from) qs.push('from='+per.from);
+    if (per.to)   qs.push('to='+per.to);
+    if (qs.length) url += '?' + qs.join('&');
+    const d = await api(url);
     if(!d.ok) { panel.innerHTML=''; return; }
     const { data=[], resumo={} } = d;
+
+    // Popula caches usados pelos cards + topo
+    const precisaReRender = _saudeResumo === null;
+    _saudeByNum = {};
+    _saudeDataByNum = {};
+    data.forEach(r => { _saudeByNum[r.numContrato] = r.statusSaude; _saudeDataByNum[r.numContrato] = r; });
+    _saudeResumo = resumo;
+
     const ativos = data.filter(r => r.statusSaude !== 'ENCERRADO');
 
     // KPIs resumidos
@@ -1391,16 +1674,23 @@ async function loadSaudeContratos(){
 
     panel.innerHTML = `
       <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:4px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <h3 style="margin:0;font-size:13px;color:#0f172a;font-weight:700">📊 Saúde dos Contratos</h3>
-          <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <h3 style="margin:0;font-size:13px;color:#0f172a;font-weight:700">📊 Saúde dos Contratos <span style="font-size:10px;font-weight:600;color:#15803d;background:#dcfce7;padding:2px 8px;border-radius:10px;margin-left:4px">${per.label}</span></h3>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button onclick="loadSaudeContratos()" style="padding:4px 12px;font-size:10px;border:1px solid #0284c7;border-radius:5px;background:#f0f9ff;color:#0284c7;cursor:pointer;font-weight:600">↻ Atualizar</button>
+            <button onclick="document.getElementById('cont-saude-panel').style.display='none'" style="padding:4px 10px;font-size:10px;border:1px solid #e2e8f0;border-radius:5px;background:#fff;color:#64748b;cursor:pointer;font-weight:600" title="Ocultar tabela">✕ Ocultar</button>
             ${btnClassificar}
           </div>
         </div>
         ${kpiHtml}
         ${tableHtml}
       </div>`;
+
+    // Se era a 1ª vez que saúde foi carregada (ou período trocou), re-renderiza
+    // os cards para que badges + KPIs do topo + receita média reflitam o período
+    if (precisaReRender) {
+      loadContratos();
+    }
   } catch(e) {
     panel.innerHTML='';
     console.error('saude contratos:', e);

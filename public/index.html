@@ -131,6 +131,7 @@
       <div class="tab" data-tab="ext" onclick="navGo('ext',this)">🏦 Extratos</div>
       <div class="tab" data-tab="nfs" onclick="navGo('nfs',this)">🧾 Notas Fiscais</div>
       <div class="tab" data-tab="cont" onclick="navGo('cont',this)">📋 Contratos</div>
+      <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)">💰 Painel Pagamentos</div>
       <div class="tab" data-tab="pag" onclick="navGo('pag',this)">💵 Pagamentos</div>
       <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
       <div class="tab" data-tab="fluxo" onclick="navGo('fluxo',this)">📈 Fluxo de Caixa</div>
@@ -385,9 +386,105 @@
 <!-- Contratos -->
 <div id="pg-cont" class="pg">
   <div class="kpis" id="cont-kpis"></div>
+  <!-- Painel: NFs em aberto do período -->
+  <div id="cont-abertas-panel" style="margin-bottom:16px"></div>
   <!-- Painel de Saúde dos Contratos -->
   <div id="cont-saude-panel" style="margin-bottom:16px"></div>
   <div id="cont-cards"></div>
+</div>
+
+<!-- Painel de Pagamentos por Contrato -->
+<div id="pg-painel-pgto" class="pg">
+  <div class="toolbar">
+    <span style="font-size:16px">💰</span>
+    <span class="toolbar-title">PAINEL DE PAGAMENTOS POR CONTRATO</span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+      <label style="font-size:11px;color:#e2e8f0;font-weight:600">Competência</label>
+      <input type="month" id="pgto-mes"
+        style="padding:4px 8px;border:1px solid #475569;border-radius:6px;background:#1e293b;color:#e2e8f0;font-size:12px">
+      <button onclick="pgtoCarregar()"
+        style="background:#3b82f6;color:#fff;border:none;padding:5px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">
+        🔄 Atualizar
+      </button>
+    </div>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="kpis" id="pgto-kpis" style="margin-bottom:14px">
+    <div class="kpi"><div class="kpi-v" id="pgto-k-faturado">—</div><div class="kpi-l">Faturado no mês</div></div>
+    <div class="kpi"><div class="kpi-v green" id="pgto-k-recebido">—</div><div class="kpi-l">Total Recebido</div></div>
+    <div class="kpi"><div class="kpi-v red" id="pgto-k-aberto">—</div><div class="kpi-l">Saldo em Aberto</div></div>
+    <div class="kpi"><div class="kpi-v" id="pgto-k-inadim" style="color:#f59e0b">—</div><div class="kpi-l">Inadimplentes (+30d)</div></div>
+  </div>
+
+  <!-- Sub-tabs internos -->
+  <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:14px">
+    <button class="pgto-subtab active" data-tab="tomadores" onclick="pgtoSubtab('tomadores')"
+      style="padding:6px 18px;border:none;border-bottom:2px solid #3b82f6;background:transparent;font-size:12px;font-weight:700;color:#3b82f6;cursor:pointer;margin-bottom:-2px">
+      📊 Por Tomador
+    </button>
+    <button class="pgto-subtab" data-tab="inadimplentes" onclick="pgtoSubtab('inadimplentes')"
+      style="padding:6px 18px;border:none;border-bottom:2px solid transparent;background:transparent;font-size:12px;font-weight:700;color:#64748b;cursor:pointer;margin-bottom:-2px">
+      🔴 Inadimplentes
+    </button>
+  </div>
+
+  <!-- Aba: Por Tomador -->
+  <div id="pgto-tab-tomadores">
+    <div class="tw">
+      <table>
+        <thead>
+          <tr style="font-size:11px">
+            <th>Tomador</th>
+            <th class="r">NFs</th>
+            <th class="r">Faturado</th>
+            <th class="r">Recebido</th>
+            <th class="r">Em Aberto</th>
+            <th class="r">% Rec.</th>
+            <th>Status</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody id="pgto-body">
+          <tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px">Selecione a competência e clique em Atualizar</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <!-- Painel de detalhe inline -->
+    <div id="pgto-detalhe-panel" style="display:none;margin-top:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span id="pgto-detalhe-title" style="font-size:14px;font-weight:800;color:#0f172a"></span>
+        <button onclick="pgtoFecharDetalhe()"
+          style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;color:#64748b">
+          ✕ Fechar
+        </button>
+      </div>
+      <div id="pgto-detalhe-body"></div>
+    </div>
+  </div>
+
+  <!-- Aba: Inadimplentes -->
+  <div id="pgto-tab-inadimplentes" style="display:none">
+    <div class="tw">
+      <table>
+        <thead>
+          <tr style="font-size:11px">
+            <th>Tomador</th>
+            <th class="r">NFs s/ pagamento</th>
+            <th class="r">Faturado</th>
+            <th class="r">Recebido</th>
+            <th class="r">Em Aberto</th>
+            <th class="r">Dias em Aberto</th>
+            <th>NF mais antiga</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody id="pgto-inadim-body">
+          <tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px">Carregando…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <!-- Pagamentos -->
@@ -3243,5 +3340,6 @@
 <script src="/app-ia.js"></script>
 <script src="/app-bb.js"></script>
 <script src="/app-concilia-robusta.js"></script>
+<script src="/app-pagamentos-contrato.js"></script>
 </body>
 </html>
