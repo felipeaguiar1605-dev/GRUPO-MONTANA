@@ -455,12 +455,57 @@ router.get('/dashboard', (req, res) => {
     UPPER(historico) LIKE '%MUSTANG%'
   )`;
 
+  // Padrões de histórico que identificam débitos NÃO-operacionais:
+  //  (a) aplicações financeiras — dinheiro que sai para investimento próprio (volta como crédito)
+  //  (b) transferências intragrupo — Montana ↔ Nevada/Mustang/Montreal/Porto do Vau/Montana Seg etc.
+  //   (mesmo CNPJ raiz ou empresas-irmãs; NÃO é despesa operacional).
+  const DEBITO_APLICACAO = `(
+    UPPER(historico) LIKE '%BB RENDE%' OR
+    UPPER(historico) LIKE '%RENDE FACIL%' OR
+    UPPER(historico) LIKE '%RENDE F_CIL%' OR
+    UPPER(historico) LIKE '%CDB%' OR
+    UPPER(historico) LIKE '%LCI%' OR
+    UPPER(historico) LIKE '%LCA%' OR
+    UPPER(historico) LIKE '%POUPAN%' OR
+    UPPER(historico) LIKE '%APLICAC%' OR
+    UPPER(historico) LIKE '%APLICA_%'
+  )`;
+  const DEBITO_INTRAGRUPO = `(
+    (
+      UPPER(historico) LIKE '%MONTANA ASS%' OR
+      UPPER(historico) LIKE '%MONTANA S LTDA%' OR
+      UPPER(historico) LIKE '%MONTANA SERVICOS%' OR
+      UPPER(historico) LIKE '%MONTANA SEG%' OR
+      UPPER(historico) LIKE '%MONTREAL%' OR
+      UPPER(historico) LIKE '%NEVADA%' OR
+      UPPER(historico) LIKE '%PORTO DO VAU%' OR
+      UPPER(historico) LIKE '%PORTODOVAU%' OR
+      UPPER(historico) LIKE '%MUSTANG%' OR
+      UPPER(historico) LIKE '%OHIO MED%' OR
+      UPPER(historico) LIKE '%MESMA TITULARIDADE%' OR
+      UPPER(historico) LIKE '%CH.AVULSO ENTRE AG%' OR
+      UPPER(historico) LIKE '%TED MESMA TITUL%'
+    )
+    /* exclui salários/benefícios a funcionários (ex.: MONTANASEG FUNC/EMPREG) */
+    AND NOT (UPPER(historico) LIKE '%FUNC%' OR UPPER(historico) LIKE '%EMPREG%')
+  )`;
+
   // 1. Totais gerais dos extratos
   const totais = req.db.prepare(`
     SELECT
       COUNT(*) as total,
       COALESCE(SUM(credito), 0) as total_creditos,
       COALESCE(SUM(debito), 0) as total_debitos,
+      /* Débitos de aplicações financeiras (não são despesa) */
+      COALESCE(SUM(CASE WHEN debito > 0 AND ${DEBITO_APLICACAO} THEN debito END), 0) as debito_aplicacoes,
+      /* Débitos de transferências intragrupo (não são despesa) */
+      COALESCE(SUM(CASE WHEN debito > 0 AND ${DEBITO_INTRAGRUPO} THEN debito END), 0) as debito_intragrupo,
+      /* DESPESA OPERACIONAL = todos débitos − aplicações − intragrupo */
+      COALESCE(SUM(CASE
+        WHEN debito > 0
+         AND NOT ${DEBITO_APLICACAO}
+         AND NOT ${DEBITO_INTRAGRUPO}
+        THEN debito END), 0) as despesa_operacional,
       /* Receita operacional: exclui transferências internas, investimentos, devoluções, conta vinculada */
       COALESCE(SUM(CASE
         WHEN credito > 0
@@ -849,7 +894,9 @@ router.get('/contratos/saude', (req, res) => {
     // nfWhere: fragmento WHERE para notas_fiscais (tomador matching)
     // nfParams: parâmetros para o fragmento
     // Para UFT limpeza vs motorista: usamos discriminacao para diferenciar
-    const NF_DATE_FROM = '2024-01-01'; // Só NFs do período relevante (contratos ativos)
+    // Período dinâmico (from/to) ou default 2024-01-01 (histórico relevante)
+    const NF_DATE_FROM = req.query.from || '2024-01-01';
+    const NF_DATE_TO   = req.query.to   || '9999-12-31';
 
     const MAPA_SAUDE = {
       'UFT 16/2025': {
@@ -939,6 +986,7 @@ router.get('/contratos/saude', (req, res) => {
                  MAX(CASE WHEN status_conciliacao='CONCILIADO' THEN data_emissao END) as ultima_conciliada
           FROM notas_fiscais
           WHERE data_emissao >= '${NF_DATE_FROM}'
+            AND data_emissao <= '${NF_DATE_TO}'
             AND (${mapa.nfWhere})
         `).get(...mapa.nfParams);
         qtdNFs = nfRow.qtd; totalNFs = nfRow.total;
@@ -1231,19 +1279,26 @@ router.patch('/parcelas/:id', (req, res) => {
 
 // ─── NOTAS FISCAIS ───────────────────────────────────────────────
 router.get('/nfs', (req, res) => {
-  const { cidade, tomador, from, to, page = 1, limit = 100 } = req.query;
+  const { cidade, tomador, from, to, aberto, page = 1, limit = 100 } = req.query;
   let where = '1=1';
   const params = {};
   if (cidade) { where += ' AND cidade = @cidade'; params.cidade = cidade; }
   if (tomador) { where += ' AND tomador = @tomador'; params.tomador = tomador; }
   if (from) { where += ' AND data_emissao >= @from'; params.from = from; }
   if (to)   { where += ' AND data_emissao <= @to';   params.to = to; }
+  // aberto=1 → só NFs em aberto (não conciliadas e valor_liquido > 0)
+  if (aberto === '1' || aberto === 'true') {
+    where += ` AND (status_conciliacao IS NULL OR status_conciliacao NOT IN ('CONCILIADO','CONCILIADA','ASSESSORIA'))
+               AND COALESCE(valor_liquido,0) > 0`;
+  }
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit); params.offset = offset;
 
   const total = req.db.prepare(`SELECT COUNT(*) as cnt FROM notas_fiscais WHERE ${where}`).get(params).cnt;
-  const rows = req.db.prepare(`SELECT * FROM notas_fiscais WHERE ${where} ORDER BY id DESC LIMIT @limit OFFSET @offset`).all(params);
-  res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
+  const rows = req.db.prepare(`SELECT * FROM notas_fiscais WHERE ${where} ORDER BY data_emissao DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
+  // Soma total (útil p/ KPI independente do paginado)
+  const soma = req.db.prepare(`SELECT COALESCE(SUM(valor_liquido),0) as soma_liq, COALESCE(SUM(valor_bruto),0) as soma_bruto FROM notas_fiscais WHERE ${where}`).get(params);
+  res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows, soma_liquido: soma.soma_liq, soma_bruto: soma.soma_bruto });
 });
 
 router.delete('/nfs/:id', (req, res) => {

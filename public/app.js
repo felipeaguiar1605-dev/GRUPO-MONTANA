@@ -323,10 +323,10 @@ async function loadDashboard(){
       <div class="kpi-v green">${brl(recOp)}</div>
       <div class="kpi-s">bruto ${brl(e.total_creditos)}${totalExc>0?` · excluído ${brl(totalExc)}`:''}</div>
     </div>
-    <div class="kpi" style="border-left:4px solid #dc2626">
-      <div class="kpi-l">📤 Total Débitos</div>
-      <div class="kpi-v red">${brl(e.total_debitos)}</div>
-      <div class="kpi-s">saídas</div>
+    <div class="kpi" style="border-left:4px solid #dc2626" title="Total débitos ${brl(e.total_debitos)} − Aplicações ${brl(e.debito_aplicacoes||0)} − Intragrupo ${brl(e.debito_intragrupo||0)}">
+      <div class="kpi-l">📤 Despesas Operacionais</div>
+      <div class="kpi-v red">${brl(e.despesa_operacional||e.total_debitos)}</div>
+      <div class="kpi-s">saídas reais · bruto ${brl(e.total_debitos)}${(e.debito_aplicacoes||0)+(e.debito_intragrupo||0)>0?` · excluído ${brl((e.debito_aplicacoes||0)+(e.debito_intragrupo||0))}`:''}</div>
     </div>
     <div class="kpi" style="border-left:4px solid ${saldo>=0?'#15803d':'#dc2626'}">
       <div class="kpi-l">📈 Saldo (bruto)</div>
