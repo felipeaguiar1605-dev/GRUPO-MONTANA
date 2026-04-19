@@ -65,6 +65,9 @@ app.use('/api', authMiddleware);
 const auditLog = require('./middleware/auditLog');
 app.use('/api', auditLog);
 
+// ─── Consolidado multi-empresa (ANTES do apiRouter que exige X-Company) ────
+app.use('/api', require('./routes/consolidado'));
+
 app.use('/api', apiRouter);
 
 // ─── Importação OFX (extratos bancários BB/BRB/CEF) ─────────────
@@ -145,40 +148,7 @@ try {
   console.warn('  ⚠ WhatsApp module indisponível (permissão/arquivo):', e.message);
 }
 
-// ─── Consolidado multi-empresa (visão geral das 4 empresas) ────
-app.get('/api/consolidado', require('./auth').authMiddleware, (req, res) => {
-  try {
-    const resultado = {};
-    const ano = new Date().getFullYear();
-    for (const [key, company] of Object.entries(COMPANIES)) {
-      try {
-        const db = getDb(key);
-        const from = `${ano}-01-01`, to = `${ano}-12-31`;
-        const extratos = db.prepare(`SELECT COUNT(*) cnt, COALESCE(SUM(credito),0) entradas, COALESCE(SUM(debito),0) saidas FROM extratos WHERE data_iso>=? AND data_iso<=?`).get(from, to);
-        const nfs      = db.prepare(`SELECT COUNT(*) cnt, COALESCE(SUM(valor_bruto),0) bruto FROM notas_fiscais WHERE (data_emissao>=? AND data_emissao<=?) OR (data_emissao='' AND created_at>=? AND created_at<=?)`).get(from, to, from, to);
-        const desp     = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) total FROM despesas WHERE data_iso>=? AND data_iso<=?`).get(from, to);
-        const pend     = db.prepare(`SELECT COUNT(*) cnt FROM extratos WHERE status_conciliacao='PENDENTE'`).get();
-        const funcs    = db.prepare(`SELECT COUNT(*) cnt FROM rh_funcionarios WHERE status='ATIVO'`).get();
-        resultado[key] = {
-          nome: company.nome, nomeAbrev: company.nomeAbrev, cnpj: company.cnpj,
-          cor: company.cor, icone: company.icone,
-          extratos_total: extratos.cnt,
-          entradas: +extratos.entradas.toFixed(2),
-          saidas: +extratos.saidas.toFixed(2),
-          nfs_total: nfs.cnt, faturamento: +nfs.bruto.toFixed(2),
-          despesas: +desp.total.toFixed(2),
-          pendentes: pend.cnt,
-          funcionarios: funcs.cnt,
-        };
-      } catch(e) {
-        resultado[key] = { nome: company.nome, erro: e.message };
-      }
-    }
-    res.json({ ok: true, ano, empresas: resultado });
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
-});
+// (A rota /api/consolidado foi movida para src/routes/consolidado.js)
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
 
