@@ -1883,11 +1883,12 @@ function despStatusBadge(st){
 }
 
 let _despFiltersRendered=false;
+let _despCatsEmpresa=null; // marca qual empresa foi usada para popular o select
 async function loadDespesas(){
   // Render filters only once
   if(!_despFiltersRendered){
     document.getElementById('desp-filters').innerHTML=`
-      <div><label>Categoria</label><select id="df-cat" onchange="_despPage=1;loadDespData()"><option value="">Todas</option>${DESP_CATS.map(c=>`<option value="${c}">${DESP_CAT_LABELS[c]||c}</option>`).join('')}</select></div>
+      <div><label>Categoria</label><select id="df-cat" onchange="_despPage=1;loadDespData()"><option value="">Todas</option></select></div>
       <div><label>Fornecedor</label><select id="df-forn" onchange="_despPage=1;loadDespData()"><option value="">Todos</option><option value="NEVADA EMBALAGENS e PRODUTOS DE LIMPEZA EIRELI -ME">🧹 Nevada</option><option value="MONTREAL MAQUINAS E FERRAMENTAS LTDA">🦺 Montreal</option></select></div>
       <div><label>Status</label><select id="df-st" onchange="_despPage=1;loadDespData()"><option value="">Todos</option><option value="PENDENTE">Pendente</option><option value="A_PAGAR">A Pagar</option><option value="PAGO">Pago</option><option value="VENCIDO">Vencido</option></select></div>
       <div><label>De</label><input type="date" id="df-de" onchange="_despPage=1;loadDespData()"></div>
@@ -1901,7 +1902,34 @@ async function loadDespesas(){
     document.getElementById('df-ate').value='';
     _despFiltersRendered=true;
   }
+  // Se empresa mudou, reseta o cache de categorias E zera o valor selecionado
+  // (a categoria antiga pode não existir na nova empresa → retornaria zero resultados)
+  if(_despCatsEmpresa !== currentCompany){
+    _despCatsEmpresa = null;
+    const selCat=document.getElementById('df-cat');
+    if(selCat) selCat.value='';
+  }
   await loadDespData();
+}
+
+// Popula <select id="df-cat"> com as categorias reais da empresa atual
+function _populateDespCats(porCategoria){
+  const sel=document.getElementById('df-cat');
+  if(!sel) return;
+  const empresaAtual=currentCompany;
+  // só repopula se empresa mudou (ou nunca foi populado)
+  if(_despCatsEmpresa === empresaAtual) return;
+  const atual=sel.value;
+  const cats=(porCategoria||[]).map(c=>c.categoria).filter(c=>c!=null&&c!=='');
+  // Dedup e ordena alfabeticamente
+  const uniq=[...new Set(cats)].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  sel.innerHTML=`<option value="">Todas</option>`+uniq.map(c=>{
+    const label=DESP_CAT_LABELS[c]||c;
+    return `<option value="${c.replace(/"/g,'&quot;')}">${label}</option>`;
+  }).join('');
+  // Preserva valor selecionado se ainda válido
+  if(atual && uniq.includes(atual)) sel.value=atual;
+  _despCatsEmpresa=empresaAtual;
 }
 async function loadDespData(){
   let url=`/despesas?page=${_despPage}&limit=${PAGE_SIZE}`;
@@ -1933,6 +1961,10 @@ async function loadDespData(){
     api(resumoUrl),
     api(apuracaoUrl)
   ]);
+
+  // Popula categorias do select com base nos valores REAIS do banco da empresa atual
+  // (corrige o bug onde DESP_CATS hardcoded não batia com os valores armazenados)
+  _populateDespCats(resumo.porCategoria);
 
   const t=resumo.totais;
   document.getElementById('desp-total-count').textContent=t.total;
