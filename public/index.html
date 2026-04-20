@@ -135,6 +135,7 @@
       <div class="tab" data-tab="pag" onclick="navGo('pag',this)">💵 Pagamentos Recebidos</div>
       <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
       <div class="tab" data-tab="fluxo" onclick="navGo('fluxo',this)">📈 Fluxo de Caixa</div>
+      <div class="tab" data-tab="fluxo-proj" onclick="navGo('fluxo-proj',this);setTimeout(()=>fcpCarregar&&fcpCarregar(),50)">🔮 Fluxo Projetado</div>
       <div class="tab" data-tab="conta-vinculada" onclick="navGo('conta-vinculada',this)">🏦 Conta Vinculada</div>
       <div class="tab" data-tab="conciliacao3v" onclick="navGo('conciliacao3v',this)">🔗 Conciliação 3V</div>
       <div class="tab" data-tab="concilia-robusta" onclick="navGo('concilia-robusta',this);setTimeout(()=>crInit&&crInit(),50)">🧩 Conciliação IA</div>
@@ -986,6 +987,87 @@
         <tbody id="inadimplencia-body"></tbody>
       </table>
     </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- FLUXO DE CAIXA PROJETADO 30/60/90d (SLAs + NFs a receber)  -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div id="pg-fluxo-proj" class="pg">
+  <div class="toolbar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+    <h2 style="margin:0;font-size:15px">🔮 Fluxo de Caixa Projetado</h2>
+    <span style="font-size:10px;color:#64748b">Baseado em SLA médio por tomador × NFs em aberto × despesas recorrentes</span>
+    <span style="flex:1"></span>
+    <label style="font-size:11px;color:#64748b">Horizonte:</label>
+    <select id="fcp-dias" onchange="fcpCarregar()" style="padding:4px 8px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px">
+      <option value="30">30 dias</option>
+      <option value="60">60 dias</option>
+      <option value="90" selected>90 dias</option>
+      <option value="180">180 dias</option>
+    </select>
+    <label style="font-size:11px;color:#64748b">Agrupar:</label>
+    <select id="fcp-periodicidade" onchange="fcpCarregar()" style="padding:4px 8px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px">
+      <option value="mensal" selected>Mensal</option>
+      <option value="semanal">Semanal</option>
+    </select>
+    <button onclick="fcpCarregar()" style="padding:5px 12px;border:1px solid #e2e8f0;background:#f8fafc;border-radius:4px;cursor:pointer;font-size:11px">🔄 Atualizar</button>
+  </div>
+
+  <div id="fcp-kpis" class="kpis" style="gap:10px;flex-wrap:wrap"></div>
+
+  <div id="fcp-alerta" style="display:none;margin:10px 0;padding:10px 14px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:6px;color:#991b1b;font-weight:600;font-size:12px"></div>
+
+  <!-- Gráfico de barras empilhadas por bucket -->
+  <div style="margin-top:14px;border:1px solid #e2e8f0;border-radius:10px;padding:14px;background:#fff">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:13px;font-weight:700;color:#334155">Entradas × Saídas × Saldo projetado</div>
+      <div style="font-size:10px;color:#64748b;display:flex;gap:14px">
+        <span>🟢 Entradas (esperado)</span>
+        <span>🔴 Saídas</span>
+        <span>🔵 Saldo acumulado</span>
+      </div>
+    </div>
+    <div id="fcp-chart" style="display:flex;align-items:flex-end;gap:10px;height:200px;border-left:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;padding:6px"></div>
+  </div>
+
+  <!-- Tabela dos buckets -->
+  <div style="margin-top:14px;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">
+    <div style="background:#f8fafc;padding:10px 14px;border-bottom:1px solid #e2e8f0;font-size:12px;font-weight:700;color:#1e293b">
+      Detalhamento por período
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:#f1f5f9;font-size:10px;color:#475569;text-align:right">
+        <th style="padding:8px 10px;text-align:left">Período</th>
+        <th style="padding:8px 10px">Qtd NFs</th>
+        <th style="padding:8px 10px">Entradas (bruto)</th>
+        <th style="padding:8px 10px">Entradas (esperado)</th>
+        <th style="padding:8px 10px">Saídas</th>
+        <th style="padding:8px 10px">Fluxo líquido</th>
+        <th style="padding:8px 10px">Saldo final</th>
+      </tr></thead>
+      <tbody id="fcp-buckets"></tbody>
+    </table>
+  </div>
+
+  <!-- Detalhe: top 20 entradas + saídas -->
+  <div style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">
+      <div style="background:#f0fdf4;padding:10px 14px;border-bottom:1px solid #bbf7d0;font-size:12px;font-weight:700;color:#166534">
+        🟢 Top entradas previstas (NFs a receber)
+      </div>
+      <div id="fcp-entradas" style="padding:10px;font-size:11px"></div>
+    </div>
+    <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">
+      <div style="background:#fef2f2;padding:10px 14px;border-bottom:1px solid #fecaca;font-size:12px;font-weight:700;color:#991b1b">
+        🔴 Saídas previstas (folha + recorrentes)
+      </div>
+      <div id="fcp-saidas" style="padding:10px;font-size:11px"></div>
+    </div>
+  </div>
+
+  <div style="margin-top:12px;font-size:9px;color:#94a3b8;padding:0 4px">
+    * Probabilidade: NF recente (dentro do SLA) = 95% · atrasada até 1.5× SLA = 80% · até 2× = 60% · até 3× = 40% · acima = 20%<br>
+    * Saldo inicial: soma líquida dos extratos até hoje · Saídas: média dos últimos 3 meses (folha) e 6 meses (despesas recorrentes)
   </div>
 </div>
 

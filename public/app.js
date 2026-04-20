@@ -4278,3 +4278,164 @@ async function aopEnviarEmail() {
     toast('Erro: ' + e.message);
   }
 }
+
+// ───────────────────────────────────────────────────────────────────
+// Fluxo de Caixa Projetado (30/60/90d)
+// ───────────────────────────────────────────────────────────────────
+
+function fcpFmt(v) {
+  return 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fcpFmtCompact(v) {
+  const n = Number(v || 0);
+  if (Math.abs(n) >= 1e6) return 'R$ ' + (n / 1e6).toFixed(2) + 'M';
+  if (Math.abs(n) >= 1e3) return 'R$ ' + (n / 1e3).toFixed(0) + 'k';
+  return 'R$ ' + n.toFixed(0);
+}
+
+async function fcpCarregar() {
+  const dias          = document.getElementById('fcp-dias')?.value || 90;
+  const periodicidade = document.getElementById('fcp-periodicidade')?.value || 'mensal';
+  const kpisEl        = document.getElementById('fcp-kpis');
+  if (kpisEl) kpisEl.innerHTML = '<div class="loading">Calculando projeção…</div>';
+
+  try {
+    const d = await api(`/fluxo-caixa/projecao?dias=${dias}&periodicidade=${periodicidade}&incluir_itens=1`);
+    if (!d.ok) throw new Error(d.erro || 'erro desconhecido');
+    fcpRenderKPIs(d);
+    fcpRenderAlerta(d);
+    fcpRenderChart(d.buckets);
+    fcpRenderTabela(d.buckets);
+    fcpRenderEntradasSaidas(d.buckets);
+  } catch (e) {
+    if (kpisEl) kpisEl.innerHTML = `<div style="color:#dc2626;padding:10px">Erro: ${e.message}</div>`;
+  }
+}
+
+function fcpRenderKPIs(d) {
+  const el = document.getElementById('fcp-kpis');
+  if (!el) return;
+  const corSaldo = d.saldo_final_projetado < 0 ? '#dc2626' : '#16a34a';
+  el.innerHTML = `
+    <div class="kpi" style="border-left:3px solid #64748b"><div class="kpi-label">Saldo atual</div><div class="kpi-value">${fcpFmtCompact(d.saldo_inicial)}</div><div class="kpi-sub">${d.saldo_inicial_data || ''}</div></div>
+    <div class="kpi" style="border-left:3px solid #16a34a"><div class="kpi-label">Entradas previstas (${d.horizonte_dias}d)</div><div class="kpi-value">${fcpFmtCompact(d.total_entradas_esperado)}</div><div class="kpi-sub">${d.qtd_entradas} NFs · bruto ${fcpFmtCompact(d.total_entradas_bruto)}</div></div>
+    <div class="kpi" style="border-left:3px solid #dc2626"><div class="kpi-label">Saídas previstas</div><div class="kpi-value">${fcpFmtCompact(d.total_saidas)}</div><div class="kpi-sub">${d.qtd_saidas} lançamentos</div></div>
+    <div class="kpi" style="border-left:3px solid #3b82f6"><div class="kpi-label">Fluxo líquido</div><div class="kpi-value">${fcpFmtCompact(d.fluxo_liquido_horizonte)}</div><div class="kpi-sub">horizonte ${d.horizonte_dias}d</div></div>
+    <div class="kpi" style="border-left:3px solid ${corSaldo}"><div class="kpi-label">Saldo final projetado</div><div class="kpi-value" style="color:${corSaldo}">${fcpFmtCompact(d.saldo_final_projetado)}</div><div class="kpi-sub">${d.periodicidade}</div></div>
+  `;
+}
+
+function fcpRenderAlerta(d) {
+  const el = document.getElementById('fcp-alerta');
+  if (!el) return;
+  if (d.alerta) {
+    el.style.display = 'block';
+    el.innerHTML = `⚠ ${d.alerta} — saldo projetado de ${fcpFmt(d.saldo_final_projetado)} em ${d.horizonte_dias} dias. Revise cobranças em atraso e despesas antes que se realize.`;
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+function fcpRenderChart(buckets) {
+  const el = document.getElementById('fcp-chart');
+  if (!el) return;
+  if (!buckets || !buckets.length) { el.innerHTML = '<div style="color:#94a3b8;padding:20px">Sem dados no horizonte</div>'; return; }
+
+  // Escala: maior valor absoluto entre entradas/saídas/saldo
+  const maxVal = Math.max(
+    ...buckets.map(b => Math.max(Math.abs(b.entradas_esperado), Math.abs(b.saidas), Math.abs(b.saldo_final)))
+  ) || 1;
+
+  let html = '';
+  for (const b of buckets) {
+    const hE = Math.max(4, (b.entradas_esperado / maxVal) * 180);
+    const hS = Math.max(4, (b.saidas / maxVal) * 180);
+    const hSal = Math.max(4, (Math.abs(b.saldo_final) / maxVal) * 180);
+    const corSal = b.saldo_final < 0 ? '#dc2626' : '#3b82f6';
+    html += `
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;min-width:70px">
+        <div style="display:flex;gap:3px;align-items:flex-end;height:180px">
+          <div title="Entradas: ${fcpFmt(b.entradas_esperado)}" style="width:14px;height:${hE}px;background:linear-gradient(to top,#16a34a,#86efac);border-radius:2px 2px 0 0"></div>
+          <div title="Saídas: ${fcpFmt(b.saidas)}" style="width:14px;height:${hS}px;background:linear-gradient(to top,#dc2626,#fca5a5);border-radius:2px 2px 0 0"></div>
+          <div title="Saldo: ${fcpFmt(b.saldo_final)}" style="width:14px;height:${hSal}px;background:linear-gradient(to top,${corSal},${b.saldo_final < 0 ? '#fca5a5' : '#93c5fd'});border-radius:2px 2px 0 0"></div>
+        </div>
+        <div style="margin-top:6px;font-size:9px;color:#64748b;text-align:center;line-height:1.2">${b.label}</div>
+        <div style="font-size:10px;font-weight:700;color:${corSal};margin-top:2px">${fcpFmtCompact(b.saldo_final)}</div>
+      </div>
+    `;
+  }
+  el.innerHTML = html;
+}
+
+function fcpRenderTabela(buckets) {
+  const tbody = document.getElementById('fcp-buckets');
+  if (!tbody) return;
+  tbody.innerHTML = buckets.map(b => {
+    const corFluxo = b.fluxo_liquido < 0 ? '#dc2626' : '#16a34a';
+    const corSaldo = b.saldo_final < 0 ? '#dc2626' : '#16a34a';
+    return `
+      <tr style="border-top:1px solid #f1f5f9">
+        <td style="padding:8px 10px;font-weight:600">${b.label}<div style="font-size:9px;color:#94a3b8;font-weight:400">${b.ini} → ${b.fim}</div></td>
+        <td style="padding:8px 10px;text-align:right">${b.qtd_entradas}</td>
+        <td style="padding:8px 10px;text-align:right;color:#64748b">${fcpFmt(b.entradas_bruto)}</td>
+        <td style="padding:8px 10px;text-align:right;color:#16a34a;font-weight:600">${fcpFmt(b.entradas_esperado)}</td>
+        <td style="padding:8px 10px;text-align:right;color:#dc2626">${fcpFmt(b.saidas)}</td>
+        <td style="padding:8px 10px;text-align:right;color:${corFluxo};font-weight:700">${fcpFmt(b.fluxo_liquido)}</td>
+        <td style="padding:8px 10px;text-align:right;color:${corSaldo};font-weight:700">${fcpFmt(b.saldo_final)}</td>
+      </tr>`;
+  }).join('');
+}
+
+function fcpRenderEntradasSaidas(buckets) {
+  // Coleta top 20 entradas e top saídas consolidadas
+  const todasEntradas = [];
+  const todasSaidas   = [];
+  for (const b of buckets) {
+    if (b.itens_entrada) todasEntradas.push(...b.itens_entrada);
+    if (b.itens_saida)   todasSaidas.push(...b.itens_saida);
+  }
+  todasEntradas.sort((a, b) => b.valor_esperado - a.valor_esperado);
+  todasSaidas.sort((a, b) => b.valor - a.valor);
+
+  const entEl = document.getElementById('fcp-entradas');
+  if (entEl) {
+    if (todasEntradas.length === 0) {
+      entEl.innerHTML = '<div style="color:#94a3b8;padding:12px;text-align:center">Nenhuma entrada prevista</div>';
+    } else {
+      entEl.innerHTML = `<table style="width:100%;border-collapse:collapse">
+        <thead><tr style="font-size:10px;color:#64748b;border-bottom:1px solid #e2e8f0">
+          <th style="padding:4px 6px;text-align:left">NF</th>
+          <th style="padding:4px 6px;text-align:left">Tomador</th>
+          <th style="padding:4px 6px;text-align:center">Prev.</th>
+          <th style="padding:4px 6px;text-align:right">Valor</th>
+          <th style="padding:4px 6px;text-align:center">%</th>
+        </tr></thead><tbody>${todasEntradas.slice(0, 20).map(e => `
+          <tr style="border-top:1px solid #f1f5f9">
+            <td style="padding:4px 6px">${e.numero || ''}</td>
+            <td style="padding:4px 6px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e.tomador || ''}">${(e.tomador || '').slice(0, 22)}</td>
+            <td style="padding:4px 6px;text-align:center;color:#64748b;font-size:10px">${e.data_prevista}</td>
+            <td style="padding:4px 6px;text-align:right;color:#16a34a;font-weight:600">${fcpFmtCompact(e.valor_esperado)}</td>
+            <td style="padding:4px 6px;text-align:center;color:#94a3b8;font-size:10px">${Math.round(e.probabilidade * 100)}%</td>
+          </tr>`).join('')}</tbody></table>`;
+    }
+  }
+
+  const saidasEl = document.getElementById('fcp-saidas');
+  if (saidasEl) {
+    if (todasSaidas.length === 0) {
+      saidasEl.innerHTML = '<div style="color:#94a3b8;padding:12px;text-align:center">Nenhuma saída recorrente identificada</div>';
+    } else {
+      saidasEl.innerHTML = `<table style="width:100%;border-collapse:collapse">
+        <thead><tr style="font-size:10px;color:#64748b;border-bottom:1px solid #e2e8f0">
+          <th style="padding:4px 6px;text-align:left">Descrição</th>
+          <th style="padding:4px 6px;text-align:center">Prev.</th>
+          <th style="padding:4px 6px;text-align:right">Valor</th>
+        </tr></thead><tbody>${todasSaidas.slice(0, 20).map(s => `
+          <tr style="border-top:1px solid #f1f5f9">
+            <td style="padding:4px 6px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${s.descricao}">${s.descricao}</td>
+            <td style="padding:4px 6px;text-align:center;color:#64748b;font-size:10px">${s.data_prevista}</td>
+            <td style="padding:4px 6px;text-align:right;color:#dc2626;font-weight:600">${fcpFmtCompact(s.valor)}</td>
+          </tr>`).join('')}</tbody></table>`;
+    }
+  }
+}
