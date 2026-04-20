@@ -150,7 +150,7 @@
       <div class="tab" data-tab="pref" onclick="navGo('pref',this)">🏛️ Prefeitura / NFS-e</div>
       <div class="tab" data-tab="certidoes" onclick="navGo('certidoes',this)">📋 Certidões</div>
       <div class="tab" data-tab="licitacoes" onclick="navGo('licitacoes',this)">🏛️ Licitações</div>
-      <div class="tab" data-tab="piscofins-seg" onclick="navGo('piscofins-seg',this)">💰 PIS/COFINS Seg.</div>
+      <div class="tab" data-tab="piscofins-seg" onclick="navGo('piscofins-seg',this)">💰 PIS/COFINS</div>
       <div class="tab" data-tab="inss-retido" onclick="navGo('inss-retido',this)">🏛️ INSS Retido S-1300</div>
       <div class="tab" data-tab="retencoes" onclick="navGo('retencoes',this)">🏛️ Retenções</div>
       <div class="tab" data-tab="reajuste" onclick="navGo('reajuste',this)">📈 Reajuste</div>
@@ -2398,8 +2398,9 @@
 <!-- 💰 PIS/COFINS Segurança -->
 <div id="pg-piscofins-seg" class="pg">
   <div style="max-width:980px;margin:0 auto">
-    <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:4px">💰 Apuração PIS/COFINS — Montana Segurança</h2>
-    <p style="font-size:11px;color:#94a3b8;margin-bottom:16px">Regime: Lucro Real Anual — Cumulativo (PIS 0,65% + COFINS 3,00%) · Base de Caixa a partir de jan/2026</p>
+    <h2 id="pc-titulo" style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:4px">💰 Apuração PIS/COFINS</h2>
+    <p id="pc-subtitulo" style="font-size:11px;color:#94a3b8;margin-bottom:16px">Selecione a competência e clique em Calcular. Base: regime de caixa a partir de jan/2026.</p>
+    <div id="pc-aviso-nao-aplicavel" style="display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:#92400e;font-weight:600"></div>
 
     <!-- Seletor de período -->
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap">

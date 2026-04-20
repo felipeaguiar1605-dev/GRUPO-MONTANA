@@ -328,14 +328,19 @@ async function loadDashboard(){
       <div class="kpi-s">bruto ${brl(e.total_creditos)}${totalExc>0?` · excluído ${brl(totalExc)}`:''}</div>
     </div>
     <div class="kpi" style="border-left:4px solid #dc2626" title="Total débitos ${brl(e.total_debitos)} − Aplicações ${brl(e.debito_aplicacoes||0)} − Intragrupo ${brl(e.debito_intragrupo||0)}">
-      <div class="kpi-l">📤 Despesas Operacionais</div>
+      <div class="kpi-l">📤 Saída de Caixa Operacional</div>
       <div class="kpi-v red">${brl(e.despesa_operacional||e.total_debitos)}</div>
-      <div class="kpi-s">saídas reais · bruto ${brl(e.total_debitos)}${(e.debito_aplicacoes||0)+(e.debito_intragrupo||0)>0?` · excluído ${brl((e.debito_aplicacoes||0)+(e.debito_intragrupo||0))}`:''}</div>
+      <div class="kpi-s">débitos − aplic./intragrupo · bruto ${brl(e.total_debitos)}${(e.debito_aplicacoes||0)+(e.debito_intragrupo||0)>0?` · excluído ${brl((e.debito_aplicacoes||0)+(e.debito_intragrupo||0))}`:''}</div>
     </div>
-    <div class="kpi" style="border-left:4px solid ${saldo>=0?'#15803d':'#dc2626'}">
-      <div class="kpi-l">📈 Saldo (bruto)</div>
+    <div class="kpi" style="border-left:4px solid ${(recOp-(e.despesa_operacional||e.total_debitos))>=0?'#15803d':'#dc2626'}" title="Receita Operacional − Saída de Caixa Operacional">
+      <div class="kpi-l">📊 Margem Operacional</div>
+      <div class="kpi-v" style="color:${(recOp-(e.despesa_operacional||e.total_debitos))>=0?'#15803d':'#dc2626'}">${brl(recOp-(e.despesa_operacional||e.total_debitos))}</div>
+      <div class="kpi-s">receita op. − saída op.</div>
+    </div>
+    <div class="kpi" style="border-left:4px solid ${saldo>=0?'#15803d':'#dc2626'}" title="Crédito bruto − Débito bruto (variação da conta bancária no período)">
+      <div class="kpi-l">🏦 Saldo de Caixa (bruto)</div>
       <div class="kpi-v" style="color:${saldo>=0?'#15803d':'#dc2626'}">${brl(saldo)}</div>
-      <div class="kpi-s">${saldo>=0?'positivo':'negativo'}</div>
+      <div class="kpi-s">variação de caixa · ${saldo>=0?'positivo':'negativo'}</div>
     </div>
     <div class="kpi" style="border-left:4px solid #15803d">
       <div class="kpi-l">✅ Conciliados</div>
@@ -353,10 +358,10 @@ async function loadDashboard(){
       <div class="kpi-v" style="color:#7c3aed">${brl(d.nfs.totalBruto)}</div>
       <div class="kpi-s">${d.nfs.total} notas · Liq. ${brl(d.nfs.totalLiquido)}</div>
     </div>
-    <div class="kpi" style="border-left:4px solid #0891b2">
-      <div class="kpi-l">💸 Despesas</div>
+    <div class="kpi" style="border-left:4px solid #0891b2" title="Despesas cadastradas na tabela `despesas` (categorizadas por FOLHA/FGTS/Impostos/etc.) — pode diferir da Saída de Caixa Operacional">
+      <div class="kpi-l">💸 Despesas Classificadas</div>
       <div class="kpi-v" style="color:#0891b2">${brl(d.despesas.totalBruto)}</div>
-      <div class="kpi-s">${d.despesas.total} lançamentos</div>
+      <div class="kpi-s">${d.despesas.total} lançamentos${d.despesas.total===0?' · sem classificação':''}</div>
     </div>
     <div class="kpi" style="border-left:4px solid #dc2626">
       <div class="kpi-l">🏛️ Impostos/DARF</div>

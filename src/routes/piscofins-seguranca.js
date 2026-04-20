@@ -1,6 +1,10 @@
 /**
- * Montana Segurança — Apuração PIS/COFINS Mensal
- * Regime: Lucro Real Anual — Cumulativo (PIS 0,65% + COFINS 3,00%)
+ * Apuração PIS/COFINS Mensal — Multi-empresa
+ *
+ *   Montana Segurança  → Lucro Real Anual Cumulativo     (PIS 0,65% + COFINS 3,00%)  DARFs 8109/2172
+ *   Montana Assessoria → Lucro Real Não-Cumulativo       (PIS 1,65% + COFINS 7,60%)  DARFs 6912/5856
+ *   Demais (Simples)   → não aplicável (aba só mostra aviso)
+ *
  * Base: Caixa a partir de jan/2026.
  * Regra de transição: NFs emitidas antes de 2026 já foram tributadas
  *   por competência — excluídas da base de cálculo.
@@ -11,10 +15,47 @@ const companyMw  = require('../companyMiddleware');
 const router = express.Router();
 router.use(companyMw);
 
-const ALIQ_PIS    = 0.0065;
-const ALIQ_COFINS = 0.030;
-const DARF_PIS    = '8109';
-const DARF_COFINS = '2172';
+// ── Config por empresa ────────────────────────────────────────────
+const REGIMES = {
+  seguranca: {
+    nome:       'Montana Segurança Privada Ltda',
+    nome_curto: 'Montana Segurança',
+    regime:     'Lucro Real Anual — Cumulativo',
+    aliq_pis:    0.0065,
+    aliq_cofins: 0.030,
+    darf_pis:    '8109',
+    darf_cofins: '2172',
+    aplicavel:   true,
+  },
+  assessoria: {
+    nome:       'Montana Assessoria Empresarial Ltda',
+    nome_curto: 'Montana Assessoria',
+    regime:     'Lucro Real — Não-Cumulativo',
+    aliq_pis:    0.0165,
+    aliq_cofins: 0.0760,
+    darf_pis:    '6912',
+    darf_cofins: '5856',
+    aplicavel:   true,
+  },
+  portodovau: {
+    nome: 'Porto do Vau Serviços Privados', nome_curto: 'Porto do Vau',
+    regime: 'Simples Nacional', aliq_pis: 0, aliq_cofins: 0, darf_pis: '', darf_cofins: '',
+    aplicavel: false,
+  },
+  mustang: {
+    nome: 'Mustang G E Eireli', nome_curto: 'Mustang',
+    regime: 'Simples Nacional', aliq_pis: 0, aliq_cofins: 0, darf_pis: '', darf_cofins: '',
+    aplicavel: false,
+  },
+};
+function regimeFor(companyKey) {
+  return REGIMES[companyKey] || {
+    nome: 'Empresa desconhecida', nome_curto: companyKey || '?',
+    regime: 'Desconhecido', aliq_pis: 0, aliq_cofins: 0, darf_pis: '', darf_cofins: '',
+    aplicavel: false,
+  };
+}
+
 const INICIO_CAIXA = '2026-01-01';
 
 const NAO_TRIBUTA_KW = [
@@ -42,7 +83,8 @@ function calcVencimento(ano, mes) {
   return d.toLocaleDateString('pt-BR');
 }
 
-function apurar(db, anoMes) {
+function apurar(db, anoMes, companyKey) {
+  const cfg = regimeFor(companyKey);
   const [ano, mes] = anoMes.split('-').map(Number);
   const dateFrom   = `${ano}-${String(mes).padStart(2,'0')}-01`;
   const dateTo     = `${ano}-${String(mes).padStart(2,'0')}-31`;
@@ -84,16 +126,23 @@ function apurar(db, anoMes) {
 
   const rr    = v => +Number(v || 0).toFixed(2);
   const base  = rr(tributaveis.reduce((s, x) => s + (x.credito || 0), 0));
-  const pis   = rr(base * ALIQ_PIS);
-  const cof   = rr(base * ALIQ_COFINS);
+  const pis   = rr(base * cfg.aliq_pis);
+  const cof   = rr(base * cfg.aliq_cofins);
   const total = rr(pis + cof);
 
   return {
+    empresa: companyKey,
+    empresa_nome: cfg.nome,
+    empresa_nome_curto: cfg.nome_curto,
+    regime: cfg.regime,
+    aliq_pis: cfg.aliq_pis,
+    aliq_cofins: cfg.aliq_cofins,
+    aplicavel: cfg.aplicavel,
     ano_mes: anoMes, ano, mes,
     date_from: dateFrom, date_to: dateTo,
     base_tributavel: base,
     pis, cofins: cof, total_darf: total,
-    darf_pis: DARF_PIS, darf_cofins: DARF_COFINS,
+    darf_pis: cfg.darf_pis, darf_cofins: cfg.darf_cofins,
     vencimento: calcVencimento(ano, mes),
     tributaveis, excluidos,
     nao_tributa: naoTributa, pendentes,
@@ -114,7 +163,28 @@ router.get('/:anomes', (req, res) => {
     if (!/^\d{4}-\d{2}$/.test(anomes)) {
       return res.status(400).json({ error: 'Use AAAA-MM (ex: 2026-03)' });
     }
-    const dados = apurar(req.db, anomes);
+    const cfg = regimeFor(req.companyKey);
+    if (!cfg.aplicavel) {
+      return res.json({
+        ok: true,
+        dados: {
+          empresa: req.companyKey,
+          empresa_nome: cfg.nome,
+          empresa_nome_curto: cfg.nome_curto,
+          regime: cfg.regime,
+          aplicavel: false,
+          aviso: `${cfg.nome_curto} é ${cfg.regime} — PIS/COFINS recolhidos no DAS unificado. Apuração separada não se aplica.`,
+          ano_mes: anomes,
+          base_tributavel: 0, pis: 0, cofins: 0, total_darf: 0,
+          darf_pis: '', darf_cofins: '',
+          aliq_pis: 0, aliq_cofins: 0,
+          vencimento: '—',
+          tributaveis: [], excluidos: [], nao_tributa: [], pendentes: [],
+          resumo: { qtd_tributaveis:0, qtd_excluidos:0, qtd_nao_tributa:0, qtd_pendentes:0, tem_pendentes:false },
+        }
+      });
+    }
+    const dados = apurar(req.db, anomes, req.companyKey);
     res.json({ ok: true, dados });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -129,7 +199,11 @@ router.get('/:anomes/excel', async (req, res) => {
     if (!/^\d{4}-\d{2}$/.test(anomes)) {
       return res.status(400).json({ error: 'Use AAAA-MM (ex: 2026-03)' });
     }
-    const d  = apurar(req.db, anomes);
+    const cfg = regimeFor(req.companyKey);
+    if (!cfg.aplicavel) {
+      return res.status(400).json({ error: `${cfg.nome_curto} é ${cfg.regime} — apuração separada não se aplica.` });
+    }
+    const d  = apurar(req.db, anomes, req.companyKey);
     const wb = new ExcelJS.Workbook();
     wb.creator = 'Montana';
 
@@ -154,11 +228,11 @@ router.get('/:anomes/excel', async (req, res) => {
     ws1.getColumn(1).width = 44;
     ws1.getColumn(2).width = 26;
 
-    const t1 = ws1.addRow(['APURAÇÃO PIS/COFINS — MONTANA SEGURANÇA PRIVADA LTDA', '']);
+    const t1 = ws1.addRow([`APURAÇÃO PIS/COFINS — ${cfg.nome.toUpperCase()}`, '']);
     t1.getCell(1).font = { bold:true, size:13 };
     ws1.mergeCells(1,1,1,2);
 
-    const t2 = ws1.addRow([`Competência: ${mesNome.toUpperCase()}  |  Regime: Lucro Real Anual — Cumulativo`, '']);
+    const t2 = ws1.addRow([`Competência: ${mesNome.toUpperCase()}  |  Regime: ${cfg.regime}`, '']);
     t2.getCell(1).font = { size:9, color:{ argb:'FF64748B' } };
     ws1.mergeCells(2,1,2,2);
 
@@ -177,9 +251,11 @@ router.get('/:anomes/excel', async (req, res) => {
       });
     }
 
+    const pctPis = (cfg.aliq_pis*100).toLocaleString('pt-BR',{minimumFractionDigits:2});
+    const pctCof = (cfg.aliq_cofins*100).toLocaleString('pt-BR',{minimumFractionDigits:2});
     addR('BASE DE CÁLCULO (créditos tributáveis no mês)', BRL(d.base_tributavel), true, BLU_FILL);
-    addR(`PIS — 0,65%  (DARF ${DARF_PIS})`,              BRL(d.pis),             false, GRN_FILL);
-    addR(`COFINS — 3,00%  (DARF ${DARF_COFINS})`,        BRL(d.cofins),          false, GRN_FILL);
+    addR(`PIS — ${pctPis}%  (DARF ${cfg.darf_pis})`,     BRL(d.pis),             false, GRN_FILL);
+    addR(`COFINS — ${pctCof}%  (DARF ${cfg.darf_cofins})`, BRL(d.cofins),        false, GRN_FILL);
     addR('TOTAL A RECOLHER (PIS + COFINS)',               BRL(d.total_darf),      true,  GRN_FILL);
     addR('VENCIMENTO DARF',                               d.vencimento,           true);
     ws1.addRow([]);
@@ -260,7 +336,8 @@ router.get('/:anomes/excel', async (req, res) => {
       ['status_conciliacao',   'Status',        12],
     ]);
 
-    const filename = `Apuracao_PISCOFINS_Seguranca_${anomes.replace('-','')}.xlsx`;
+    const empSafe = (cfg.nome_curto || req.companyKey || 'empresa').replace(/[^A-Za-z0-9]+/g,'_');
+    const filename = `Apuracao_PISCOFINS_${empSafe}_${anomes.replace('-','')}.xlsx`;
     res.setHeader('Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

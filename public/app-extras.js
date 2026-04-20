@@ -3384,11 +3384,33 @@ async function loadPisCofinsSeg() {
   document.getElementById('pc-loading').textContent = 'Calculando…';
   document.getElementById('pc-loading').style.display = 'block';
   document.getElementById('pc-cards').style.display = 'none';
+  document.getElementById('pc-aviso-nao-aplicavel').style.display = 'none';
 
   try {
     const data = await api(`/piscofins-seguranca/${anoMes}`);
     if (!data.ok) throw new Error(data.error || 'Erro');
     _pcDados = data.dados;
+
+    // Título + subtítulo dinâmicos por empresa
+    const tituloEl = document.getElementById('pc-titulo');
+    const subEl    = document.getElementById('pc-subtitulo');
+    if (tituloEl) tituloEl.textContent = `💰 Apuração PIS/COFINS — ${_pcDados.empresa_nome_curto || ''}`.trim();
+    if (subEl && _pcDados.aplicavel) {
+      const pct = (v) => (v*100).toLocaleString('pt-BR',{minimumFractionDigits:2});
+      subEl.textContent =
+        `Regime: ${_pcDados.regime} (PIS ${pct(_pcDados.aliq_pis)}% + COFINS ${pct(_pcDados.aliq_cofins)}%) · Base de caixa a partir de jan/2026`;
+    }
+
+    // Empresas Simples: mostra aviso e não renderiza cards
+    if (!_pcDados.aplicavel) {
+      document.getElementById('pc-loading').style.display = 'none';
+      const av = document.getElementById('pc-aviso-nao-aplicavel');
+      av.style.display = 'block';
+      av.textContent = _pcDados.aviso || `${_pcDados.empresa_nome_curto} — ${_pcDados.regime}. PIS/COFINS recolhidos via DAS unificado; apuração separada não se aplica.`;
+      if (subEl) subEl.textContent = `Regime: ${_pcDados.regime}`;
+      document.getElementById('pc-btn-excel').style.display = 'none';
+      return;
+    }
 
     document.getElementById('pc-loading').style.display = 'none';
     document.getElementById('pc-cards').style.display = 'block';
@@ -3427,10 +3449,11 @@ async function loadPisCofinsSeg() {
 }
 
 function renderPcKpis(d) {
+  const pct = v => (v*100).toLocaleString('pt-BR',{minimumFractionDigits:2});
   const cards = [
     { label: 'Base Tributável',       val: brl(d.base_tributavel), bg: '#dbeafe', bold: true },
-    { label: `PIS 0,65% (DARF ${d.darf_pis})`,   val: brl(d.pis),   bg: '#d1fae5' },
-    { label: `COFINS 3,00% (DARF ${d.darf_cofins})`, val: brl(d.cofins), bg: '#d1fae5' },
+    { label: `PIS ${pct(d.aliq_pis)}% (DARF ${d.darf_pis})`,   val: brl(d.pis),   bg: '#d1fae5' },
+    { label: `COFINS ${pct(d.aliq_cofins)}% (DARF ${d.darf_cofins})`, val: brl(d.cofins), bg: '#d1fae5' },
     { label: 'Total a Recolher',      val: brl(d.total_darf),      bg: '#d1fae5', bold: true },
     { label: 'Vencimento DARF',       val: d.vencimento,           bg: '#fef3c7' },
   ];
