@@ -102,6 +102,9 @@ app.use('/api/transparencia', require('./routes/transparencia'));
 // ─── Módulo Conciliação Robusta (pagador_alias + sugestões) ─────
 app.use('/api/conciliacao-robusta', require('./routes/conciliacao-robusta'));
 
+// ─── Alertas Operacionais (faturamento / cobranças / folha) ─────
+app.use('/api/alertas-operacionais', require('./routes/alertas-operacionais'));
+
 // ─── Módulo Assistente IA (Claude) ──────────────────────────────
 app.use('/api/ia',           require('./routes/ia'));
 
@@ -196,6 +199,8 @@ try {
   const cron = require('node-cron');
   const { enviarAlertasEmpresa, verificarDuplicatas, enviarAlertaDedup } = require('./routes/notificacoes');
 
+  const alertasOp = require('./alertas-operacionais');
+
   async function dispararAlertasDiarios() {
     for (const key of Object.keys(COMPANIES)) {
       try {
@@ -203,6 +208,38 @@ try {
         const resultado = await enviarAlertasEmpresa(db, COMPANIES[key]);
         if (resultado.enviado) {
           console.log(`  📧 Alertas enviados [${key}] (${resultado.total} alertas)`);
+        }
+
+        // ── Alertas Operacionais (#1 faturamento, #2 cobranças, #3 folha) ──
+        try {
+          const relOp = alertasOp.rodarTodos(db, COMPANIES[key]);
+          if (relOp.total_geral > 0) {
+            const smtpRows = db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'smtp_%'`).all();
+            const smtp = {};
+            smtpRows.forEach(r => { smtp[r.chave.replace('smtp_', '')] = r.valor; });
+            if (smtp.host && smtp.user && smtp.to) {
+              const nodemailer = require('nodemailer');
+              const transporter = nodemailer.createTransport({
+                host: smtp.host, port: parseInt(smtp.port) || 587,
+                secure: parseInt(smtp.port) === 465,
+                auth: { user: smtp.user, pass: smtp.pass },
+              });
+              const html = alertasOp.formatarHTML(relOp);
+              const assunto = `⚠ ${relOp.total_geral} Alerta(s) Operacional(is) — ${COMPANIES[key].nomeAbrev || COMPANIES[key].nome} — ${new Date().toLocaleDateString('pt-BR')}`;
+              await transporter.sendMail({ from: smtp.from || smtp.user, to: smtp.to, subject: assunto, html });
+              console.log(`  ⚠ Alertas operacionais enviados [${key}]: ${relOp.faturamento.total} fat, ${relOp.cobrancas.total} cob, ${relOp.folha.total} folha`);
+              try {
+                db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status)
+                            VALUES ('email',?,?,?,'enviado')`).run(smtp.to, assunto, html);
+              } catch(_) {}
+            } else {
+              console.log(`  ⚠ Alertas operacionais [${key}]: ${relOp.total_geral} pendentes (SMTP não configurado)`);
+            }
+          } else {
+            console.log(`  ✅ Alertas operacionais [${key}]: nenhuma pendência`);
+          }
+        } catch (eOp) {
+          console.warn(`  ⚠ Alertas operacionais [${key}]:`, eOp.message);
         }
         // Tentar enviar WhatsApp também
         try {

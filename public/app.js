@@ -4166,3 +4166,115 @@ async function abrirCorrecaoNfs() {
     }
   } catch(e) { toast('Erro: ' + e.message); }
 }
+// ═══════════════════════════════════════════════════════════════════════════
+// Alertas Operacionais (#1 faturamento × NFs | #2 cobranças × SLA | #3 folha × extrato)
+// ═══════════════════════════════════════════════════════════════════════════
+async function aopCarregar() {
+  const body   = document.getElementById('aop-body');
+  const resumo = document.getElementById('aop-resumo');
+  if (!body) return;
+
+  body.innerHTML = '<div class="loading" style="padding:16px;text-align:center;color:#94a3b8;font-size:11px">Carregando alertas operacionais…</div>';
+
+  let d;
+  try {
+    d = await api('/alertas-operacionais');
+  } catch (e) {
+    body.innerHTML = '<div class="muted" style="padding:16px;font-size:11px;text-align:center;color:#b91c1c">Falha ao carregar: ' + (e.message || 'desconhecido') + '</div>';
+    return;
+  }
+
+  const brl = v => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const f   = d.faturamento || { itens: [], total: 0 };
+  const c   = d.cobrancas   || { itens: [], total: 0, valor_total: 0, por_tomador: [] };
+  const fo  = d.folha       || { itens: [], total: 0 };
+
+  if (resumo) resumo.textContent = `${d.total_geral || 0} alerta(s) | Fat: ${f.total} | Cob: ${c.total} NFs (${brl(c.valor_total)}) | Folha: ${fo.total}`;
+
+  const corSev = { critica: '#c92a2a', alta: '#e8590c', media: '#f08c00' };
+
+  let html = `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;padding-top:10px">`;
+
+  // ── Coluna 1: Faturamento ────────────────────────────────────────────
+  html += `<div style="border:1px solid #e5e7eb;border-radius:6px;overflow:hidden">`;
+  html += `<div style="background:#fff7ed;padding:8px 10px;border-bottom:1px solid #e5e7eb;font-weight:600;font-size:12px">📋 Faturamento não emitido (${f.total})</div>`;
+  if (f.total === 0) {
+    html += `<div style="padding:14px;text-align:center;color:#15803d;font-size:11px">✅ ${f.motivo || 'Tudo em dia'}</div>`;
+  } else {
+    html += `<div style="max-height:260px;overflow-y:auto"><table style="width:100%;font-size:11px;border-collapse:collapse">`;
+    html += `<thead><tr style="background:#f1f5f9"><th style="padding:5px 6px;text-align:left;border-bottom:1px solid #e5e7eb">Contrato</th><th style="padding:5px 6px;text-align:right;border-bottom:1px solid #e5e7eb">Faltante</th><th style="padding:5px 6px;text-align:center;border-bottom:1px solid #e5e7eb">%</th></tr></thead><tbody>`;
+    f.itens.slice(0, 10).forEach(i => {
+      html += `<tr style="border-bottom:1px solid #f1f5f9">`;
+      html += `<td style="padding:5px 6px"><b>${i.numContrato}</b><br><span style="color:#6b7280;font-size:10px">${(i.orgao || '').substring(0, 28)}</span></td>`;
+      html += `<td style="padding:5px 6px;text-align:right;color:${corSev[i.severidade]};font-weight:600">${brl(i.faltante)}</td>`;
+      html += `<td style="padding:5px 6px;text-align:center;color:${corSev[i.severidade]};font-weight:700">${i.pct_coberto}%</td>`;
+      html += `</tr>`;
+    });
+    html += `</tbody></table></div>`;
+  }
+  html += `</div>`;
+
+  // ── Coluna 2: Cobranças (resumo por tomador) ─────────────────────────
+  html += `<div style="border:1px solid #e5e7eb;border-radius:6px;overflow:hidden">`;
+  html += `<div style="background:#fef2f2;padding:8px 10px;border-bottom:1px solid #e5e7eb;font-weight:600;font-size:12px">💰 Cobranças atrasadas — ${c.total} NFs (${c.janela_dias || 180}d)</div>`;
+  if (c.total === 0) {
+    html += `<div style="padding:14px;text-align:center;color:#15803d;font-size:11px">✅ Nenhuma NF acima do SLA</div>`;
+  } else {
+    html += `<div style="padding:6px 10px;background:#fff;font-size:11px;border-bottom:1px solid #f1f5f9;font-weight:600">Total: ${brl(c.valor_total)}</div>`;
+    html += `<div style="max-height:240px;overflow-y:auto"><table style="width:100%;font-size:11px;border-collapse:collapse">`;
+    html += `<thead><tr style="background:#f1f5f9"><th style="padding:5px 6px;text-align:left;border-bottom:1px solid #e5e7eb">Tomador</th><th style="padding:5px 6px;text-align:center;border-bottom:1px solid #e5e7eb">NFs</th><th style="padding:5px 6px;text-align:right;border-bottom:1px solid #e5e7eb">Valor</th></tr></thead><tbody>`;
+    (c.por_tomador || []).slice(0, 10).forEach(t => {
+      html += `<tr style="border-bottom:1px solid #f1f5f9">`;
+      html += `<td style="padding:5px 6px"><span title="${t.tomador}">${(t.tomador || '').substring(0, 25)}</span><br><span style="color:#6b7280;font-size:10px">SLA ${t.sla}d (${t.origem_sla})</span></td>`;
+      html += `<td style="padding:5px 6px;text-align:center">${t.nfs}</td>`;
+      html += `<td style="padding:5px 6px;text-align:right;color:#dc2626;font-weight:600">${brl(t.valor_bruto)}</td>`;
+      html += `</tr>`;
+    });
+    html += `</tbody></table></div>`;
+  }
+  html += `</div>`;
+
+  // ── Coluna 3: Folha ──────────────────────────────────────────────────
+  html += `<div style="border:1px solid #e5e7eb;border-radius:6px;overflow:hidden">`;
+  html += `<div style="background:#faf5ff;padding:8px 10px;border-bottom:1px solid #e5e7eb;font-weight:600;font-size:12px">👥 Folhas sem contrapartida (${fo.total})</div>`;
+  if (fo.total === 0) {
+    html += `<div style="padding:14px;text-align:center;color:#15803d;font-size:11px">✅ Todas as folhas identificadas no extrato</div>`;
+  } else {
+    html += `<div style="max-height:260px;overflow-y:auto"><table style="width:100%;font-size:11px;border-collapse:collapse">`;
+    html += `<thead><tr style="background:#f1f5f9"><th style="padding:5px 6px;text-align:left;border-bottom:1px solid #e5e7eb">Competência</th><th style="padding:5px 6px;text-align:right;border-bottom:1px solid #e5e7eb">Total</th><th style="padding:5px 6px;text-align:center;border-bottom:1px solid #e5e7eb">Cand.</th></tr></thead><tbody>`;
+    fo.itens.forEach(i => {
+      html += `<tr style="border-bottom:1px solid #f1f5f9">`;
+      html += `<td style="padding:5px 6px"><b>${i.competencia}</b><br><span style="color:#6b7280;font-size:10px">${i.janela_busca}</span></td>`;
+      html += `<td style="padding:5px 6px;text-align:right;color:${corSev[i.severidade]};font-weight:600">${brl(i.total_liquido)}</td>`;
+      html += `<td style="padding:5px 6px;text-align:center">${i.candidatos_encontrados}</td>`;
+      html += `</tr>`;
+    });
+    html += `</tbody></table></div>`;
+  }
+  html += `</div>`;
+
+  html += `</div>`;
+
+  // Rodapé com botões de ação
+  html += `<div style="display:flex;gap:8px;margin-top:10px;padding:8px 0;border-top:1px solid #f1f5f9;font-size:10px;color:#6b7280">`;
+  html += `<span>Gerado em ${new Date(d.gerado_em).toLocaleString('pt-BR')}</span>`;
+  html += `<span style="margin-left:auto">`;
+  html += `<button onclick="aopEnviarEmail()" style="padding:4px 10px;border:1px solid #e2e8f0;background:#f8fafc;border-radius:4px;cursor:pointer;color:#64748b;font-size:10px">📧 Enviar por email</button>`;
+  html += `</span></div>`;
+
+  body.innerHTML = html;
+}
+
+async function aopEnviarEmail() {
+  if (!confirm('Enviar relatório de alertas operacionais por email?')) return;
+  try {
+    const d = await api('/alertas-operacionais/enviar-email', { method: 'POST', body: '{}' });
+    if (d.enviado) {
+      toast('✅ Email enviado para ' + d.destino + ' (' + d.total + ' alertas)');
+    } else {
+      toast('⚠ ' + (d.motivo || d.erro || 'Não enviado'));
+    }
+  } catch (e) {
+    toast('Erro: ' + e.message);
+  }
+}
