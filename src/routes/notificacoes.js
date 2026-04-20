@@ -420,5 +420,192 @@ router.post('/alertar-reajustes', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── FASE 3: Verificação de Duplicatas ──────────────────────────────────────
+
+/**
+ * verificarDuplicatas(db, companyKey)
+ * Escaneia o banco em busca de registros duplicados nas tabelas críticas.
+ * Retorna objeto com listas de duplicatas encontradas por tabela.
+ */
+function verificarDuplicatas(db, companyKey) {
+  const resultado = { temDuplicatas: false, extratos: [], notas: [], despesas: [] };
+
+  // ── extratos: mesmo data_iso + historico + valor + tipo sem bb_hash (legados) ──
+  // Ignora linhas informativas sem valor (saldo, bloqueio judicial, etc. — val=0)
+  // que aparecem múltiplas vezes no extrato BB e não são duplicatas reais.
+  try {
+    const dupExt = db.prepare(`
+      SELECT data_iso, historico, COALESCE(debito,0) debito, COALESCE(credito,0) credito,
+             tipo, COUNT(*) cnt
+      FROM extratos
+      WHERE (bb_hash IS NULL OR bb_hash = '') AND data_iso != ''
+        AND (COALESCE(debito,0) + COALESCE(credito,0)) > 0
+      GROUP BY data_iso, historico, debito, credito, tipo
+      HAVING cnt > 1
+      ORDER BY cnt DESC LIMIT 30
+    `).all();
+    resultado.extratos = dupExt;
+    if (dupExt.length > 0) resultado.temDuplicatas = true;
+  } catch(_) {}
+
+  // ── extratos: bb_hash duplicado (mesma hash em dois registros distintos) ──
+  try {
+    const dupHash = db.prepare(`
+      SELECT bb_hash, COUNT(*) cnt FROM extratos
+      WHERE bb_hash != '' AND bb_hash NOT LIKE '%_dup%'
+      GROUP BY bb_hash HAVING cnt > 1 LIMIT 20
+    `).all();
+    if (dupHash.length > 0) {
+      resultado.extratos.push(...dupHash.map(r => ({ ...r, tipo_duplic: 'bb_hash' })));
+      resultado.temDuplicatas = true;
+    }
+  } catch(_) {}
+
+  // ── notas_fiscais: numero duplicado (ignora 0 e vazio) ──
+  try {
+    const dupNfs = db.prepare(`
+      SELECT numero, COUNT(*) cnt, MIN(data_emissao) data_emissao,
+             GROUP_CONCAT(tomador, ' / ') tomadores
+      FROM notas_fiscais
+      WHERE numero != '' AND numero != '0'
+      GROUP BY numero HAVING cnt > 1
+      ORDER BY cnt DESC LIMIT 20
+    `).all();
+    resultado.notas = dupNfs;
+    if (dupNfs.length > 0) resultado.temDuplicatas = true;
+  } catch(_) {}
+
+  // ── despesas: dedup_hash duplicado ──
+  try {
+    const dupDesp = db.prepare(`
+      SELECT dedup_hash, COUNT(*) cnt,
+             MIN(data_iso) data_iso, MIN(fornecedor) fornecedor,
+             MIN(valor_bruto) valor_bruto
+      FROM despesas
+      WHERE dedup_hash != '' AND dedup_hash NOT LIKE '%_dup%'
+      GROUP BY dedup_hash HAVING cnt > 1
+      ORDER BY cnt DESC LIMIT 20
+    `).all();
+    resultado.despesas = dupDesp;
+    if (dupDesp.length > 0) resultado.temDuplicatas = true;
+  } catch(_) {}
+
+  return resultado;
+}
+
+/**
+ * enviarAlertaDedup(db, company, relatorio)
+ * Envia e-mail com relatório de duplicatas para a empresa.
+ */
+async function enviarAlertaDedup(db, company, relatorio) {
+  const smtp = getSmtp(db);
+  if (!smtp.host || !smtp.user || !smtp.to) {
+    return { enviado: false, motivo: 'SMTP não configurado' };
+  }
+
+  const brl = v => `R$ ${Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}`;
+  const hoje = new Date().toLocaleDateString('pt-BR',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+
+  let corpo = `
+    <div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto">
+    <div style="background:#7f1d1d;color:#fff;padding:20px;border-radius:8px 8px 0 0">
+      <h2 style="margin:0">⚠️ Alerta de Duplicatas — ${company.nome}</h2>
+      <p style="margin:4px 0 0;opacity:.8;font-size:13px">${hoje}</p>
+    </div>
+    <div style="border:1px solid #fca5a5;border-top:none;padding:20px;border-radius:0 0 8px 8px;background:#fff8f8">
+    <p style="color:#991b1b">Foram detectados registros duplicados no banco de dados. Verifique e corrija antes da próxima conciliação.</p>
+  `;
+
+  if (relatorio.extratos.length > 0) {
+    corpo += `<h3 style="color:#b91c1c">💰 Extratos Bancários Duplicados (${relatorio.extratos.length})</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <tr style="background:#fee2e2"><th>Data</th><th>Histórico</th><th>Valor</th><th>Ocorrências</th></tr>`;
+    relatorio.extratos.slice(0, 10).forEach(e => {
+      const val = e.credito > 0 ? brl(e.credito) : brl(e.debito);
+      corpo += `<tr style="border-bottom:1px solid #fecaca">
+        <td style="padding:4px">${e.data_iso||''}</td>
+        <td style="padding:4px">${(e.historico||'').slice(0,50)}</td>
+        <td style="padding:4px">${val}</td>
+        <td style="padding:4px;text-align:center;color:#dc2626"><strong>${e.cnt}</strong></td>
+      </tr>`;
+    });
+    corpo += '</table>';
+  }
+
+  if (relatorio.notas.length > 0) {
+    corpo += `<h3 style="color:#b91c1c">🧾 Notas Fiscais Duplicadas (${relatorio.notas.length})</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <tr style="background:#fee2e2"><th>Número NF</th><th>Data</th><th>Ocorrências</th></tr>`;
+    relatorio.notas.forEach(n => {
+      corpo += `<tr style="border-bottom:1px solid #fecaca">
+        <td style="padding:4px"><strong>${n.numero}</strong></td>
+        <td style="padding:4px">${n.data_emissao||''}</td>
+        <td style="padding:4px;text-align:center;color:#dc2626"><strong>${n.cnt}</strong></td>
+      </tr>`;
+    });
+    corpo += '</table>';
+  }
+
+  if (relatorio.despesas.length > 0) {
+    corpo += `<h3 style="color:#b91c1c">💸 Despesas Duplicadas (${relatorio.despesas.length})</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <tr style="background:#fee2e2"><th>Data</th><th>Fornecedor</th><th>Valor</th><th>Ocorrências</th></tr>`;
+    relatorio.despesas.forEach(d => {
+      corpo += `<tr style="border-bottom:1px solid #fecaca">
+        <td style="padding:4px">${d.data_iso||''}</td>
+        <td style="padding:4px">${(d.fornecedor||'').slice(0,40)}</td>
+        <td style="padding:4px">${brl(d.valor_bruto)}</td>
+        <td style="padding:4px;text-align:center;color:#dc2626"><strong>${d.cnt}</strong></td>
+      </tr>`;
+    });
+    corpo += '</table>';
+  }
+
+  const totalItens = relatorio.extratos.length + relatorio.notas.length + relatorio.despesas.length;
+  corpo += `<p style="margin-top:16px;font-size:12px;color:#666">
+    Acesse o Montana ERP para corrigir estes registros.<br>
+    Este alerta é gerado automaticamente pela Fase 3 do sistema Anti-Duplicação.
+  </p></div></div>`;
+
+  const assunto = `⚠️ ${totalItens} Duplicata(s) Detectadas — ${company.nomeAbrev || company.nome} — ${new Date().toLocaleDateString('pt-BR')}`;
+
+  let nodemailer;
+  try { nodemailer = require('nodemailer'); }
+  catch(e) { return { enviado: false, motivo: 'nodemailer não instalado' }; }
+
+  try {
+    const transporter = nodemailer.createTransport({
+      host: smtp.host, port: parseInt(smtp.port)||587,
+      secure: parseInt(smtp.port)===465, auth: { user: smtp.user, pass: smtp.pass }
+    });
+    await transporter.sendMail({ from: smtp.from||smtp.user, to: smtp.to, subject: assunto, html: corpo });
+    try {
+      db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('email',?,?,?,'enviado')`).run(smtp.to, assunto, corpo);
+    } catch(_) {}
+    return { enviado: true, totalItens };
+  } catch(e) {
+    try {
+      db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status,erro) VALUES ('email',?,?,'','erro',?)`).run(smtp.to||'', assunto, e.message);
+    } catch(_) {}
+    return { enviado: false, motivo: e.message };
+  }
+}
+
+// POST /api/notificacoes/verificar-dedup — disparo manual
+router.post('/verificar-dedup', async (req, res) => {
+  try {
+    const relatorio = verificarDuplicatas(req.db, req.companyKey);
+    if (!relatorio.temDuplicatas) {
+      return res.json({ ok: true, temDuplicatas: false, message: 'Nenhuma duplicata encontrada ✅' });
+    }
+    const envio = await enviarAlertaDedup(req.db, req.company, relatorio);
+    res.json({ ok: true, temDuplicatas: true, relatorio, envio });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
 module.exports.enviarAlertasEmpresa = enviarAlertasEmpresa;
+module.exports.verificarDuplicatas  = verificarDuplicatas;
+module.exports.enviarAlertaDedup    = enviarAlertaDedup;
