@@ -819,16 +819,25 @@ router.get('/dashboard/exposicao-intragrupo', (_req, res) => {
 
 // ─── EXTRATOS ────────────────────────────────────────────────────
 // Meses disponíveis no banco para o período selecionado (para botões dinâmicos)
+// Deriva o mês a partir de data_iso (fonte de verdade) em vez de ler a coluna
+// `mes` — que historicamente foi poluida com formatos diversos: 'ABR', 'abril
+// 2026', '2026-04', 'Extrato....csv.xls', etc. Assim o filtro sempre funciona
+// independente de como a importação populou `mes`.
 router.get('/extratos/meses', (req, res) => {
   try {
     const { from, to } = req.query;
-    let where = '1=1';
+    let where = `data_iso IS NOT NULL AND length(data_iso) >= 7`;
     const params = {};
     if (from) { where += ' AND data_iso >= @from'; params.from = from; }
     if (to)   { where += ' AND data_iso <= @to';   params.to   = to;   }
     const MES_ORDER = ['JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DEZ'];
-    const rows = req.db.prepare(`SELECT DISTINCT mes FROM extratos WHERE ${where} AND length(mes)=3`).all(params);
-    const meses = rows.map(r => r.mes).filter(m => MES_ORDER.includes(m))
+    const rows = req.db.prepare(`
+      SELECT DISTINCT substr(data_iso, 6, 2) as mm
+      FROM extratos WHERE ${where}
+    `).all(params);
+    const meses = rows
+      .map(r => MES_ORDER[parseInt(r.mm, 10) - 1])
+      .filter(m => !!m)
       .sort((a,b) => MES_ORDER.indexOf(a) - MES_ORDER.indexOf(b));
     res.json({ meses });
   } catch(e) { errRes(res, e); }
@@ -842,7 +851,13 @@ router.get('/extratos', (req, res) => {
   if (from) { where += ' AND data_iso >= @from'; params.from = from; }
   if (to) { where += ' AND data_iso <= @to'; params.to = to; }
   if (status) { where += ' AND status_conciliacao = @status'; params.status = status; }
-  if (mes) { where += ' AND mes = @mes'; params.mes = mes; }
+  if (mes) {
+    // Filtro por mês derivado de data_iso (coluna `mes` é poluida por imports legados).
+    // Aceita tanto 'ABR'/'FEV' quanto '04'/'02' vindos do frontend.
+    const MES_NUM = { JAN:'01',FEV:'02',MAR:'03',ABR:'04',MAI:'05',JUN:'06',JUL:'07',AGO:'08',SET:'09',OUT:'10',NOV:'11',DEZ:'12' };
+    const mm = MES_NUM[String(mes).toUpperCase()] || (String(mes).length === 2 ? mes : null);
+    if (mm) { where += ` AND substr(data_iso, 6, 2) = @mm AND length(data_iso) >= 7`; params.mm = mm; }
+  }
   if (posto) { where += ' AND posto = @posto'; params.posto = posto; }
   if (somente_creditos === '1') { where += ' AND credito > 0'; }
 
