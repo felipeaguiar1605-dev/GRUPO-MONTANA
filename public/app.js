@@ -97,7 +97,7 @@ function hideLoading(){
 
 async function api(url,opts){
   const headers={'X-Company':currentCompany};
-  const token=localStorage.getItem('montana_token');
+  const token=localStorage.getItem('montana_jwt');
   if(token) headers['Authorization']='Bearer '+token;
   if(opts&&opts.body&&typeof opts.body==='string') headers['Content-Type']='application/json';
   if(opts&&opts.headers) Object.assign(headers,opts.headers);
@@ -150,9 +150,13 @@ function navGo(id,el){
 
 // ─── Tabs ────────────────────────────────────────────────────────
 function showTab(id,el){
+  const pgEl=document.getElementById('pg-'+id);
+  if(!pgEl){ console.warn('[showTab] pg-'+id+' não existe'); return; }
   document.querySelectorAll('.pg').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  document.getElementById('pg-'+id).classList.add('active');
+  pgEl.classList.add('active');
+  // Atualiza hash da URL para deep-link / bookmark (sem scroll jump)
+  try { if(location.hash !== '#'+id) history.replaceState(null, '', '#'+id); } catch(_){}
   // Find the sidebar item if not provided
   if(!el) el=document.querySelector(`.nav-group-items .tab[data-tab="${id}"]`);
   if(el) el.classList.add('active');
@@ -2906,6 +2910,8 @@ async function doLogin() {
     if (ov) ov.style.display = 'none';
     updateUserInfo();
     loadDashboard();
+    // Respeita deep-link: se usuário chegou em /#pagamentos e precisou logar, abre aquela aba
+    if(typeof applyInitialHash === 'function') applyInitialHash();
   } catch(e) { errEl.textContent = 'Erro de conexão: ' + e.message; errEl.style.display='block'; }
 }
 
@@ -2940,10 +2946,52 @@ function initAuth() {
   if (!token) { showLoginModal(); return; }
   // Verifica se token ainda é válido tentando uma requisição GET
   api('/dashboard').then(d => {
-    if (d && !d.error) { updateUserInfo(); loadDashboard(); }
+    if (d && !d.error) { updateUserInfo(); loadDashboard(); applyInitialHash(); }
     else { clearToken(); showLoginModal('Sessão expirada. Faça login novamente.'); }
   }).catch(() => { clearToken(); showLoginModal('Erro de conexão.'); });
 }
+
+// ─── Hash routing (deep-link / bookmark) ─────────────────────────
+// Ex: https://sistema.grupomontanasec.com/#painel-pgto abre direto na aba.
+function applyInitialHash(){
+  const h = (location.hash || '').replace(/^#/,'').trim();
+  if(!h) return;
+  // Valida que a aba existe antes de acionar
+  if(document.getElementById('pg-'+h)) showTab(h, null);
+}
+window.addEventListener('hashchange', () => {
+  const h = (location.hash || '').replace(/^#/,'').trim();
+  if(h && document.getElementById('pg-'+h)) showTab(h, null);
+});
+
+// ─── Safety net: intercepta 401 em fetches diretos /api/* ────────
+// Cobre codigo legado que ainda usa fetch() cru em vez de api() wrapper.
+// Ao detectar 401, limpa token e mostra login — evita usuario travado numa
+// aba silenciosamente quebrada depois do JWT expirar.
+(function install401Interceptor(){
+  if(window._fetch401Installed) return;
+  window._fetch401Installed = true;
+  const _origFetch = window.fetch.bind(window);
+  window.fetch = async function(input, init){
+    const resp = await _origFetch(input, init);
+    try {
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      if(resp.status === 401 && url.indexOf('/api/') >= 0 && url.indexOf('/api/auth/login') < 0){
+        // clone() para nao consumir o body que o chamador precisa ler
+        resp.clone().json().then(d => {
+          if (typeof clearToken === 'function') clearToken();
+          if (typeof showLoginModal === 'function') {
+            showLoginModal(d && d.code === 'TOKEN_EXPIRED' ? 'Sessão expirada. Faça login novamente.' : 'Autenticação necessária.');
+          }
+        }).catch(() => {
+          if (typeof clearToken === 'function') clearToken();
+          if (typeof showLoginModal === 'function') showLoginModal('Autenticação necessária.');
+        });
+      }
+    } catch(_){}
+    return resp;
+  };
+})();
 
 // ─── Override api() para injetar token JWT ──────────────────────
 // (redefine a função api() já declarada acima)
@@ -3479,7 +3527,7 @@ function exportarExcel(tipo) {
   }
   if (params.length) url += '?' + params.join('&');
   // Adiciona header de auth via link
-  const token = localStorage.getItem('montana_token') || '';
+  const token = localStorage.getItem('montana_jwt') || '';
   // Força download via fetch e blob para enviar header X-Company
   showLoading('Gerando Excel…');
   fetch('/api' + url, { headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token } })

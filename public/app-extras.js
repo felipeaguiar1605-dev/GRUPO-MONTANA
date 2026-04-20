@@ -19,6 +19,7 @@
     if (id === 'consolidado')     loadConsolidadoResumo();
     if (id === 'desp')            loadSubcontratados();
     if (id === 'piscofins-seg')   initPisCofinsSeg();
+    if (id === 'inss-retido')     initInssRetido();
   };
 })();
 
@@ -157,7 +158,7 @@ async function salvarCertidao() {
   const arq = document.getElementById('cert-arquivo').files[0];
   if (arq) fd.append('arquivo_pdf', arq);
 
-  const token = localStorage.getItem('montana_token') || '';
+  const token = localStorage.getItem('montana_jwt') || '';
   const method = id ? 'PUT' : 'POST';
   const url    = id ? `/api/certidoes/${id}` : '/api/certidoes';
 
@@ -1586,7 +1587,7 @@ async function uploadCertWebiss() {
 
   showLoading('Enviando certificado…');
   try {
-    const token = localStorage.getItem('montana_token');
+    const token = localStorage.getItem('montana_jwt');
     const r = await fetch(`/api/webiss/upload-cert?company=${currentCompany}`, {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token },
@@ -1840,13 +1841,13 @@ function exportDREPdf() {
   const mes = document.getElementById('dre-mes')?.value || '';
   let url = `/api/dre/pdf?company=${currentCompany}&ano=${ano}`;
   if (mes) url += `&mes=${mes}`;
-  const token = localStorage.getItem('montana_token');
+  const token = localStorage.getItem('montana_jwt');
   window.open(url + (token ? `&_token=${token}` : ''), '_blank');
 }
 
 // ── Holerite PDF ─────────────────────────────────────────────
 function gerarHolerite(folhaId, funcId) {
-  const token = localStorage.getItem('montana_token');
+  const token = localStorage.getItem('montana_jwt');
   const url = `/api/rh/folha/${folhaId}/holerite/${funcId}?company=${currentCompany}` + (token ? `&_token=${token}` : '');
   window.open(url, '_blank');
 }
@@ -1857,7 +1858,7 @@ async function loadConsolidado() {
   if (!el) return;
   el.innerHTML = '<div class="loading">Carregando...</div>';
   try {
-    const token = localStorage.getItem('montana_token');
+    const token = localStorage.getItem('montana_jwt');
     const r = await fetch('/api/consolidado', { headers: { 'Authorization': 'Bearer ' + token } });
     const data = await r.json();
     if (!data.ok) { el.innerHTML = '<p style="color:#dc2626">Erro ao carregar consolidado</p>'; return; }
@@ -2527,7 +2528,7 @@ function importarExcelFolha(folhaId) {
     form.append('file', inp.files[0]);
     showLoading('Importando Excel…');
     try {
-      const token = localStorage.getItem('montana_token');
+      const token = localStorage.getItem('montana_jwt');
       const r = await fetch(`/api/rh/folha/${folhaId}/importar-excel?company=${currentCompany}`, {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + token },
@@ -3502,4 +3503,292 @@ async function exportarPisCofinsExcel() {
   const anoMes = document.getElementById('pc-mes')?.value;
   if (!anoMes) return;
   window.open(`/api/piscofins-seguranca/${anoMes}/excel?company=${window.currentCompany}`, '_blank');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// INSS RETIDO / S-1300
+// ═══════════════════════════════════════════════════════════════
+
+let _irDados = null;
+
+async function initInssRetido() {
+  const sel = document.getElementById('ir-competencia');
+  if (!sel) return;
+  try {
+    const d = await api('/inss-retido/competencias', { headers: { 'X-Company': 'assessoria' } });
+    if (!d.ok) return;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Selecione…</option>' +
+      d.competencias.map(c =>
+        `<option value="${c.value}" ${c.value === cur ? 'selected' : ''}>${c.label} (${c.cnt} NFs)</option>`
+      ).join('');
+    if (!cur && d.competencias.length) {
+      sel.value = d.competencias[0].value;
+      loadInssRetido();
+    }
+  } catch (e) {
+    console.warn('initInssRetido:', e.message);
+  }
+}
+
+async function loadInssRetido() {
+  const comp = document.getElementById('ir-competencia')?.value;
+  if (!comp) return;
+
+  document.getElementById('ir-loading').textContent = 'Carregando…';
+  document.getElementById('ir-loading').style.display = 'block';
+  ['ir-kpis','ir-alerta','ir-tomadores-box','ir-nfs-box','ir-dctfweb-box'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+
+  try {
+    const d = await api(`/inss-retido/apuracao?competencia=${comp}`, { headers: { 'X-Company': 'assessoria' } });
+    if (!d.ok) throw new Error(d.error || 'Erro');
+    _irDados = d;
+
+    document.getElementById('ir-loading').style.display = 'none';
+    document.getElementById('ir-btn-relatorio').style.display = '';
+
+    const r = d.resumo;
+
+    // DCTFWeb input
+    const dctfBox = document.getElementById('ir-dctfweb-box');
+    dctfBox.style.display = 'block';
+    const dctfInp = document.getElementById('ir-dctfweb-valor');
+    if (dctfInp && r.dctfweb_declarado > 0) dctfInp.value = r.dctfweb_declarado.toFixed(2);
+
+    // Alerta gap
+    const alertEl = document.getElementById('ir-alerta');
+    if (r.gap > 1) {
+      alertEl.style.display = 'block';
+      alertEl.innerHTML = `⚠ DCTFWeb de ${d.competencia} declara apenas <strong>${brl(r.dctfweb_declarado)}</strong>.` +
+        ` INSS retido nas NFs: <strong>${brl(r.total_inss_declarado)}</strong>.` +
+        ` Gap: <strong>${brl(r.gap)}</strong> — possível necessidade de retificação.`;
+    } else if (r.dctfweb_declarado === 0) {
+      alertEl.style.display = 'block';
+      alertEl.style.background = '#fef3c7';
+      alertEl.style.borderColor = '#fcd34d';
+      alertEl.style.color = '#92400e';
+      alertEl.innerHTML = `⚠ DCTFWeb não informada para ${d.competencia}. Informe o valor declarado abaixo para calcular o gap.`;
+    } else {
+      alertEl.style.display = 'none';
+    }
+
+    // KPIs
+    const kpisEl = document.getElementById('ir-kpis');
+    kpisEl.style.display = 'grid';
+    kpisEl.innerHTML = [
+      { label: 'Total NFs Analisadas',      val: String(r.total_nfs),                    bg: '#f1f5f9' },
+      { label: 'Valor Bruto Total',          val: brl(r.total_bruto),                     bg: '#dbeafe', bold: true },
+      { label: 'INSS Retido nas NFs',        val: brl(r.total_inss_declarado),            bg: '#dcfce7', bold: true },
+      { label: 'DCTFWeb Declarada',          val: brl(r.dctfweb_declarado),               bg: r.gap > 1 ? '#fee2e2' : '#f0fdf4' },
+      { label: 'Gap (INSS − DCTFWeb)',       val: brl(r.gap),                             bg: r.gap > 1 ? '#fee2e2' : '#f0fdf4', bold: r.gap > 1 },
+    ].map(c => `
+      <div style="background:${c.bg};border-radius:10px;padding:12px 14px;border:1px solid #e2e8f0">
+        <div style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px">${c.label}</div>
+        <div style="font-size:${c.bold?'17px':'15px'};font-weight:${c.bold?800:600};color:#0f172a">${c.val}</div>
+      </div>`).join('');
+
+    // Tabela por tomador
+    irRenderTomadores(d.por_tomador);
+
+    // Tabela NFs
+    irRenderNFs(d.nfs);
+
+  } catch (e) {
+    document.getElementById('ir-loading').textContent = 'Erro: ' + e.message;
+    document.getElementById('ir-loading').style.display = 'block';
+  }
+}
+
+function irRenderTomadores(rows) {
+  const box    = document.getElementById('ir-tomadores-box');
+  const thead  = document.getElementById('ir-tomadores-thead');
+  const tbody  = document.getElementById('ir-tomadores-tbody');
+  if (!box || !thead || !tbody) return;
+
+  box.style.display = 'block';
+  const cols = ['Tomador','NFs','Valor Bruto','INSS Retido','% INSS','Status'];
+  thead.innerHTML = cols.map(c =>
+    `<th style="font-size:10px;font-weight:700;color:#fff;background:#1e293b;padding:7px 10px;text-align:left;white-space:nowrap">${c}</th>`
+  ).join('');
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="padding:16px;text-align:center;color:#94a3b8;font-size:12px">Nenhuma NF nesta competência.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.map(r => {
+    let rowBg = '', statusIcon = '';
+    if (r.inss === 0)               { rowBg = '#fee2e2'; statusIcon = '🔴 Sem INSS'; }
+    else if (r.pct < 8)             { rowBg = '#fef3c7'; statusIcon = '🟡 INSS baixo'; }
+    else if (Math.abs(r.pct-11)<=1) { rowBg = '#dcfce7'; statusIcon = '🟢 OK'; }
+    else                            { rowBg = '#fef3c7'; statusIcon = '🟡 Divergente'; }
+    return `<tr style="background:${rowBg}">
+      <td style="font-size:11px;padding:6px 10px;border-bottom:1px solid #f1f5f9;font-weight:600">${r.tomador}</td>
+      <td style="font-size:11px;padding:6px 10px;border-bottom:1px solid #f1f5f9;text-align:center">${r.nfs}</td>
+      <td style="font-size:11px;padding:6px 10px;border-bottom:1px solid #f1f5f9;text-align:right">${brl(r.bruto)}</td>
+      <td style="font-size:11px;padding:6px 10px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:700">${brl(r.inss)}</td>
+      <td style="font-size:11px;padding:6px 10px;border-bottom:1px solid #f1f5f9;text-align:right">${r.pct.toFixed(2)}%</td>
+      <td style="font-size:11px;padding:6px 10px;border-bottom:1px solid #f1f5f9">${statusIcon}</td>
+    </tr>`;
+  }).join('');
+}
+
+function irRenderNFs(rows) {
+  const box   = document.getElementById('ir-nfs-box');
+  const thead = document.getElementById('ir-nfs-thead');
+  const tbody = document.getElementById('ir-nfs-tbody');
+  if (!box || !thead || !tbody) return;
+
+  box.style.display = 'block';
+  const cols = ['NF','Data','Tomador','Valor Bruto','INSS','%'];
+  thead.innerHTML = cols.map(c =>
+    `<th style="font-size:10px;font-weight:700;color:#fff;background:#1e293b;padding:7px 10px;text-align:left;white-space:nowrap">${c}</th>`
+  ).join('');
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="padding:16px;text-align:center;color:#94a3b8;font-size:12px">Nenhuma NF.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.map(r => {
+    let bg = '';
+    if (r.status === 'sem_inss')   bg = '#fee2e2';
+    else if (r.status === 'baixo') bg = '#fef3c7';
+    return `<tr style="background:${bg}">
+      <td style="font-size:11px;padding:5px 10px;border-bottom:1px solid #f1f5f9">${r.numero || '—'}</td>
+      <td style="font-size:11px;padding:5px 10px;border-bottom:1px solid #f1f5f9;white-space:nowrap">${r.data_emissao || '—'}</td>
+      <td style="font-size:11px;padding:5px 10px;border-bottom:1px solid #f1f5f9;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.tomador||'').replace(/"/g,'')}">${r.tomador || '—'}</td>
+      <td style="font-size:11px;padding:5px 10px;border-bottom:1px solid #f1f5f9;text-align:right">${brl(r.valor_bruto)}</td>
+      <td style="font-size:11px;padding:5px 10px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:${r.inss>0?600:400}">${brl(r.inss)}</td>
+      <td style="font-size:11px;padding:5px 10px;border-bottom:1px solid #f1f5f9;text-align:right">${r.pct.toFixed(2)}%</td>
+    </tr>`;
+  }).join('');
+}
+
+function irToggleNFs() {
+  const tbl = document.getElementById('ir-nfs-table');
+  const btn = document.getElementById('ir-toggle-nfs');
+  if (!tbl) return;
+  const visible = tbl.style.display !== 'none';
+  tbl.style.display = visible ? 'none' : '';
+  if (btn) btn.textContent = visible ? 'Ver detalhes ▼' : 'Ocultar ▲';
+}
+
+async function salvarDctfweb() {
+  const comp  = document.getElementById('ir-competencia')?.value;
+  const valor = document.getElementById('ir-dctfweb-valor')?.value;
+  const stat  = document.getElementById('ir-dctfweb-status');
+  if (!comp) return;
+
+  try {
+    const d = await api('/inss-retido/dctfweb', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Company': 'assessoria' },
+      body: JSON.stringify({ competencia: comp, valor: parseFloat(valor) || 0 }),
+    });
+    if (!d.ok) throw new Error(d.error);
+    if (stat) { stat.textContent = '✅ Salvo'; setTimeout(() => { stat.textContent = ''; }, 3000); }
+    loadInssRetido();
+  } catch (e) {
+    if (stat) stat.textContent = '❌ Erro: ' + e.message;
+  }
+}
+
+async function abrirRelatorioInss() {
+  const comp = document.getElementById('ir-competencia')?.value;
+  if (!comp) return;
+
+  const modal   = document.getElementById('ir-modal');
+  const content = document.getElementById('ir-modal-content');
+  if (!modal || !content) return;
+
+  content.innerHTML = '<div style="text-align:center;padding:30px;color:#94a3b8">Gerando relatório…</div>';
+  modal.style.display = 'block';
+
+  try {
+    const d = await api(`/inss-retido/relatorio?competencia=${comp}`, { headers: { 'X-Company': 'assessoria' } });
+    if (!d.ok) throw new Error(d.error);
+
+    const linhasTomador = d.por_tomador.map(t => {
+      let icon = '';
+      if (t.inss === 0)               icon = '🔴';
+      else if (t.pct < 8)             icon = '🟡';
+      else if (Math.abs(t.pct-11)<=1) icon = '🟢';
+      else                            icon = '🟡';
+      return `<tr>
+        <td style="padding:6px 10px;border-bottom:1px solid #e2e8f0;font-size:12px">${icon} ${t.tomador}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;text-align:center">${t.nfs}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;text-align:right">${brl(t.bruto)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;text-align:right;font-weight:700">${brl(t.inss)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;text-align:right">${t.pct.toFixed(2)}%</td>
+      </tr>`;
+    }).join('');
+
+    const gapHtml = d.gap > 1
+      ? `<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;margin-top:14px;font-size:12px;color:#991b1b;font-weight:600">
+          ⚠ DIVERGÊNCIA: DCTFWeb declara ${brl(d.dctfweb_declarado)} — INSS retido nas NFs: ${brl(d.total_inss)} — Gap: ${brl(d.gap)}.
+          Verificar necessidade de retificação.
+         </div>`
+      : d.dctfweb_declarado > 0
+        ? `<div style="background:#dcfce7;border:1px solid #86efac;border-radius:8px;padding:10px 14px;margin-top:14px;font-size:12px;color:#166534;font-weight:600">
+            ✅ DCTFWeb (${brl(d.dctfweb_declarado)}) confere com o INSS retido nas NFs (${brl(d.total_inss)}).
+           </div>`
+        : `<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 14px;margin-top:14px;font-size:12px;color:#92400e">
+            ⚠ DCTFWeb não informada para este período. Informe na tela principal para calcular o gap.
+           </div>`;
+
+    content.innerHTML = `
+      <div style="font-family:Arial,sans-serif">
+        <div style="text-align:center;margin-bottom:20px">
+          <div style="font-size:16px;font-weight:800;color:#0f172a">RELATÓRIO DE INSS RETIDO — S-1300</div>
+          <div style="font-size:13px;color:#334155;margin-top:4px">${d.empresa}</div>
+          <div style="font-size:11px;color:#64748b">CNPJ: ${d.cnpj} · Regime: ${d.regime}</div>
+          <div style="font-size:11px;color:#64748b">Competência: ${d.competencia.toUpperCase()} · Gerado em: ${d.gerado_em}</div>
+        </div>
+
+        <table style="width:100%;border-collapse:collapse;margin-bottom:14px">
+          <tr style="background:#f1f5f9">
+            <td style="padding:8px 12px;font-size:12px;font-weight:700">Total de NFs analisadas</td>
+            <td style="padding:8px 12px;font-size:12px;text-align:right">${d.total_nfs}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 12px;font-size:12px;font-weight:700">Valor Bruto Total</td>
+            <td style="padding:8px 12px;font-size:12px;text-align:right">${brl(d.total_bruto)}</td>
+          </tr>
+          <tr style="background:#dcfce7">
+            <td style="padding:8px 12px;font-size:13px;font-weight:800">INSS Retido Total (a declarar/recolher)</td>
+            <td style="padding:8px 12px;font-size:13px;font-weight:800;text-align:right">${brl(d.total_inss)}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 12px;font-size:12px">DCTFWeb Declarada</td>
+            <td style="padding:8px 12px;font-size:12px;text-align:right">${brl(d.dctfweb_declarado)}</td>
+          </tr>
+        </table>
+
+        <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:8px">Detalhamento por Tomador</div>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:6px">
+          <thead><tr style="background:#1e293b;color:#fff">
+            <th style="padding:7px 10px;font-size:11px;text-align:left">Tomador</th>
+            <th style="padding:7px 10px;font-size:11px;text-align:center">NFs</th>
+            <th style="padding:7px 10px;font-size:11px;text-align:right">Valor Bruto</th>
+            <th style="padding:7px 10px;font-size:11px;text-align:right">INSS Retido</th>
+            <th style="padding:7px 10px;font-size:11px;text-align:right">% INSS</th>
+          </tr></thead>
+          <tbody>${linhasTomador}</tbody>
+        </table>
+        <div style="font-size:10px;color:#94a3b8;margin-bottom:4px">🟢 ≈ 11% correto · 🟡 INSS baixo (&lt;8%) — pode ser legítimo (contratos c/ material) · 🔴 INSS = 0</div>
+
+        ${gapHtml}
+
+        <div style="margin-top:18px;font-size:10px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:10px">
+          Base legal: art. 31 Lei 8.212/91 · Retificação DCTFWeb: prazo até o vencimento do período de apuração subsequente.
+          Relatório gerado pelo Sistema ERP Montana.
+        </div>
+      </div>`;
+  } catch (e) {
+    content.innerHTML = `<div style="color:#dc2626;padding:20px">Erro ao gerar relatório: ${e.message}</div>`;
+  }
 }

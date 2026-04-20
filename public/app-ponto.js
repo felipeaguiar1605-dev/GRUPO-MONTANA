@@ -307,7 +307,7 @@ async function baixarEspelhoPDF() {
   const mes    = document.getElementById('espelho-mes')?.value;
   if (!funcId || !mes) return toast('Selecione funcionário e mês primeiro', 'erro');
   const company = window.currentCompany || 'assessoria';
-  const token   = localStorage.getItem('montana_token') || '';
+  const token   = localStorage.getItem('montana_jwt') || '';
   const url     = `/api/ponto/espelho-pdf?funcionario_id=${funcId}&mes=${mes}`;
   const resp    = await fetch(url, { headers: { 'X-Company': company, 'Authorization': `Bearer ${token}` } });
   if (!resp.ok) { const e = await resp.json(); return toast(e.error || 'Erro ao gerar PDF', 'erro'); }
@@ -377,7 +377,7 @@ async function loadFrequencia() {
 async function exportarPontoExcel() {
   const mes = document.getElementById('freq-mes')?.value || new Date().toISOString().substring(0,7);
   const company = window.currentCompany || 'assessoria';
-  const token   = localStorage.getItem('montana_token') || '';
+  const token   = localStorage.getItem('montana_jwt') || '';
   const resp    = await fetch(`/api/ponto/export?mes=${mes}`, { headers: { 'X-Company': company, 'Authorization': `Bearer ${token}` } });
   const blob    = await resp.blob();
   const a       = document.createElement('a');
@@ -390,7 +390,7 @@ async function exportarPontoExcel() {
 async function exportarFolhaFormato(formato) {
   const mes = document.getElementById('freq-mes')?.value || new Date().toISOString().substring(0,7);
   const company = window.currentCompany || 'assessoria';
-  const token   = localStorage.getItem('montana_token') || '';
+  const token   = localStorage.getItem('montana_jwt') || '';
   showLoading(`Gerando exportação ${formato.toUpperCase()}…`);
   try {
     const resp = await fetch(`/api/ponto/export-folha?mes=${mes}&formato=${formato}`, {
@@ -608,7 +608,7 @@ async function importarPontoExcel() {
   const fd = new FormData();
   fd.append('file', fileEl.files[0]);
   const company = window.currentCompany || 'assessoria';
-  const token   = localStorage.getItem('montana_token') || '';
+  const token   = localStorage.getItem('montana_jwt') || '';
   showLoading('Importando registros de ponto…');
   try {
     const resp = await fetch('/api/ponto/importar', { method:'POST', body: fd, headers:{ 'X-Company': company, 'Authorization': `Bearer ${token}` } });

@@ -131,8 +131,8 @@
       <div class="tab" data-tab="ext" onclick="navGo('ext',this)">🏦 Extratos</div>
       <div class="tab" data-tab="nfs" onclick="navGo('nfs',this)">🧾 Notas Fiscais</div>
       <div class="tab" data-tab="cont" onclick="navGo('cont',this)">📋 Contratos</div>
-      <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)">💰 Painel Pagamentos</div>
-      <div class="tab" data-tab="pag" onclick="navGo('pag',this)">💵 Pagamentos</div>
+      <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)">💰 Adimplência por Contrato</div>
+      <div class="tab" data-tab="pag" onclick="navGo('pag',this)">💵 Pagamentos Recebidos</div>
       <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
       <div class="tab" data-tab="fluxo" onclick="navGo('fluxo',this)">📈 Fluxo de Caixa</div>
       <div class="tab" data-tab="conta-vinculada" onclick="navGo('conta-vinculada',this)">🏦 Conta Vinculada</div>
@@ -393,11 +393,11 @@
   <div id="cont-cards"></div>
 </div>
 
-<!-- Painel de Pagamentos por Contrato -->
+<!-- Adimplência por Contrato (antes: Painel de Pagamentos) -->
 <div id="pg-painel-pgto" class="pg">
   <div class="toolbar">
     <span style="font-size:16px">💰</span>
-    <span class="toolbar-title">PAINEL DE PAGAMENTOS POR CONTRATO</span>
+    <span class="toolbar-title">ADIMPLÊNCIA POR CONTRATO</span>
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
       <label style="font-size:11px;color:#e2e8f0;font-weight:600">Competência</label>
       <input type="month" id="pgto-mes"

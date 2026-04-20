@@ -326,7 +326,7 @@ async function bolExecutarGeracao(contratoId) {
   btn.textContent = '⏳ Gerando...';
 
   try {
-    const token = localStorage.getItem('montana_token') || '';
+    const token = localStorage.getItem('montana_jwt') || '';
     const result = await fetch('/api/boletins/gerar', {
       method: 'POST',
       headers: {
@@ -371,7 +371,7 @@ async function bolNovoContrato() {
   const numero = prompt('Número do contrato:');
   if (!numero) return;
 
-  const token = localStorage.getItem('montana_token') || '';
+  const token = localStorage.getItem('montana_jwt') || '';
   await fetch('/api/boletins/contratos', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
@@ -395,7 +395,7 @@ async function bolNovoContrato() {
 
 async function bolDeletarContrato(id) {
   if (!confirm('Excluir este contrato e todos os postos/itens?')) return;
-  const token = localStorage.getItem('montana_token') || '';
+  const token = localStorage.getItem('montana_jwt') || '';
   await fetch('/api/boletins/contratos/' + id, {
     method: 'DELETE',
     headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token }
@@ -410,7 +410,7 @@ async function bolEditarContrato(id) {
   if (!c) return;
   const nome = prompt('Nome:', c.nome);
   if (nome === null) return;
-  const token = localStorage.getItem('montana_token') || '';
+  const token = localStorage.getItem('montana_jwt') || '';
   await fetch('/api/boletins/contratos/' + id, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
@@ -442,7 +442,7 @@ async function bolNovoPosto(contratoId) {
   const descricao_posto = prompt('Descrição do posto:') || '';
   const label_resumo = prompt('Label no resumo:', campus_key) || campus_key;
 
-  const token = localStorage.getItem('montana_token') || '';
+  const token = localStorage.getItem('montana_jwt') || '';
   await fetch('/api/boletins/contratos/' + contratoId + '/postos', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
@@ -457,7 +457,7 @@ async function bolEditarPosto(postoId, contratoId) {
   if (!posto) return;
   const campus_key = prompt('Chave:', posto.campus_key);
   if (campus_key === null) return;
-  const token = localStorage.getItem('montana_token') || '';
+  const token = localStorage.getItem('montana_jwt') || '';
   await fetch('/api/boletins/postos/' + postoId, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
@@ -476,7 +476,7 @@ async function bolEditarPosto(postoId, contratoId) {
 
 async function bolDeletarPosto(postoId, contratoId) {
   if (!confirm('Excluir este posto e todos os itens?')) return;
-  const token = localStorage.getItem('montana_token') || '';
+  const token = localStorage.getItem('montana_jwt') || '';
   await fetch('/api/boletins/postos/' + postoId, {
     method: 'DELETE',
     headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token }
@@ -491,7 +491,7 @@ async function bolNovoItem(postoId, contratoId) {
   const quantidade = parseInt(prompt('Quantidade de postos:', '1')) || 1;
   const valor_unitario = parseFloat(prompt('Valor unitário (ex: 14804.74):', '0')) || 0;
 
-  const token = localStorage.getItem('montana_token') || '';
+  const token = localStorage.getItem('montana_jwt') || '';
   await fetch('/api/boletins/postos/' + postoId + '/itens', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
@@ -514,7 +514,7 @@ async function bolEditarItem(itemId, contratoId) {
   const quantidade = parseInt(prompt('Quantidade:', item.quantidade)) || item.quantidade;
   const valor_unitario = parseFloat(prompt('Valor unitário:', item.valor_unitario)) || item.valor_unitario;
 
-  const token = localStorage.getItem('montana_token') || '';
+  const token = localStorage.getItem('montana_jwt') || '';
   await fetch('/api/boletins/itens/' + itemId, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
@@ -526,7 +526,7 @@ async function bolEditarItem(itemId, contratoId) {
 
 async function bolDeletarItem(itemId, contratoId) {
   if (!confirm('Excluir este item?')) return;
-  const token = localStorage.getItem('montana_token') || '';
+  const token = localStorage.getItem('montana_jwt') || '';
   await fetch('/api/boletins/itens/' + itemId, {
     method: 'DELETE',
     headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token }
@@ -673,7 +673,7 @@ async function _gbmExecutar(contrato_id) {
   btn.textContent = '⏳ Gerando...';
 
   try {
-    const token = localStorage.getItem('montana_token') || '';
+    const token = localStorage.getItem('montana_jwt') || '';
     const headers = { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token };
 
     // 1. Criar/obter boletim
@@ -787,7 +787,7 @@ async function _nfseConfirmarEmissao(boletim_id) {
   btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px"></span>Emitindo...';
 
   try {
-    const token = localStorage.getItem('montana_token') || '';
+    const token = localStorage.getItem('montana_jwt') || '';
     const res = await fetch(`/api/boletins/${boletim_id}/emitir-nfse`, {
       method: 'POST',
       headers: {
@@ -918,7 +918,7 @@ async function bolInicializarDeContratos() {
     const checked = overlay.querySelectorAll('input[type=checkbox]:checked');
     if (!checked.length) { toast('Selecione ao menos um contrato', 'error'); return; }
 
-    const token = localStorage.getItem('montana_token') || '';
+    const token = localStorage.getItem('montana_jwt') || '';
     let criados = 0;
     for (const cb of checked) {
       const nome = cb.dataset.nome;
