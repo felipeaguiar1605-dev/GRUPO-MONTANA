@@ -358,7 +358,7 @@ async function loadDashboard(){
       <div class="kpi-v" style="color:#7c3aed">${brl(d.nfs.totalBruto)}</div>
       <div class="kpi-s">${d.nfs.total} notas · Liq. ${brl(d.nfs.totalLiquido)}</div>
     </div>
-    <div class="kpi" style="border-left:4px solid #0891b2" title="Despesas cadastradas na tabela `despesas` (categorizadas por FOLHA/FGTS/Impostos/etc.) — pode diferir da Saída de Caixa Operacional">
+    <div class="kpi" style="border-left:4px solid #0891b2" title="Despesas cadastradas na tabela 'despesas' (categorizadas por FOLHA/FGTS/Impostos/etc.) — pode diferir da Saída de Caixa Operacional">
       <div class="kpi-l">💸 Despesas Classificadas</div>
       <div class="kpi-v" style="color:#0891b2">${brl(d.despesas.totalBruto)}</div>
       <div class="kpi-s">${d.despesas.total} lançamentos${d.despesas.total===0?' · sem classificação':''}</div>
