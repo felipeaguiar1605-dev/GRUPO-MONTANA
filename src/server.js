@@ -269,8 +269,8 @@ try {
   cron.schedule('0 8 * * *', dispararAlertasDiarios, { timezone: 'America/Araguaina' });
   console.log('  ⏰ Cron de alertas configurado: todo dia 08:00 (America/Araguaina)');
 
-  // ── Sync automático BB — todo dia às 06:00 ───────────────────
-  cron.schedule('0 6 * * *', async () => {
+  // ── Sync automático BB — todo dia às 02:30 (noturno, API BB ociosa) ──
+  cron.schedule('30 2 * * *', async () => {
     const http  = require('http');
     const jwt   = require('jsonwebtoken');
     const hoje  = new Date().toISOString().split('T')[0];
@@ -319,11 +319,12 @@ try {
       }
     }
   }, { timezone: 'America/Araguaina' });
-  console.log('  ⏰ Cron BB sync configurado: todo dia 06:00 (America/Araguaina)');
+  console.log('  ⏰ Cron BB sync configurado: todo dia 02:30 (America/Araguaina)');
 
-  // ── Sync automático WebISS (NFS-e Palmas) — todo dia às 06:30 ─
+  // ── Sync automático WebISS (NFS-e Palmas) — todo dia às 04:30 ─
+  // Horário pós janela de manutenção típica do portal municipal (02-04h)
   // Importa NFS-e emitidas nos últimos 2 dias (janela curta — NFs aparecem no portal minutos após emissão)
-  cron.schedule('30 6 * * *', async () => {
+  cron.schedule('30 4 * * *', async () => {
     const http  = require('http');
     const jwt   = require('jsonwebtoken');
     const fmt   = d => {
@@ -379,10 +380,10 @@ try {
       }
     }
   }, { timezone: 'America/Araguaina' });
-  console.log('  ⏰ Cron WebISS sync configurado: todo dia 06:30 (America/Araguaina)');
+  console.log('  ⏰ Cron WebISS sync configurado: todo dia 04:30 (America/Araguaina)');
 
-  // ── Apuração mensal automática — dia 1° às 06:00 ───────────
-  cron.schedule('0 6 1 * *', async () => {
+  // ── Apuração mensal automática — dia 1° às 05:00 (noturno, pós BB+WebISS) ───
+  cron.schedule('0 5 1 * *', async () => {
     console.log('[CRON] Iniciando apuração mensal automática...');
     const mesAnterior = new Date();
     mesAnterior.setDate(0); // último dia do mês anterior
@@ -449,7 +450,7 @@ try {
       }
     }
   });
-  console.log('  ⏰ Cron apuração mensal configurado: dia 1 às 06:00 (America/Araguaina)');
+  console.log('  ⏰ Cron apuração mensal configurado: dia 1 às 05:00 (America/Araguaina)');
 
   // ── Verificação de Duplicatas (Fase 3) — todo dia às 02:00 ───
   cron.schedule('0 2 * * *', async () => {
