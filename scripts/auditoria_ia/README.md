@@ -55,12 +55,23 @@ node scripts/auditoria_ia/orquestrador.js --teto-brl=2
 
 ## Agendamento (cron semanal)
 
-No servidor de produção, adicionar ao crontab do usuário que roda o ERP:
+Use o instalador idempotente no servidor de produção, como o usuário que
+roda o ERP:
+
+```bash
+bash /opt/montana/app_unificado/scripts/auditoria_ia/instalar_cron.sh
+```
+
+O script:
+- cria `/var/log/montana/` se precisar,
+- verifica se `ANTHROPIC_API_KEY` existe em `.env`,
+- adiciona (sem duplicar) a linha de cron abaixo:
 
 ```cron
-# Auditoria IA — sábado 04:00
-0 4 * * 6  cd /opt/montana/app_unificado && /usr/bin/node scripts/auditoria_ia/orquestrador.js >> /var/log/montana/auditoria_ia.log 2>&1
+0 4 * * 6 cd /opt/montana/app_unificado && /usr/bin/node scripts/auditoria_ia/orquestrador.js >> /var/log/montana/auditoria_ia.log 2>&1  # montana-auditoria-ia
 ```
+
+Para desinstalar: `bash instalar_cron.sh --remover`.
 
 O relatório fica em `/opt/montana/app_unificado/output/auditoria_ia_YYYY-MM-DD.md`.
 
