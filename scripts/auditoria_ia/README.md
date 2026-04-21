@@ -12,6 +12,8 @@ de caixa e lógica sistêmica (multi-empresa).
 ```
 scripts/auditoria_ia/
 ├── orquestrador.js        ← entrada; paraleliza agentes, escreve relatório
+├── enviar_relatorio.js    ← envia o último relatório por e-mail (SMTP)
+├── instalar_cron.sh       ← instala os 2 crons (execução + e-mail)
 ├── lib/
 │   ├── claude.js          ← wrapper do SDK com prompt caching + custo em R$
 │   ├── coleta.js          ← queries SQL que extraem só o essencial
@@ -64,16 +66,32 @@ bash /opt/montana/app_unificado/scripts/auditoria_ia/instalar_cron.sh
 
 O script:
 - cria `/var/log/montana/` se precisar,
-- verifica se `ANTHROPIC_API_KEY` existe em `.env`,
-- adiciona (sem duplicar) a linha de cron abaixo:
+- verifica se `ANTHROPIC_API_KEY` e `SMTP_*` existem em `.env`,
+- adiciona (sem duplicar) **duas** linhas no crontab:
 
 ```cron
-0 4 * * 6 cd /opt/montana/app_unificado && /usr/bin/node scripts/auditoria_ia/orquestrador.js >> /var/log/montana/auditoria_ia.log 2>&1  # montana-auditoria-ia
+0 4 * * 6 cd /opt/montana/app_unificado && node scripts/auditoria_ia/orquestrador.js  >> /var/log/montana/auditoria_ia.log 2>&1        # montana-auditoria-ia
+0 8 * * 1 cd /opt/montana/app_unificado && node scripts/auditoria_ia/enviar_relatorio.js >> /var/log/montana/auditoria_ia_email.log 2>&1  # montana-auditoria-ia-email
 ```
 
-Para desinstalar: `bash instalar_cron.sh --remover`.
+- **Sábado 04h** → roda a auditoria, grava `output/auditoria_ia_YYYY-MM-DD.md`.
+- **Segunda 08h** → envia por e-mail o relatório mais recente.
 
-O relatório fica em `/opt/montana/app_unificado/output/auditoria_ia_YYYY-MM-DD.md`.
+Para desinstalar (remove as duas linhas): `bash instalar_cron.sh --remover`.
+
+### E-mail — variáveis no `.env`
+
+```
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=sistema@suaempresa.com
+SMTP_PASS=...
+SMTP_FROM="Montana Auditoria <sistema@suaempresa.com>"
+SMTP_TO=financeiro@suaempresa.com
+```
+
+O `enviar_relatorio.js` também aceita `--data=YYYY-MM-DD` (enviar um relatório
+específico) e `--para=outro@email.com` (override do destinatário).
 
 ## Saída esperada
 
