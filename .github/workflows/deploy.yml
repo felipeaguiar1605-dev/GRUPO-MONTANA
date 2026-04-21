@@ -8,6 +8,7 @@ on:
       - 'public/**'
       - 'package.json'
       - 'ecosystem.config.js'
+      - '.github/workflows/deploy.yml'
 
 jobs:
   deploy:
@@ -17,6 +18,31 @@ jobs:
     steps:
       - name: Checkout código
         uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validar sintaxe JS (bloqueia deploy se falhar)
+        run: |
+          fail=0
+          for f in $(find src public -name "*.js" -type f); do
+            if ! node --check "$f"; then
+              echo "❌ Sintaxe inválida: $f"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "Deploy abortado: há arquivos com erro de sintaxe."
+            exit 1
+          fi
+          echo "✅ Todos os arquivos JS em src/ e public/ passaram no syntax check."
+
+      - name: Validar package.json
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('package.json','utf8'));" \
+            && echo "✅ package.json válido"
 
       - name: Configurar chave SSH
         run: |
@@ -37,6 +63,17 @@ jobs:
           ssh -i ~/.ssh/id_montana diretoria@104.196.22.170 \
             "cd /opt/montana/app_unificado && npm install --production 2>&1 | tail -3 && pm2 restart montana-app"
 
-      - name: Verificar status
+      - name: Verificar status PM2
         run: |
           ssh -i ~/.ssh/id_montana diretoria@104.196.22.170 "pm2 status"
+
+      - name: Healthcheck pós-deploy
+        run: |
+          sleep 5
+          status=$(curl -s -o /dev/null -w "%{http_code}" http://104.196.22.170:3002/api/health || echo "000")
+          if [ "$status" != "200" ]; then
+            echo "⚠ Healthcheck falhou (HTTP $status). App pode não ter subido — verifique pm2 logs."
+            ssh -i ~/.ssh/id_montana diretoria@104.196.22.170 "pm2 logs montana-app --lines 30 --nostream" || true
+            exit 1
+          fi
+          echo "✅ App online em http://104.196.22.170:3002 (healthcheck OK)"

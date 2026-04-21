@@ -65,7 +65,7 @@
 | D4 | Investigar SEMUS 192/2025 | R$672k/mês com `total_pago = 0` — resolver antes que vire inconsistência sistêmica. |  |  | pendente |
 | D5 | Renovação de certificados A1 | 5 certificados vencendo (CONSULTORIA_2026-04-17). Sem isso, WebISS/BB param. |  |  | pendente |
 | D6 | Backup automatizado | Fase 3 do plano de migração cloud — backup diário dos 4 SQLites (ou Postgres após D2) p/ GCS. |  |  | pendente |
-| D7 | CI/CD mínimo | GitHub Actions rodando testes em PR + deploy automático p/ GCP quando merge em main. |  |  | pendente |
+| D7 | CI + staging + aprovação no deploy | CD já existe (`.github/workflows/deploy.yml` faz `scp` + `pm2 restart` em push para `main`). Falta: (1) step de testes/lint como gate antes do deploy; (2) ambiente staging separado; (3) aprovação manual via GitHub Environments. Depende de D1 para o gate de testes real. Syntax check básico adicionado como mínimo temporário. |  |  | em-andamento |
 
 ---
 

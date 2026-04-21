@@ -100,8 +100,8 @@ const SEED = [
     d:'5 certificados vencendo (CONSULTORIA_2026-04-17). Sem isso, WebISS/BB param.' },
   { s:'D', c:'D6', t:'Backup automatizado',
     d:'Fase 3 do plano de migração cloud — backup diário dos 4 SQLites (ou Postgres após D2) p/ GCS.' },
-  { s:'D', c:'D7', t:'CI/CD mínimo',
-    d:'GitHub Actions rodando testes em PR + deploy automático p/ GCP quando merge em main.' },
+  { s:'D', c:'D7', t:'CI + staging + aprovação no deploy',
+    d:'CD já existe (.github/workflows/deploy.yml faz scp + pm2 restart em push para main). Falta: (1) step de testes/lint como gate antes do deploy; (2) ambiente staging separado; (3) aprovação manual via GitHub Environments. Depende de D1 para o gate de testes real. Syntax check básico adicionado como mínimo temporário.' },
 
   // ── Seção E — Melhorias em Módulos Existentes ──
   { s:'E', c:'E1', t:'Conciliação: auto-categorização',
@@ -149,6 +149,32 @@ const runSeed = db.transaction(() => {
   for (const item of SEED) insertSeed.run(item);
 });
 runSeed();
+
+// Migrações idempotentes em itens seedados. Cada entrada atualiza um item
+// SOMENTE se ele ainda estiver com o valor antigo (WHERE de proteção).
+// Isso preserva edições manuais feitas pelo usuário na UI.
+const SEED_MIGRATIONS = [
+  {
+    id: 'm1-d7-ci-existe',
+    sql: `
+      UPDATE roadmap_itens SET
+        titulo    = 'CI + staging + aprovação no deploy',
+        status    = 'em-andamento',
+        updated_at = datetime('now','localtime')
+      WHERE codigo = 'D7'
+        AND titulo = 'CI/CD mínimo'
+    `
+  }
+];
+for (const m of SEED_MIGRATIONS) {
+  try {
+    const info = db.prepare(m.sql).run();
+    if (info.changes > 0) console.log(`  ✅ Roadmap migração ${m.id}: ${info.changes} linha(s) atualizada(s)`);
+  } catch (e) {
+    console.warn(`  ⚠ Roadmap migração ${m.id} falhou:`, e.message);
+  }
+}
+
 const seedCount = db.prepare('SELECT COUNT(*) AS n FROM roadmap_itens').get().n;
 console.log(`  ✅ Roadmap: ${seedCount} itens no banco (seed: ${SEED.length})`);
 
