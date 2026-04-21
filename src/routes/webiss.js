@@ -11,12 +11,14 @@
  *
  * PRODUÇÃO — Certificados A1:
  *   Os arquivos .pfx precisam estar em /opt/montana/app_unificado/certificados/
- *   na VM GCP (104.196.22.170) com os nomes:
+ *   na VM GCP (35.247.236.181 — sistema.grupomontanasec.com) com os nomes:
  *     assessoria.pfx  (CNPJ 14.092.519/0001-51 — Insc. Municipal 237319)
  *     seguranca.pfx   (CNPJ 19.200.109/0001-09 — Insc. Municipal 515161)
+ *     portodovau.pfx  (CNPJ 41.034.574/0001-68)
+ *     mustang.pfx     (CNPJ 26.600.137/0001-70)
  *   Copiar via SCP:
- *     scp -i ~/.ssh/id_montana certificados/assessoria.pfx diretoria@104.196.22.170:/opt/montana/app_unificado/certificados/
- *     scp -i ~/.ssh/id_montana certificados/seguranca.pfx  diretoria@104.196.22.170:/opt/montana/app_unificado/certificados/
+ *     scp -i ~/.ssh/id_montana certificados/assessoria.pfx diretoria@35.247.236.181:/opt/montana/app_unificado/certificados/
+ *     scp -i ~/.ssh/id_montana certificados/seguranca.pfx  diretoria@35.247.236.181:/opt/montana/app_unificado/certificados/
  *   As senhas e inscrições municipais devem estar no .env do servidor:
  *     WEBISS_CERT_SENHA_ASSESSORIA=14092519
  *     WEBISS_CERT_SENHA_SEGURANCA=19200109
@@ -127,6 +129,13 @@ function getTag(xml, tag) {
   return m ? m[1].trim() : '';
 }
 
+/** Formata CNPJ 14 dígitos → XX.XXX.XXX/XXXX-XX (padrão Montana) */
+function formatCnpj(raw) {
+  const c = (raw || '').replace(/\D/g, '');
+  if (c.length !== 14) return raw || '';
+  return `${c.slice(0,2)}.${c.slice(2,5)}.${c.slice(5,8)}/${c.slice(8,12)}-${c.slice(12)}`;
+}
+
 /** Extrai lista de erros ABRASF do XML de resposta */
 function extractErrors(xml) {
   const erros = [];
@@ -174,7 +183,7 @@ function parseNfseList(xml) {
       issRetido:          g('IssRetido') === '1',
       discriminacao:      g('Discriminacao'),
       tomadorRazaoSocial: gt('RazaoSocial') || gt('NomeFantasia') || '',
-      tomadorCnpj:        gt('Cnpj') || gt('Cpf') || '',
+      tomadorCnpj:        formatCnpj(gt('Cnpj') || gt('Cpf') || ''),
       cancelada:          cancelBlock.length > 0,
       codigoCancelamento: cancelBlock ? getTag(cancelBlock, 'CodigoCancelamento') : null,
       status:             cancelBlock ? 'CANCELADA' : 'ATIVA',

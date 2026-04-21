@@ -321,6 +321,66 @@ try {
   }, { timezone: 'America/Araguaina' });
   console.log('  ⏰ Cron BB sync configurado: todo dia 06:00 (America/Araguaina)');
 
+  // ── Sync automático WebISS (NFS-e Palmas) — todo dia às 06:30 ─
+  // Importa NFS-e emitidas nos últimos 2 dias (janela curta — NFs aparecem no portal minutos após emissão)
+  cron.schedule('30 6 * * *', async () => {
+    const http  = require('http');
+    const jwt   = require('jsonwebtoken');
+    const fmt   = d => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${dd}`;
+    };
+    const hoje    = new Date();
+    const doisDiasAtras = new Date(hoje); doisDiasAtras.setDate(doisDiasAtras.getDate() - 2);
+    const dataInicial = fmt(doisDiasAtras);
+    const dataFinal   = fmt(hoje);
+
+    for (const key of Object.keys(COMPANIES)) {
+      try {
+        // Só roda se a empresa tem certificado A1 instalado
+        const certPath = path.join(__dirname, '..', 'certificados', `${key}.pfx`);
+        const hasSenha = !!process.env[`WEBISS_CERT_SENHA_${key.toUpperCase()}`];
+        if (!fs.existsSync(certPath) || !hasSenha) continue;
+
+        const body  = JSON.stringify({ dataInicial, dataFinal });
+        const token = jwt.sign({ id: 0, username: 'cron', role: 'admin' },
+          process.env.JWT_SECRET || 'montana_seg_secret_2026_!xK9#', { expiresIn: '5m' });
+
+        await new Promise((resolve) => {
+          const req = http.request({
+            hostname: '127.0.0.1', port: PORT, path: '/api/webiss/importar',
+            method: 'POST',
+            headers: {
+              'Content-Type':   'application/json',
+              'Content-Length': Buffer.byteLength(body),
+              'X-Company':      key,
+              'Authorization':  'Bearer ' + token,
+            },
+          }, (res) => {
+            let data = '';
+            res.on('data', c => data += c);
+            res.on('end', () => {
+              try {
+                const r = JSON.parse(data);
+                if (r.ok) console.log(`  📄 WebISS sync [${key}] ${dataInicial}→${dataFinal}: +${r.imported} importados (${r.skipped} já existentes)`);
+                else      console.warn(`  ⚠ WebISS sync [${key}]:`, r.error || r.erros);
+              } catch (_) {}
+              resolve();
+            });
+          });
+          req.on('error', (e) => { console.warn(`  ⚠ WebISS sync cron [${key}]:`, e.message); resolve(); });
+          req.write(body);
+          req.end();
+        });
+      } catch (e) {
+        console.warn(`  ⚠ WebISS sync cron [${key}]:`, e.message);
+      }
+    }
+  }, { timezone: 'America/Araguaina' });
+  console.log('  ⏰ Cron WebISS sync configurado: todo dia 06:30 (America/Araguaina)');
+
   // ── Apuração mensal automática — dia 1° às 06:00 ───────────
   cron.schedule('0 6 1 * *', async () => {
     console.log('[CRON] Iniciando apuração mensal automática...');

@@ -200,12 +200,20 @@ function _bbCriarPainel() {
   `;
   document.body.appendChild(div);
 
-  // Datas padrão: últimos 30 dias
+  // Datas padrão: últimos 30 dias (LOCAL, não UTC — evita off-by-one após 21h em UTC-3)
   const hoje = new Date();
   const ini  = new Date(hoje); ini.setDate(ini.getDate() - 30);
-  const fmt  = d => d.toISOString().split('T')[0];
+  const fmt  = d => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
   document.getElementById('bb-data-fim').value = fmt(hoje);
   document.getElementById('bb-data-ini').value = fmt(ini);
+  // Também fixar max no input para impedir seleção futura
+  document.getElementById('bb-data-fim').max = fmt(hoje);
+  document.getElementById('bb-data-ini').max = fmt(hoje);
 
   // Mostra área cert se produção já selecionado
   document.getElementById('bb-cert-area').style.display = 'flex';

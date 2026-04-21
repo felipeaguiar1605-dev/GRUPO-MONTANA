@@ -34,7 +34,13 @@ const diasArg = process.argv.slice(2).find(a => !a.startsWith('--') && /^\d+$/.t
 const DIAS = parseInt(diasArg || '90', 10);
 const hoje  = new Date();
 const ini   = new Date(hoje); ini.setDate(ini.getDate() - DIAS);
-const fmt   = d => d.toISOString().split('T')[0];
+// LOCAL date (UTC rolls over to next day at 21h BRT → BB rejeita "data superior a atual")
+const fmt   = d => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+};
 const dataFim    = fmt(hoje);
 const dataInicio = fmt(ini);
 

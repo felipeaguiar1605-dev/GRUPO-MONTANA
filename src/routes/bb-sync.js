@@ -20,7 +20,13 @@
 const express    = require('express');
 const https      = require('https');
 const fs         = require('fs');
+const crypto     = require('crypto');
 const companyMw  = require('../companyMiddleware');
+
+/** Gera hash MD5 de 32 chars para deduplicação de extratos */
+function bbHash(...parts) {
+  return crypto.createHash('md5').update(parts.map(String).join('|')).digest('hex').slice(0, 32);
+}
 
 const router = express.Router();
 router.use(companyMw);
@@ -295,18 +301,20 @@ function periodoEmBlocos(dataInicio, dataFim) {
   return blocos;
 }
 
-async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim) {
+async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim, companyKey = '') {
+  // INSERT com id (numeroDocumento do BB) — usa id + bb_hash como dupla proteção
   const ins = db.prepare(`
     INSERT OR IGNORE INTO extratos
-      (id, mes, data, data_iso, tipo, historico, debito, credito, status_conciliacao)
+      (id, mes, data, data_iso, tipo, historico, debito, credito, bb_hash, status_conciliacao)
     VALUES
-      (@id, @mes, @data, @data_iso, @tipo, @historico, @debito, @credito, 'PENDENTE')
+      (@id, @mes, @data, @data_iso, @tipo, @historico, @debito, @credito, @bb_hash, 'PENDENTE')
   `);
-  const insNoId = db.prepare(`
+  // INSERT sem id — usa bb_hash como único critério de dedup
+  const insByHash = db.prepare(`
     INSERT OR IGNORE INTO extratos
-      (mes, data, data_iso, tipo, historico, debito, credito, status_conciliacao)
+      (mes, data, data_iso, tipo, historico, debito, credito, bb_hash, status_conciliacao)
     VALUES
-      (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito, 'PENDENTE')
+      (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito, @bb_hash, 'PENDENTE')
   `);
 
   let imported = 0, skipped = 0;
@@ -330,14 +338,17 @@ async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim) {
             data_iso:  ext.iso,
             tipo:      ext.tipo,
             historico: ext.historico,
-            debito:    ext.debito,
-            credito:   ext.credito,
+            debito:    ext.debito   ?? null,
+            credito:   ext.credito  ?? null,
+            // Hash garante unicidade mesmo sem numeroDocumento
+            bb_hash:   bbHash(companyKey, ext.iso, ext.tipo, ext.historico,
+                              ext.debito ?? 0, ext.credito ?? 0),
           };
           let r;
           if (ext.id) {
             r = ins.run({ id: ext.id, ...row });
           } else {
-            r = insNoId.run(row);
+            r = insByHash.run(row);
           }
           if (r.changes > 0) imported++; else skipped++;
         }
@@ -354,7 +365,7 @@ async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim) {
 
 // ─── Sync principal (todas as contas) ────────────────────────────────────────
 
-async function syncBB(db, cfg, dataInicio, dataFim) {
+async function syncBB(db, cfg, dataInicio, dataFim, companyKey = '') {
   const token  = await getBBToken(cfg);
   const contas = getBBContas(db, cfg);
 
@@ -363,7 +374,7 @@ async function syncBB(db, cfg, dataInicio, dataFim) {
 
   for (const c of contas) {
     try {
-      const { imported, skipped } = await syncConta(db, cfg, token, c.agencia, c.conta, dataInicio, dataFim);
+      const { imported, skipped } = await syncConta(db, cfg, token, c.agencia, c.conta, dataInicio, dataFim, companyKey);
       totalImported += imported;
       totalSkipped  += skipped;
       resultadosPorConta.push({ conta: c.conta, descricao: c.descricao, imported, skipped });
@@ -480,14 +491,25 @@ router.post('/sync', async (req, res) => {
     return res.status(400).json({ error: 'BB não configurado para esta empresa. Configure as credenciais primeiro.' });
   }
 
-  const hoje       = new Date();
-  const dataFim    = req.body.dataFim    || hoje.toISOString().split('T')[0];
-  const dataInicio = req.body.dataInicio || (() => {
-    const d = new Date(hoje); d.setDate(d.getDate() - 30); return d.toISOString().split('T')[0];
+  // Datas em horário local (America/Sao_Paulo) — BB rejeita data futura ("A data final informada é superior a data atual")
+  const hoje = new Date();
+  const fmtLocal = d => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+  };
+  const hojeStr = fmtLocal(hoje);
+  let dataFim    = req.body.dataFim    || hojeStr;
+  let dataInicio = req.body.dataInicio || (() => {
+    const d = new Date(hoje); d.setDate(d.getDate() - 30); return fmtLocal(d);
   })();
+  // Clamp defensivo: BB rejeita futura
+  if (dataFim > hojeStr) dataFim = hojeStr;
+  if (dataInicio > hojeStr) dataInicio = hojeStr;
 
   try {
-    const { imported, skipped, contas } = await syncBB(db, cfg, dataInicio, dataFim);
+    const { imported, skipped, contas } = await syncBB(db, cfg, dataInicio, dataFim, req.companyKey);
 
     const agora = new Date().toISOString();
     setCfg(db, 'bb_ultimo_sync', agora);
