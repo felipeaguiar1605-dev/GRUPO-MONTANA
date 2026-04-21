@@ -290,36 +290,9 @@ tr.vinculado .vinc-sel{background:#dcfce7;border-color:#86efac}
   backdrop-filter:blur(2px);
 }
 
-/* ── Mobile ─────────────────────────────────────── */
-@media(max-width:768px){
-  #hamburger-btn{display:flex}
-
-  #sidenav{
-    position:fixed;
-    left:-240px;
-    top:0;bottom:0;
-    width:240px;
-    z-index:1000;
-    transition:left .25s cubic-bezier(.4,0,.2,1);
-    height:100vh;
-    box-shadow:4px 0 20px rgba(0,0,0,.4);
-  }
-  #sidenav.open{left:0}
-
-  #sidenav-overlay.visible{display:block}
-
-  #sidenav-close{display:block}
-
-  #app-layout{display:block}
-
-  #main-content{padding-bottom:60px}
-
-  .hdr h1{font-size:15px}
-  .hdr p{display:none}
-  .hdr-stats{display:none !important}
-}
-
-/* ── Desktop: hide hamburger, keep sidebar ───── */
+/* ═══════════════════════════════════════════════════════
+   DESKTOP — esconde elementos mobile
+   ═══════════════════════════════════════════════════════ */
 @media(min-width:769px){
   #hamburger-btn{display:none !important}
   #sidenav-close{display:none !important}
@@ -327,111 +300,108 @@ tr.vinculado .vinc-sel{background:#dcfce7;border-color:#86efac}
 }
 
 /* ═══════════════════════════════════════════════════════
-   DASHBOARD MOBILE RESPONSIVO
+   MOBILE — ≤768px — bloco único consolidado
    ═══════════════════════════════════════════════════════ */
 @media(max-width:768px){
-  /* Company banner — scroll horizontal em telas pequenas */
-  #company-banner span:last-child{ flex-wrap:nowrap; overflow-x:auto; gap:4px }
-  #company-banner span:last-child button{ font-size:10px; padding:2px 7px }
+  body{font-size:13px}
+
+  /* Hamburger + sidenav off-canvas */
+  #hamburger-btn{display:flex}
+  #sidenav{
+    position:fixed;left:-240px;top:0;bottom:0;width:240px;
+    z-index:1000;height:100vh;
+    transition:left .25s cubic-bezier(.4,0,.2,1);
+    box-shadow:4px 0 20px rgba(0,0,0,.4);
+  }
+  #sidenav.open{left:0}
+  #sidenav-overlay.visible{display:block}
+  #sidenav-close{display:block}
+  #app-layout{display:block}
+  #main-content{padding-bottom:60px}
 
   /* Header compacto */
-  .gbar{ padding:8px 12px; gap:8px }
-  .gbar-info{ display:none }
-  #busca-global-input{ width:160px !important }
+  .hdr{flex-direction:column;gap:8px;padding:10px 12px;align-items:flex-start}
+  .hdr h1{font-size:15px;line-height:1.2}
+  .hdr p{display:none}
+  .hdr-stats{display:none !important}
 
-  /* KPIs — 2 colunas no mobile */
-  .kpis{ grid-template-columns:repeat(2,1fr) !important }
+  /* Company banner — scroll horizontal dos 4 botões */
+  #company-banner{flex-wrap:wrap;gap:4px;padding:4px 10px;font-size:11px}
+  #company-banner > span:last-child{margin-left:0 !important;width:100%;justify-content:flex-start !important;flex-wrap:nowrap;overflow-x:auto;gap:4px}
+  #company-banner > span:last-child button{font-size:10px;padding:2px 7px}
 
-  /* Dashboard rows — uma coluna */
-  #dash-row2,#dash-row3{ grid-template-columns:1fr !important }
-  [style*="grid-template-columns:1fr 300px"]{ display:block !important }
-  [style*="grid-template-columns:1fr 340px"]{ display:block !important }
-  [style*="grid-template-columns:320px 1fr"]{ display:block !important }
+  /* Global filter bar */
+  .gbar{flex-wrap:wrap;gap:6px;padding:8px 12px}
+  .gbar-info{display:none}
+  #busca-global-input{width:160px !important}
+
+  /* KPIs — 2 colunas */
+  .kpis,.kpi-row{grid-template-columns:repeat(2,1fr) !important;gap:8px !important}
+  .kpi{padding:10px 12px !important}
+  .kpi-v{font-size:18px !important}
+
+  /* Dashboard rows — 1 coluna */
+  #dash-row2,#dash-row3{grid-template-columns:1fr !important}
+  [style*="grid-template-columns:1fr 300px"],
+  [style*="grid-template-columns:1fr 340px"],
+  [style*="grid-template-columns:320px 1fr"]{display:block !important}
+  [style*="grid-template-columns:1fr 1fr"]:not(#dash-row2):not(#dash-row3){grid-template-columns:1fr !important}
 
   /* Tabelas — scroll horizontal */
-  .tw{ overflow-x:auto }
-  table{ min-width:500px }
+  .tw,.tbl-wrap{overflow-x:auto !important;-webkit-overflow-scrolling:touch}
+  table{min-width:500px}
 
-  /* Toolbar — wrap */
-  .toolbar{ gap:6px }
-  .toolbar button{ font-size:9px; padding:4px 10px }
-  .toolbar-title{ font-size:11px }
+  /* Toolbar */
+  .toolbar{gap:6px;flex-wrap:wrap}
+  .toolbar button{font-size:9px;padding:4px 10px}
+  .toolbar-title{font-size:11px}
 
-  /* Filter bar */
-  .fbar{ gap:6px }
-  .fbar select,.fbar input{ font-size:10px }
+  /* Filter bar nas páginas */
+  .fbar{gap:6px;flex-wrap:wrap}
+  .fbar select,.fbar input{font-size:10px}
+  .filter-bar{flex-direction:column;gap:6px}
 
-  /* Ponto sub-abas — scroll */
-  .ponto-tabs{ overflow-x:auto; flex-wrap:nowrap !important }
+  /* Tabs internas (sub-abas) */
+  .ponto-tabs{overflow-x:auto;flex-wrap:nowrap !important;-webkit-overflow-scrolling:touch}
 
-  /* DRE grid */
-  #pg-dre [style*="grid-template-columns"]{ display:block !important }
-  #pg-dre [style*="grid-template-columns"] > *{ margin-bottom:12px }
+  /* DRE / Config grid */
+  #pg-dre [style*="grid-template-columns"]{display:block !important}
+  #pg-dre [style*="grid-template-columns"] > *{margin-bottom:12px}
+  #pg-config [style*="grid-template-columns:1fr 1fr"]{grid-template-columns:1fr !important}
+  #pg-config [style*="grid-template-columns:1fr 1fr 1fr 1fr auto"]{grid-template-columns:1fr 1fr !important}
+  #pg-config [style*="grid-template-columns:1fr 1fr 1fr auto"]{grid-template-columns:1fr 1fr !important}
+  #pg-config button[onclick="criarUsuarioManual()"]{grid-column:1/-1}
 
-  /* Config grid */
-  #pg-config [style*="grid-template-columns:1fr 1fr"]{ grid-template-columns:1fr !important }
-  #pg-config [style*="grid-template-columns:1fr 1fr 1fr 1fr auto"]{ grid-template-columns:1fr 1fr !important }
-  #pg-config [style*="grid-template-columns:1fr 1fr 1fr auto"]{ grid-template-columns:1fr 1fr !important }
-  #pg-config button[onclick="criarUsuarioManual()"]{ grid-column:1/-1 }
-
-  /* Formulários */
-  [style*="grid-template-columns:1fr 1fr"]:not(#dash-row2):not(#dash-row3){ grid-template-columns:1fr !important }
-
-  /* Modais */
-  .login-box{ padding:24px 20px; margin:16px }
-
-  /* Buttons menores em mobile */
-  .qbtn{ padding:4px 10px; font-size:9px }
-}
-
-@media(max-width:480px){
-  .kpis{ grid-template-columns:1fr !important }
-  .hdr-stats{ display:none !important }
-  #busca-global-input{ width:120px !important }
-}
-
-/* ─── MOBILE RESPONSIVE ─────────────────────────────────── */
-@media (max-width: 768px) {
-  body { font-size: 13px; }
-
-  /* Header compacto */
-  .hdr { flex-direction: column; gap: 8px; padding: 10px 12px; }
-  .hdr-stats { flex-wrap: wrap; gap: 6px; }
-  .hdr-stat { min-width: 60px; }
-
-  /* KPIs em grid 2 colunas */
-  .kpis, .kpi-row { grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
-  .kpi { padding: 10px 12px !important; }
-  .kpi-v { font-size: 18px !important; }
-
-  /* Tabelas com scroll horizontal */
-  .tbl-wrap { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
-
-  /* Filtros empilhados */
-  .filter-bar { flex-direction: column; gap: 6px; }
-  .gbar { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
-
-  /* Botões maiores para touch */
-  button, .btn { min-height: 38px !important; }
-
-  /* Company banner compacto */
-  #company-banner { flex-wrap: wrap; gap: 4px; padding: 4px 10px; }
-  #company-banner > span:last-child { margin-left: 0 !important; width: 100%; justify-content: flex-start !important; }
-
-  /* Sidebar/nav horizontal */
-  .sidebar, nav.sidebar { width: 100% !important; height: auto !important; flex-direction: row !important; flex-wrap: wrap !important; }
-
-  /* Ocultar colunas menos importantes */
-  .hide-mobile { display: none !important; }
+  /* Botões pequenos mantidos; apenas botões principais ganham touch target */
+  .qbtn{padding:4px 10px;font-size:9px;min-height:unset}
+  .tab,.nav-group-items .tab{min-height:40px;display:flex;align-items:center}
 
   /* Modais full-screen */
-  .modal-box, [id*="modal"] > div { width: 95vw !important; max-width: 95vw !important; max-height: 90vh; overflow-y: auto; }
+  .login-box{padding:24px 20px;margin:16px;max-width:calc(100vw - 32px)}
+  .modal-box,[id*="modal"] > div{width:95vw !important;max-width:95vw !important;max-height:90vh;overflow-y:auto}
 
   /* Charts responsivos */
-  canvas { max-width: 100% !important; }
+  canvas{max-width:100% !important;height:auto !important}
+
+  /* Helper class para esconder coluna em mobile */
+  .hide-mobile{display:none !important}
+
+  /* Aba Contratos — cards em layout 2-col de valores, toolbar stack */
+  .cont-toolbar > div{flex-direction:column !important;align-items:stretch !important}
+  .cont-toolbar button,.cont-toolbar select,.cont-toolbar input{font-size:11px}
+  .cont-card-nums > div{min-width:45% !important;flex:1 1 45% !important}
+  .cont-card-nums{gap:10px !important}
 }
 
-@media (max-width: 480px) {
-  .kpis, .kpi-row { grid-template-columns: 1fr !important; }
-  .kpi-v { font-size: 16px !important; }
+/* ═══════════════════════════════════════════════════════
+   MOBILE PEQUENO — ≤480px — ajustes extras
+   ═══════════════════════════════════════════════════════ */
+@media(max-width:480px){
+  body{font-size:12px}
+  .kpis,.kpi-row{grid-template-columns:1fr !important}
+  .kpi-v{font-size:16px !important}
+  #busca-global-input{width:120px !important}
+  .hdr h1{font-size:13px}
+  #company-banner{font-size:10px}
+  .toolbar button{font-size:8px;padding:3px 8px}
 }

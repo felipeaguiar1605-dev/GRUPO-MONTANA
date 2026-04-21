@@ -645,6 +645,49 @@ const MIGRATIONS = [
   "CREATE INDEX IF NOT EXISTS idx_pgpt_cnpj ON pagamentos_portal(cnpj)",
   "CREATE INDEX IF NOT EXISTS idx_pgpt_data ON pagamentos_portal(data_pagamento_iso)",
   "CREATE INDEX IF NOT EXISTS idx_pgpt_portal ON pagamentos_portal(portal)",
+
+  // ── FASE 1: Regras Anti-Duplicação ────────────────────────────────────────
+  // notas_fiscais: índice único parcial no numero (exclui entradas manuais sem número)
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_nfs_numero_unique
+   ON notas_fiscais(numero)
+   WHERE numero != '' AND numero != '0'`,
+  "CREATE INDEX IF NOT EXISTS idx_nfs_cnpj_data ON notas_fiscais(cnpj_tomador, data_emissao)",
+
+  // extratos: coluna bb_hash para identificação única de lançamentos bancários
+  "ALTER TABLE extratos ADD COLUMN bb_hash TEXT DEFAULT ''",
+  "ALTER TABLE extratos ADD COLUMN ofx_fitid TEXT DEFAULT ''",
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_ext_bb_hash_unique
+   ON extratos(bb_hash)
+   WHERE bb_hash != '' AND bb_hash NOT LIKE '%_dup%'`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_ext_ofx_fitid_unique
+   ON extratos(ofx_fitid)
+   WHERE ofx_fitid != ''`,
+
+  // rh_folha: competência única por empresa
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_folha_competencia_unique
+   ON rh_folha(competencia)`,
+
+  // rh_folha_itens: par (folha, funcionario) único
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_folha_itens_uk
+   ON rh_folha_itens(folha_id, funcionario_id)`,
+
+  // despesas: coluna dedup_hash para identificação única de despesas com NF
+  "ALTER TABLE despesas ADD COLUMN dedup_hash TEXT DEFAULT ''",
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_despesas_dedup_hash
+   ON despesas(dedup_hash)
+   WHERE dedup_hash != '' AND dedup_hash NOT LIKE '%_dup%'`,
+
+  // pagamentos: hash único por OB + empenho + data + valor
+  "ALTER TABLE pagamentos ADD COLUMN hash_unico TEXT DEFAULT ''",
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_pagamentos_hash_unique
+   ON pagamentos(hash_unico)
+   WHERE hash_unico != '' AND hash_unico NOT LIKE '%_dup%'`,
+
+  // liquidacoes: hash único por empenho + gestão + data + valor
+  "ALTER TABLE liquidacoes ADD COLUMN hash_unico TEXT DEFAULT ''",
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_liquidacoes_hash_unique
+   ON liquidacoes(hash_unico)
+   WHERE hash_unico != '' AND hash_unico NOT LIKE '%_dup%'`,
 ];
 
 function getDb(companyKey) {

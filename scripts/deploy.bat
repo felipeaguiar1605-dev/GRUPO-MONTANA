@@ -7,7 +7,7 @@
 :: ═══════════════════════════════════════════════════════════════════
 
 :: ── CONFIGURAÇÕES ──────────────────────────────────────────────────
-set GCP_IP=104.196.22.170
+set GCP_IP=35.247.236.181
 set GCP_USER=diretoria
 set GCP_PATH=/opt/montana/app_unificado
 set GCP_MCP_PATH=/opt/montana/mcp-server

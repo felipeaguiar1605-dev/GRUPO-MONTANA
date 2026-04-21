@@ -107,7 +107,9 @@ function setCell(ws, rowNum, colNum, val, numFmt, bgColor, fontColor='FF1E293B',
 }
 
 function setMoney(ws, rowNum, colNum, val, bgColor, fontColor='FF1E293B', bold=false) {
-  setCell(ws, rowNum, colNum, val, BRL, bgColor, fontColor, bold, 'right');
+  // Arredonda defensivamente para 2 casas — evita resíduos de ponto flutuante (ex: 968386.5800000002)
+  const v = (typeof val === 'number' && !Number.isNaN(val)) ? Math.round(val * 100) / 100 : val;
+  setCell(ws, rowNum, colNum, v, BRL, bgColor, fontColor, bold, 'right');
 }
 
 // ── FUNÇÃO PRINCIPAL ─────────────────────────────────────────────
@@ -136,11 +138,14 @@ async function gerarRelatorio(empresa) {
     ORDER BY data_iso, credito DESC
   `).all(dataInicio, dataFim);
 
-  // Deduplicar (mesmo lançamento em 2 CSVs)
+  // Deduplicar (mesmo lançamento em 2 CSVs — um com pipe `|`, outro sem)
+  // Chave robusta: remove TODO caractere não-alfanumérico ANTES de slice, para que "Ordem Bancária | MUNI..."
+  // e "Ordem Bancária MUNICIPIO..." gerem a mesma chave normalizada.
   const chavesSeen = new Set();
   const creditosUnicos = [];
   for (const c of rawCreditos) {
-    const chave = `${c.data_iso}|${c.credito.toFixed(2)}|${(c.historico||'').slice(0,20).replace(/\s+/g,' ').trim().toUpperCase().replace(/[^A-Z0-9]/g,'')}`;
+    const histNorm = (c.historico||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,30);
+    const chave = `${c.data_iso}|${c.credito.toFixed(2)}|${histNorm}`;
     if (!chavesSeen.has(chave)) { chavesSeen.add(chave); creditosUnicos.push(c); }
   }
 
@@ -173,19 +178,29 @@ async function gerarRelatorio(empresa) {
 
   // ── MATCHING NFs → PAGAMENTOS ────────────────────────────────
   // Tenta usar apenas CONCILIADO; se poucos, usa todas as NFs
+  // Janela temporal: NFs emitidas nos 6 meses anteriores + mês corrente
+  // (evita falso-positivo de NFs antigas sendo "re-conciliadas" com pagamentos de meses posteriores
+  // que na verdade pagam NFs de períodos diferentes)
+  const dtJanInicio = new Date(anoArg, mesArg - 7, 1).toISOString().slice(0,10);
+  const dtJanFim    = dataFim;
+
   const nfsConciliadas = db.prepare(`
-    SELECT id, numero, data_emissao, tomador, contrato_ref,
+    SELECT id, numero, data_emissao, data_pagamento, tomador, contrato_ref, status_conciliacao,
            valor_bruto, valor_liquido, retencao, pis, cofins, inss, ir, iss, csll
-    FROM notas_fiscais WHERE status_conciliacao = 'CONCILIADO'
+    FROM notas_fiscais
+    WHERE status_conciliacao = 'CONCILIADO'
+      AND data_emissao BETWEEN ? AND ?
     ORDER BY data_emissao ASC
-  `).all();
+  `).all(dtJanInicio, dtJanFim);
 
   const todasNFs = nfsConciliadas.length > 0 ? nfsConciliadas : db.prepare(`
-    SELECT id, numero, data_emissao, tomador, contrato_ref,
+    SELECT id, numero, data_emissao, data_pagamento, tomador, contrato_ref, status_conciliacao,
            valor_bruto, valor_liquido, retencao, pis, cofins, inss, ir, iss, csll
-    FROM notas_fiscais WHERE status_conciliacao != 'CANCELADA'
+    FROM notas_fiscais
+    WHERE status_conciliacao != 'CANCELADA'
+      AND data_emissao BETWEEN ? AND ?
     ORDER BY data_emissao ASC
-  `).all();
+  `).all(dtJanInicio, dtJanFim);
 
   const usouTodasNFs = nfsConciliadas.length === 0;
   console.log(`  NFs disponíveis para matching: ${todasNFs.length} ${usouTodasNFs ? '(todas — sem conciliação)' : '(conciliadas)'}`);
@@ -215,18 +230,28 @@ async function gerarRelatorio(empresa) {
   const nfsPagas   = [];
   const nfsUsadas  = new Set();
 
+  // Pass 0: NFs cuja data_pagamento JÁ cai no mês de apuração — match direto sem heurística
+  for (const n of todasNFs) {
+    if (nfsUsadas.has(n.id)) continue;
+    if (!n.data_pagamento) continue;
+    if (n.data_pagamento < dataInicio || n.data_pagamento > dataFim) continue;
+    nfsUsadas.add(n.id);
+    nfsPagas.push({...n, data_pagamento: n.data_pagamento, match_tipo: 'PAG'});
+  }
+
   // Pass 1: match 1:1 por valor_liquido ≈ extrato.credito (±R$0,10)
+  // Preferir NFs recentes (mais próximas do mês de apuração) — evita re-conciliar NFs antigas
   for (const ext of extReceita) {
     const cands = todasNFs
       .filter(n => !nfsUsadas.has(n.id) && Math.abs(n.valor_liquido - ext.credito) <= 0.10)
-      .sort((a,b) => a.data_emissao.localeCompare(b.data_emissao));
+      .sort((a,b) => b.data_emissao.localeCompare(a.data_emissao));
     if (cands.length > 0) {
       nfsUsadas.add(cands[0].id);
       nfsPagas.push({...cands[0], data_pagamento: ext.data_iso, match_tipo: '1:1'});
     }
   }
 
-  // Pass 2: extratos não cobertos → match por grupo de tomador + FIFO
+  // Pass 2: extratos não cobertos → match por grupo de tomador + NFs mais recentes primeiro
   const naoMatchados = extReceita.filter(ext =>
     !nfsPagas.some(n => n.match_tipo==='1:1' && Math.abs(n.valor_liquido - ext.credito) <= 0.10 && n.data_pagamento === ext.data_iso)
   );
@@ -235,7 +260,7 @@ async function gerarRelatorio(empresa) {
     let saldo = ext.credito;
     const cands = todasNFs
       .filter(n => !nfsUsadas.has(n.id) && nfMatchGrupo(n.tomador, grupo))
-      .sort((a,b) => a.data_emissao.localeCompare(b.data_emissao));
+      .sort((a,b) => b.data_emissao.localeCompare(a.data_emissao)); // mais recente primeiro
     for (const nf of cands) {
       if (saldo < nf.valor_liquido * 0.50) break;
       nfsUsadas.add(nf.id);
@@ -245,7 +270,8 @@ async function gerarRelatorio(empresa) {
     }
   }
 
-  const match1a1 = nfsPagas.filter(n => n.match_tipo === '1:1').length;
+  const matchPag  = nfsPagas.filter(n => n.match_tipo === 'PAG').length;
+  const match1a1  = nfsPagas.filter(n => n.match_tipo === '1:1').length;
   const matchLote = nfsPagas.filter(n => n.match_tipo === 'LOTE').length;
 
   // ── BASE TRIBUTÁRIA ──────────────────────────────────────────
@@ -297,7 +323,7 @@ async function gerarRelatorio(empresa) {
   });
   const fornOrdenados = Object.values(despPorForn).sort((a,b) => b.total - a.total);
 
-  console.log(`  Match 1:1: ${match1a1} | Lote: ${matchLote} | Total: ${nfsPagas.length} NFs`);
+  console.log(`  Match data_pag: ${matchPag} | 1:1 heurístico: ${match1a1} | Lote: ${matchLote} | Total: ${nfsPagas.length} NFs`);
   console.log(`  Base tributária: R$ ${brl_fmt(sumNFsPagasBruto)} | Retenções: R$ ${brl_fmt(ret.total)}`);
   console.log(`  PIS: R$ ${brl_fmt(pisLiq)} | COFINS: R$ ${brl_fmt(cofinsLiq)}`);
   if (semConciliacao > 500) console.log(`  ⚠️  Não identificados: R$ ${brl_fmt(semConciliacao)}`);
@@ -373,12 +399,12 @@ async function gerarRelatorio(empresa) {
   // Retenções
   hdrRow(ws1, r, [`RETENÇÕES NA FONTE — NFs pagas em ${COMP_LABEL}`, 'Alíquota', 'Valor Retido (R$)', 'Observação'], GRAY); r++;
   [
-    ['INSS — Previdência Social',              '11,00%', ret.inss,   'Federal/Estadual — Módulo 1'],
-    ['IRRF — Imposto de Renda Retido na Fonte','1,50%',  ret.ir,    'Tomadores federais (UFT, UFNT)'],
-    ['ISS — Imposto sobre Serviços',           'Variável',ret.iss,  'Município de Palmas'],
-    ['CSLL',                                   '1,00%',  ret.csll,  'Tomadores federais'],
-    ['PIS — crédito retido na fonte',          '0,65%',  ret.pis,   'Tomadores federais — deduz apuração própria'],
-    ['COFINS — crédito retido na fonte',       '3,00%',  ret.cofins,'Tomadores federais — deduz apuração própria'],
+    ['INSS — Previdência Social',              'Variável', ret.inss,  'Retido pelo tomador — alíquota efetiva varia por contrato'],
+    ['IRRF — Imposto de Renda Retido na Fonte','Variável', ret.ir,    'DARF 6147 (1,20% vigilância/limpeza) ou 6190 (4,80% profissional)'],
+    ['ISS — Imposto sobre Serviços',           'Variável', ret.iss,   'Município de Palmas / outros — depende do código de serviço'],
+    ['CSLL',                                   '1,00%',    ret.csll,  'Tomadores federais (IN RFB 1.234/2012)'],
+    ['PIS — crédito retido na fonte',          '0,65%',    ret.pis,   'Tomadores federais — deduz da apuração própria'],
+    ['COFINS — crédito retido na fonte',       '3,00%',    ret.cofins,'Tomadores federais — deduz da apuração própria'],
   ].forEach(([desc,aliq,val,obs]) => {
     setCell(ws1,r,1,'  '+desc); setCell(ws1,r,2,aliq,null,null,GRAY);
     setMoney(ws1,r,3,val); setCell(ws1,r,4,obs,null,null,GRAY); r++;
