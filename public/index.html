@@ -235,6 +235,7 @@
       <span class="ng-icon">⚙️</span><span class="ng-label">Sistema</span><span class="ng-chevron">▾</span>
     </div>
     <div class="nav-group-items" style="display:none">
+      <div class="tab" data-tab="roadmap" onclick="navGo('roadmap',this);setTimeout(()=>window.rmInit&&window.rmInit(),50)">🗺️ Roadmap Omie</div>
       <div class="tab" data-tab="keywords" onclick="navGo('keywords',this)">⚙️ Keywords</div>
       <div class="tab" data-tab="auditoria" onclick="navGo('auditoria',this)">🔍 Auditoria</div>
       <div class="tab" id="tab-config" data-tab="config" onclick="navGo('config',this)">⚙️ Config</div>
@@ -3431,6 +3432,82 @@
   </div>
 </div>
 
+<!-- ═══════════════ ROADMAP DE SUBSTITUIÇÃO DO OMIE ══════════════ -->
+<div id="pg-roadmap" class="pg">
+  <div style="margin-bottom:14px">
+    <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">🗺️ Roadmap de Substituição do Omie</h2>
+    <p style="font-size:11px;color:#94a3b8">
+      Backlog vivo da migração gradual do Omie ERP para o Montana. Fonte: <code>ROADMAP_SUBSTITUICAO_OMIE.md</code>.
+      Edição inline — salva ao desfocar/selecionar.
+    </p>
+  </div>
+
+  <!-- KPIs -->
+  <style>
+    .rm-kpi{padding:10px 14px;border-radius:8px;min-width:120px}
+    .rm-kpi-v{font-size:20px;font-weight:800;color:#0f172a}
+    .rm-kpi-l{font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px}
+    .rm-table tbody tr{border-bottom:1px solid #f1f5f9}
+    .rm-table tbody tr:hover{background:#f8fafc}
+    .rm-table td{padding:8px 10px;vertical-align:top}
+  </style>
+  <div id="rm-kpis" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px"></div>
+
+  <!-- Filtros + ações -->
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:14px;background:#f8fafc;padding:10px 14px;border-radius:8px;border:1px solid #e2e8f0">
+    <div>
+      <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Seção</label>
+      <select id="rm-f-secao" onchange="rmFiltrar('secao', this.value)"
+              style="display:block;margin-top:3px;padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:11px;min-width:140px">
+        <option value="">Todas</option>
+        <option value="A">A — Onda 1 (Operacional)</option>
+        <option value="B">B — Onda 2 (Gestão)</option>
+        <option value="C">C — Onda 3 (Corte Omie)</option>
+        <option value="D">D — Pré-requisitos</option>
+        <option value="E">E — Melhorias</option>
+        <option value="F">F — Gaps vs Omie</option>
+      </select>
+    </div>
+    <div>
+      <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Status</label>
+      <select id="rm-f-status" onchange="rmFiltrar('status', this.value)"
+              style="display:block;margin-top:3px;padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:11px;min-width:130px">
+        <option value="">Todos</option>
+        <option value="pendente">Pendente</option>
+        <option value="em-andamento">Em andamento</option>
+        <option value="em-review">Em review</option>
+        <option value="concluido">Concluído</option>
+        <option value="cancelado">Cancelado</option>
+      </select>
+    </div>
+    <div>
+      <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Prioridade</label>
+      <select id="rm-f-prio" onchange="rmFiltrar('prioridade', this.value)"
+              style="display:block;margin-top:3px;padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:11px;min-width:110px">
+        <option value="">Todas</option>
+        <option value="A">A</option>
+        <option value="B">B</option>
+        <option value="C">C</option>
+      </select>
+    </div>
+    <button onclick="rmLimparFiltros()"
+            style="padding:7px 14px;border:1px solid #cbd5e1;background:#fff;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;color:#475569">
+      Limpar filtros
+    </button>
+    <button onclick="rmExportar()"
+            style="padding:7px 14px;border:1px solid #cbd5e1;background:#fff;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;color:#475569;margin-left:auto">
+      📥 Exportar CSV
+    </button>
+    <button onclick="rmInit()"
+            style="padding:7px 14px;border:none;background:#0d6efd;color:#fff;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">
+      🔄 Recarregar
+    </button>
+  </div>
+
+  <!-- Seções -->
+  <div id="rm-secoes"></div>
+</div>
+
 </div><!-- fim main-content -->
 </div><!-- fim app-layout -->
 
@@ -3520,5 +3597,6 @@
 <script src="/app-concilia-robusta.js"></script>
 <script src="/app-pagamentos-contrato.js"></script>
 <script src="/app-comprovantes.js"></script>
+<script src="/app-roadmap.js"></script>
 </body>
 </html>

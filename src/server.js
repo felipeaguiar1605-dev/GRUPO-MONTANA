@@ -68,6 +68,9 @@ app.use('/api', auditLog);
 // ─── Consolidado multi-empresa (ANTES do apiRouter que exige X-Company) ────
 app.use('/api', require('./routes/consolidado'));
 
+// ─── Roadmap de Substituição do Omie (global, sem empresa) ────
+app.use('/api/roadmap', require('./routes/roadmap'));
+
 app.use('/api', apiRouter);
 
 // ─── Importação OFX (extratos bancários BB/BRB/CEF) ─────────────
