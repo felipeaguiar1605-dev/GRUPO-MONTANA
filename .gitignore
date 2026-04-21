@@ -28,6 +28,9 @@ backups/
 fontes/
 conferencia/
 
+# PDFs de contratos — pesam ~60MB, ficam no VM e no desktop do usuário
+contratos/
+
 # Relatórios gerados
 *.xlsx
 relatorio_*.html
