@@ -108,6 +108,9 @@ app.use('/api/alertas-operacionais', require('./routes/alertas-operacionais'));
 // ─── Fluxo de Caixa Projetado (30/60/90d) ──────────────────────
 app.use('/api/fluxo-caixa', require('./routes/fluxo-caixa-projetado'));
 
+// ─── Comprovantes de Pagamento (upload + vinculação multi-empresa) ─
+app.use('/api/comprovantes', require('./routes/comprovantes'));
+
 // ─── Módulo Assistente IA (Claude) ──────────────────────────────
 app.use('/api/ia',           require('./routes/ia'));
 

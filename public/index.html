@@ -132,7 +132,7 @@
       <div class="tab" data-tab="nfs" onclick="navGo('nfs',this)">🧾 Notas Fiscais</div>
       <div class="tab" data-tab="cont" onclick="navGo('cont',this)">📋 Contratos</div>
       <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)">💰 Adimplência por Contrato</div>
-      <div class="tab" data-tab="pag" onclick="navGo('pag',this)">💵 Pagamentos Recebidos</div>
+      <div class="tab" data-tab="pag" onclick="navGo('pag',this);setTimeout(()=>compListar&&compListar(),50)">🧾 Comprovantes de Pagamento</div>
       <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
       <div class="tab" data-tab="fluxo" onclick="navGo('fluxo',this)">📈 Fluxo de Caixa</div>
       <div class="tab" data-tab="fluxo-proj" onclick="navGo('fluxo-proj',this);setTimeout(()=>fcpCarregar&&fcpCarregar(),50)">🔮 Fluxo Projetado</div>
@@ -500,12 +500,95 @@
   </div>
 </div>
 
-<!-- Pagamentos -->
+<!-- Comprovantes de Pagamento -->
 <div id="pg-pag" class="pg">
-  <div class="fbar" id="pag-filters"></div>
-  <div class="counter" id="pag-counter"></div>
-  <div class="tw"><table id="tbl-pag"><thead id="pag-head"></thead><tbody id="pag-body"></tbody></table></div>
-  <div class="pag" id="pag-pag"></div>
+  <div class="toolbar" style="margin-bottom:10px">
+    <span style="font-size:16px">🧾</span>
+    <span class="toolbar-title">COMPROVANTES DE PAGAMENTO</span>
+    <span id="comp-counter" style="font-size:11px;color:#475569">0 comprovantes</span>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button onclick="compToggleForm()" id="comp-btn-new" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:5px 14px;font-size:10px;border-radius:6px;cursor:pointer;font-weight:700">+ Novo Comprovante</button>
+    </div>
+  </div>
+
+  <!-- Form de upload (toggle) -->
+  <div id="comp-form-wrap" style="display:none;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;margin-bottom:10px">
+    <h3 style="margin:0 0 10px;font-size:13px;color:#0f172a">📤 Upload de Comprovante</h3>
+    <form id="comp-form" onsubmit="return compSalvar(event)" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;font-size:11px">
+      <label>Tipo
+        <select name="tipo" required style="width:100%">
+          <option value="OB">OB (Ordem Bancária)</option>
+          <option value="TED">TED</option>
+          <option value="DOC">DOC</option>
+          <option value="PIX">PIX</option>
+          <option value="BOLETO">Boleto</option>
+          <option value="DEBITO">Débito em conta</option>
+          <option value="CHEQUE">Cheque</option>
+          <option value="OUTRO">Outro</option>
+        </select>
+      </label>
+      <label>Direção
+        <select name="direcao" required style="width:100%">
+          <option value="SAIDA">SAÍDA (pagamento a fornecedor)</option>
+          <option value="ENTRADA">ENTRADA (recebimento de tomador)</option>
+        </select>
+      </label>
+      <label>Data pagamento<input type="date" name="data_pagamento" required></label>
+      <label>Valor (R$)<input type="number" step="0.01" min="0.01" name="valor" required placeholder="0,00"></label>
+
+      <label>Banco pagador<input name="banco_pagador" placeholder="BB / BRB / CAIXA"></label>
+      <label>Conta pagador<input name="conta_pagador" placeholder="agência / conta"></label>
+      <label>CNPJ pagador<input name="cnpj_pagador" placeholder="XX.XXX.XXX/0001-XX"></label>
+      <label>Nº documento<input name="numero_documento" placeholder="nº OB / ID PIX / TED"></label>
+
+      <label>CNPJ destinatário<input name="cnpj_destinatario" placeholder="(tomador ou fornecedor)"></label>
+      <label style="grid-column:span 2">Nome destinatário<input name="nome_destinatario" placeholder="Razão social do recebedor"></label>
+      <label>Arquivo (PDF/imagem)<input type="file" name="arquivo" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif"></label>
+
+      <label style="grid-column:span 4">Observação<textarea name="observacao" rows="2" placeholder="ex: referente à NF 202600000000123 — pagamento parcial"></textarea></label>
+
+      <div style="grid-column:span 4;display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" onclick="compToggleForm()" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;padding:6px 16px;border-radius:6px;font-weight:700;cursor:pointer">Cancelar</button>
+        <button type="submit" style="background:#15803d;color:#fff;border:0;padding:6px 16px;border-radius:6px;font-weight:700;cursor:pointer">Salvar</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Filtros -->
+  <div class="fbar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+    <select id="comp-filter-status" onchange="compListar()" style="font-size:11px">
+      <option value="">Todos status</option>
+      <option value="PENDENTE">Pendente</option>
+      <option value="PARCIAL">Parcial</option>
+      <option value="TOTAL">Totalmente vinculado</option>
+    </select>
+    <select id="comp-filter-direcao" onchange="compListar()" style="font-size:11px">
+      <option value="">Todas direções</option>
+      <option value="SAIDA">Saída</option>
+      <option value="ENTRADA">Entrada</option>
+    </select>
+    <input id="comp-filter-q" placeholder="buscar por nome/CNPJ/nº doc..." oninput="clearTimeout(window._compTO);window._compTO=setTimeout(compListar,400)" style="font-size:11px;flex:1;min-width:180px">
+  </div>
+
+  <!-- Tabela -->
+  <div class="tw"><table id="tbl-comp">
+    <thead><tr>
+      <th>Data</th><th>Tipo</th><th>Direção</th><th>Destinatário</th>
+      <th class="r">Valor</th><th class="r">Vinculado</th><th>Status</th><th>Doc</th><th>Arq.</th><th></th>
+    </tr></thead>
+    <tbody id="comp-body"><tr><td colspan="10" style="text-align:center;color:#94a3b8;padding:20px">Carregando...</td></tr></tbody>
+  </table></div>
+
+  <!-- Modal vincular -->
+  <div id="comp-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:10px;max-width:900px;width:94%;max-height:90vh;overflow:auto;padding:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 id="comp-modal-title" style="margin:0;font-size:15px">Detalhes do Comprovante</h3>
+        <button onclick="compFecharModal()" style="background:#fee2e2;color:#b91c1c;border:0;border-radius:6px;padding:4px 10px;cursor:pointer">✕</button>
+      </div>
+      <div id="comp-modal-body"></div>
+    </div>
+  </div>
 </div>
 
 <!-- Despesas -->
@@ -3436,5 +3519,6 @@
 <script src="/app-bb.js"></script>
 <script src="/app-concilia-robusta.js"></script>
 <script src="/app-pagamentos-contrato.js"></script>
+<script src="/app-comprovantes.js"></script>
 </body>
 </html>
