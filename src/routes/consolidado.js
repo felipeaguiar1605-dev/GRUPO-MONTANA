@@ -32,7 +32,9 @@ router.get('/consolidado', (req, res) => {
   try {
     const resultado = {};
     const ano = parseInt(req.query.ano, 10) || new Date().getFullYear();
-    const from = `${ano}-01-01`, to = `${ano}-12-31`;
+    // Suporta ?from=&to= (filtro global) com fallback pro ano inteiro
+    const from = req.query.from || `${ano}-01-01`;
+    const to   = req.query.to   || `${ano}-12-31`;
 
     for (const [key, company] of Object.entries(COMPANIES)) {
       try {

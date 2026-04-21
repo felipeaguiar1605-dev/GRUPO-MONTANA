@@ -227,6 +227,7 @@ function applyGlobalPeriod(){
     _to=document.getElementById('gf-ate').value||'';
   }
   document.getElementById('gf-label').innerHTML=`<strong>${_from||'...'} a ${_to||'...'}</strong>`;
+  window._globalPeriod = { from: _from, to: _to };
   loadDashboard();
   const activeTab=document.querySelector('.tab.active');
   if(activeTab) showTab(activeTab.dataset.tab, activeTab);
@@ -234,10 +235,13 @@ function applyGlobalPeriod(){
 
 function clearGlobalPeriod(){
   _from='';_to='';
+  window._globalPeriod = { from: '', to: '' };
   document.getElementById('gf-tipo').value='';
   ['gf-mes-wrap','gf-trim-wrap','gf-ano-wrap','gf-custom-wrap'].forEach(id=>document.getElementById(id).style.display='none');
   document.getElementById('gf-label').textContent='Todos os períodos';
   loadDashboard();
+  const activeTab=document.querySelector('.tab.active');
+  if(activeTab) showTab(activeTab.dataset.tab, activeTab);
 }
 
 // ─── Dashboard ───────────────────────────────────────────────────

@@ -16,7 +16,7 @@
     if (id === 'auditoria')   loadAuditoria();
     if (id === 'retencoes')        loadRetencoes();
     if (id === 'conta-vinculada') loadContaVinculada();
-    if (id === 'consolidado')     loadConsolidadoResumo();
+    if (id === 'consolidado')     { loadConsolidado(); loadConsolidadoResumo(); }
     if (id === 'desp')            loadSubcontratados();
     if (id === 'piscofins-seg')   initPisCofinsSeg();
     if (id === 'inss-retido')     initInssRetido();
@@ -1859,7 +1859,11 @@ async function loadConsolidado() {
   el.innerHTML = '<div class="loading">Carregando...</div>';
   try {
     const token = localStorage.getItem('montana_jwt');
-    const r = await fetch('/api/consolidado', { headers: { 'Authorization': 'Bearer ' + token } });
+    const p = window._globalPeriod || {};
+    const qs = p.from ? `?from=${p.from}&to=${p.to}` : '';
+    const labelEl = document.getElementById('consolidado-periodo-label');
+    if (labelEl) labelEl.textContent = p.from ? `${p.from} a ${p.to}` : 'ano atual';
+    const r = await fetch('/api/consolidado' + qs, { headers: { 'Authorization': 'Bearer ' + token } });
     const data = await r.json();
     if (!data.ok) { el.innerHTML = '<p style="color:#dc2626">Erro ao carregar consolidado</p>'; return; }
 
@@ -1867,6 +1871,7 @@ async function loadConsolidado() {
     el.innerHTML = empresas.map(e => {
       if (e.erro) return `<div class="kpi-card" style="border-left:4px solid #dc2626"><div class="kpi-l">${e.nome}</div><div style="color:#dc2626;font-size:11px">Erro: ${e.erro}</div></div>`;
       const saldo = e.entradas - e.saidas;
+      const labelPeriodo = (window._globalPeriod && window._globalPeriod.from) ? 'Faturamento' : `Faturamento ${data.ano}`;
       return `<div class="kpi-card" style="border-left:4px solid ${e.cor || '#64748b'}">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
           <span style="font-size:20px">${e.icone || '🏢'}</span>
@@ -1876,7 +1881,7 @@ async function loadConsolidado() {
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div><div class="kpi-l">Faturamento ${data.ano}</div><div style="font-size:14px;font-weight:800;color:#1d4ed8">${brl(e.faturamento)}</div></div>
+          <div><div class="kpi-l">${labelPeriodo}</div><div style="font-size:14px;font-weight:800;color:#1d4ed8">${brl(e.faturamento)}</div></div>
           <div><div class="kpi-l">Saldo Extrato</div><div style="font-size:14px;font-weight:800;color:${saldo>=0?'#15803d':'#dc2626'}">${brl(saldo)}</div></div>
           <div><div class="kpi-l">Despesas</div><div style="font-size:13px;font-weight:700;color:#dc2626">${brl(e.despesas)}</div></div>
           <div><div class="kpi-l">Funcionários</div><div style="font-size:13px;font-weight:700;color:#475569">${e.funcionarios}</div></div>
