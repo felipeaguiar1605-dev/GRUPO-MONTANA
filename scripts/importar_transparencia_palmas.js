@@ -47,6 +47,8 @@ let   fimArg  = arg('fim', '');
 const anoArg  = arg('ano', '');
 const mesArg  = arg('mes', '');
 const limite  = parseInt(arg('limite', '5000')) || 5000;
+const tokenCliArg = arg('token', '');     // --token=eyJ... salva em configuracoes e sai
+const saveAllArg  = ARG.includes('--save-all'); // com --token: salva em todas as empresas
 
 // Conveniência: --ano + --mes geram ini/fim
 if (!iniArg && anoArg && mesArg) {
@@ -59,8 +61,34 @@ if (!iniArg && anoArg && mesArg) {
   fimArg = `${anoArg}-12-31`;
 }
 
+// --token=xxx: salva o JWT capturado do DevTools em configuracoes e encerra.
+if (tokenCliArg) {
+  const empresasAlvo = saveAllArg
+    ? ['assessoria', 'seguranca', 'portodovau', 'mustang']
+    : [empresa];
+  for (const emp of empresasAlvo) {
+    try {
+      const db = getDb(emp);
+      // garante tabela
+      db.prepare(`CREATE TABLE IF NOT EXISTS configuracoes (
+        chave TEXT PRIMARY KEY, valor TEXT, updated_at TEXT DEFAULT (datetime('now'))
+      )`).run();
+      db.prepare(`INSERT INTO configuracoes (chave, valor, updated_at)
+                  VALUES ('prodata_auth_token', ?, datetime('now'))
+                  ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor, updated_at=datetime('now')`)
+        .run(tokenCliArg);
+      const exp = (function(){ try { return JSON.parse(Buffer.from(tokenCliArg.split('.')[1],'base64').toString('utf8')).data || ''; } catch(_) { return ''; }})();
+      console.log(`✅ Token salvo em ${emp} (expira: ${exp})`);
+    } catch (e) {
+      console.error(`❌ ${emp}: ${e.message}`);
+    }
+  }
+  process.exit(0);
+}
+
 if (!iniArg || !fimArg) {
   console.error('Uso: --ini=AAAA-MM-DD --fim=AAAA-MM-DD  (ou --ano=AAAA [--mes=M])');
+  console.error('     --token=eyJ... [--save-all]   (salva JWT capturado do DevTools)');
   process.exit(1);
 }
 
@@ -73,7 +101,28 @@ function toIsoUtc(ymd) {
   return `${ymd}T15:00:00.000Z`;
 }
 
-function postJson(body) {
+/**
+ * Lê o x-auth-token JWT do Prodata (Portal Transparência) da tabela configuracoes.
+ * Usuário precisa capturar no DevTools do Edge a cada ~10 dias quando expirar.
+ * Formato do token: eyJ... (3 partes base64 separadas por ponto). Válido ~10 dias
+ * (JWT payload tem "data" = expiração).
+ */
+function getAuthToken(db) {
+  if (process.env.PRODATA_AUTH_TOKEN) return process.env.PRODATA_AUTH_TOKEN;
+  try {
+    const r = db.prepare("SELECT valor FROM configuracoes WHERE chave='prodata_auth_token'").get();
+    return r?.valor || '';
+  } catch (_) { return ''; }
+}
+
+function decodeJwtExp(token) {
+  try {
+    const p = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString('utf8'));
+    return p.data || ''; // "2026-05-01 00:39:59" formato Prodata
+  } catch (_) { return ''; }
+}
+
+function postJson(body, authToken) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
     const req = https.request({
@@ -82,10 +131,13 @@ function postJson(body) {
         'Accept':        'application/json, text/plain, */*',
         'Content-Type':  'application/json;charset=utf-8',
         'Content-Length': Buffer.byteLength(payload),
+        'x-auth-token': authToken,
+        'x-client-id': 'sig-frontend',
         'x-id':      'sig',
+        'x-modulo':  'TRANSPARENCIA',
         'x-origin':  'https://prodata.palmas.to.gov.br',
         'x-url':     'https://prodata.palmas.to.gov.br/sig/app.html#/transparencia/transparencia-pagamentos-ordem-cronologica/',
-        'User-Agent': 'Mozilla/5.0 MontanaERP',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 MontanaERP',
       },
     }, res => {
       const chunks = [];
@@ -101,7 +153,7 @@ function postJson(body) {
   });
 }
 
-async function buscar({ ini, fim, limiteRegistros }) {
+async function buscar({ ini, fim, limiteRegistros, authToken }) {
   const body = {
     limiteRegistros,
     formatoArquivoRelatorio: 'PDF',
@@ -115,7 +167,7 @@ async function buscar({ ini, fim, limiteRegistros }) {
     moduloAtual: 'TRANSPARENCIA',
     descricaoModuloAtual: 'transparencia',
   };
-  const r = await postJson(body);
+  const r = await postJson(body, authToken);
   if (r.status !== 200) return { status: r.status, rows: [], err: r.body.substring(0, 200) };
   try {
     const json = JSON.parse(r.body);
@@ -142,8 +194,28 @@ async function main() {
 
   const db = getDb(empresa);
 
+  // Recupera token JWT (env > configuracoes)
+  const authToken = getAuthToken(db);
+  if (!authToken) {
+    console.error('❌ Token x-auth-token não encontrado.');
+    console.error('   Capture no DevTools (Edge/Chrome) do portal Prodata e rode:');
+    console.error('   node scripts/importar_transparencia_palmas.js --token=eyJ... --save-all');
+    process.exit(1);
+  }
+  const exp = decodeJwtExp(authToken);
+  if (exp) {
+    const expDate = new Date(exp.replace(' ', 'T') + '-03:00');
+    const hoursLeft = (expDate - Date.now()) / 3600000;
+    if (hoursLeft < 0) {
+      console.error(`❌ Token expirou em ${exp}. Capture novo token no DevTools.`);
+      process.exit(1);
+    }
+    if (hoursLeft < 48) console.log(`  ⚠️  Token expira em <48h (${exp}) — capture novo em breve.`);
+    else console.log(`  Token válido até ${exp} (${Math.floor(hoursLeft/24)} dias restantes).`);
+  }
+
   process.stdout.write('  Consultando portal... ');
-  const { status, rows, err } = await buscar({ ini: iniArg, fim: fimArg, limiteRegistros: limite });
+  const { status, rows, err } = await buscar({ ini: iniArg, fim: fimArg, limiteRegistros: limite, authToken });
   if (status !== 200) {
     console.log(`HTTP ${status}${err?' · '+err:''}`);
     return;
@@ -187,6 +259,11 @@ async function main() {
 
   // Insert em pagamentos_portal
   if (APLICAR && filtrados.length > 0) {
+    // garante coluna historico
+    const colsPP = db.prepare("PRAGMA table_info(pagamentos_portal)").all().map(c => c.name);
+    if (!colsPP.includes('historico')) {
+      db.prepare("ALTER TABLE pagamentos_portal ADD COLUMN historico TEXT").run();
+    }
     const stmt = db.prepare(`
       INSERT OR IGNORE INTO pagamentos_portal
         (portal, gestao, fornecedor, cnpj, cnpj_raiz, empenho,
@@ -225,6 +302,10 @@ async function main() {
     });
     trx(filtrados);
     console.log(`\n  ✅ Inseridos em pagamentos_portal: ${inseridos} (ignorados duplicatas: ${filtrados.length - inseridos})`);
+    if (inseridos > 0) {
+      console.log(`\n  💡 Próximo passo: enriquecer com histórico (descrição do "i" no portal):`);
+      console.log(`     node scripts/enriquecer_historico_palmas.js --empresa=${empresa}`);
+    }
   } else if (!APLICAR) {
     console.log(`\n  (dry-run — use --apply para gravar em pagamentos_portal)`);
   }
