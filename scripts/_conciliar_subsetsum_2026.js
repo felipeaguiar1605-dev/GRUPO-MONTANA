@@ -75,17 +75,28 @@ function buscarSubset(valores, target, tol, maxK) {
   valores.sort((a,b) => b.v - a.v);
   const N = valores.length;
   if (N === 0) return null;
+  // Poda: sufixo acumulado (valor máximo que ainda pode ser somado a partir de i)
+  const sufMax = new Array(N+1).fill(0);
+  for (let i = N-1; i >= 0; i--) sufMax[i] = sufMax[i+1] + valores[i].v;
   let achou = null;
+  const MAX_STEPS = 500000;
+  let steps = 0;
   function dfs(idx, k, soma, picked) {
     if (achou) return;
+    if (++steps > MAX_STEPS) return;
     if (Math.abs(soma - target) <= tol) { achou = picked.slice(); return; }
     if (k >= maxK) return;
     if (idx >= N) return;
+    // Poda: se soma + todo o restante ainda não alcança target, inútil prosseguir
+    if (soma + sufMax[idx] < target - tol) return;
+    // Poda: se soma já passou target + tol e valores são positivos, também inútil
+    if (soma > target + tol) return;
     for (let i = idx; i < N; i++) {
       picked.push(valores[i].nf);
       dfs(i+1, k+1, soma + valores[i].v, picked);
       picked.pop();
       if (achou) return;
+      if (steps > MAX_STEPS) return;
     }
   }
   dfs(0, 0, 0, []);
@@ -150,23 +161,41 @@ function conciliarMes(empresa, mes) {
     }
   }
 
-  // Pass 2: subset-sum por grupo (2..8 NFs cuja soma ≈ credito)
-  for (const ext of receitas) {
-    if (matches.some(m => m.ext_id === ext.id)) continue; // já casado no passo 1
-    if (ext.credito < 500) continue;
-    const grupo = tomadorGrupo(ext.historico);
-    const cands = nfs
-      .filter(n => !nfsUsadas.has(n.id) && nfMatchGrupo(n.tomador, grupo))
-      .sort((a,b) => b.data_emissao.localeCompare(a.data_emissao))
-      .slice(0, 25);
-    if (cands.length === 0) continue;
-    const tol = Math.max(0.50, ext.credito * 0.005);
-    const valores = cands.map(n => ({ nf: n, v: n.valor_liquido }));
-    const subset = buscarSubset(valores, ext.credito, tol, 8);
-    if (subset && subset.length > 0) {
-      for (const nf of subset) {
-        nfsUsadas.add(nf.id);
-        matches.push({ nf_id: nf.id, ext_id: ext.id, data_iso: ext.data_iso, tipo: subset.length===1 ? '1:1-grupo' : 'SUBSET' });
+  // Pass 2: subset-sum por grupo — passe progressivo
+  //   2a) estrito: maxK=8, tol 0,5%, candidatos ordenados por data desc (top 25)
+  //   2b) agressivo: maxK=15, tol 1,0%, candidatos por valor similar (top 35)
+  const passes = [
+    { maxK: 8,  tolPct: 0.005, slice: 25, ord: 'data' },
+    { maxK: 15, tolPct: 0.010, slice: 35, ord: 'valor' },
+  ];
+
+  for (const pp of passes) {
+    for (const ext of receitas) {
+      if (matches.some(m => m.ext_id === ext.id)) continue;
+      if (ext.credito < 500) continue;
+      const grupo = tomadorGrupo(ext.historico);
+      let cands = nfs
+        .filter(n => !nfsUsadas.has(n.id) && nfMatchGrupo(n.tomador, grupo));
+      if (pp.ord === 'data') {
+        cands.sort((a,b) => b.data_emissao.localeCompare(a.data_emissao));
+      } else {
+        // Prefere NFs cujos valores somem ≈ ext.credito — heurística: começa por NFs com valor ≤ ext.credito
+        cands.sort((a,b) => {
+          const aDist = Math.abs(a.valor_liquido - ext.credito/2);
+          const bDist = Math.abs(b.valor_liquido - ext.credito/2);
+          return aDist - bDist;
+        });
+      }
+      cands = cands.slice(0, pp.slice);
+      if (cands.length === 0) continue;
+      const tol = Math.max(0.50, ext.credito * pp.tolPct);
+      const valores = cands.map(n => ({ nf: n, v: n.valor_liquido }));
+      const subset = buscarSubset(valores, ext.credito, tol, pp.maxK);
+      if (subset && subset.length > 0) {
+        for (const nf of subset) {
+          nfsUsadas.add(nf.id);
+          matches.push({ nf_id: nf.id, ext_id: ext.id, data_iso: ext.data_iso, tipo: subset.length===1 ? '1:1-grupo' : `SUBSET-k${pp.maxK}` });
+        }
       }
     }
   }

@@ -606,6 +606,107 @@ function adicionarAbaEmpresa(wb, empresa, nfs) {
   setMoney(wsP, rp, 5, pagadoresOrdenados.reduce((s,[_,g]) => s+g.totalBruto, 0), LBLUE, BLUE, true);
   setMoney(wsP, rp, 6, pagadoresOrdenados.reduce((s,[_,g]) => s+g.totalLiq,   0), LBLUE, BLUE, true);
 
+  // ═══════════════════════════════════════════════════════════════
+  // ABA: NFs 2026 REFERENTES A 2025 (discriminação Prodata / contratos públicos)
+  // ═══════════════════════════════════════════════════════════════
+  // Consulta ao banco pra pegar essas NFs (emitidas 2026 com competência 2025 no texto)
+  const dbEmp = new Database(empresa.db, { readonly: true });
+  const nfs2025Ref = dbEmp.prepare(`
+    SELECT numero, data_emissao, data_pagamento, tomador, cnpj_tomador, contrato_ref,
+           valor_bruto, valor_liquido, retencao, discriminacao,
+           extrato_id, status_conciliacao
+    FROM notas_fiscais
+    WHERE status_conciliacao NOT IN ('CANCELADA','ASSESSORIA')
+      AND substr(data_emissao,1,4) = '2026'
+      AND discriminacao IS NOT NULL
+      AND (
+        discriminacao LIKE '%2025%'
+        OR discriminacao LIKE '%/25%'
+        OR lower(discriminacao) LIKE '%janeiro/2025%'  OR lower(discriminacao) LIKE '%fevereiro/2025%'
+        OR lower(discriminacao) LIKE '%marco/2025%'    OR lower(discriminacao) LIKE '%março/2025%'
+        OR lower(discriminacao) LIKE '%abril/2025%'    OR lower(discriminacao) LIKE '%maio/2025%'
+        OR lower(discriminacao) LIKE '%junho/2025%'    OR lower(discriminacao) LIKE '%julho/2025%'
+        OR lower(discriminacao) LIKE '%agosto/2025%'   OR lower(discriminacao) LIKE '%setembro/2025%'
+        OR lower(discriminacao) LIKE '%outubro/2025%'  OR lower(discriminacao) LIKE '%novembro/2025%'
+        OR lower(discriminacao) LIKE '%dezembro/2025%'
+      )
+    ORDER BY tomador, data_emissao, numero
+  `).all();
+  dbEmp.close();
+
+  if (nfs2025Ref.length > 0) {
+    const wsR = wb.addWorksheet(`NFs 2026 ref 2025 ${label}`);
+    wsR.columns = [
+      {width:6},{width:14},{width:11},{width:36},{width:17},{width:22},
+      {width:14},{width:14},{width:60},{width:18},{width:11}
+    ];
+    let rr = 1;
+    wsR.mergeCells(rr, 1, rr, 11);
+    const rHdr = wsR.getRow(rr).getCell(1);
+    rHdr.value = `${empresa.nome} — NFs EMITIDAS EM 2026 REFERENTES A COMPETÊNCIAS DE 2025`;
+    rHdr.font  = {bold:true, size:12, color:{argb:WHITE}};
+    rHdr.fill  = {type:'pattern', pattern:'solid', fgColor:{argb:AMBER}};
+    rHdr.alignment = {horizontal:'center', vertical:'middle'};
+    wsR.getRow(rr).height = 28; rr++;
+
+    wsR.mergeCells(rr, 1, rr, 11);
+    const rExp = wsR.getRow(rr).getCell(1);
+    rExp.value =
+      'NFs emitidas em 2026 cuja discriminação (Prodata/WebISS) menciona meses de 2025. ' +
+      'No regime de caixa são tributadas em 2026 (quando recebidas). ' +
+      '⚠️ Prefeitura de Palmas paga com 4–6 meses de atraso — algumas podem ainda estar a receber. ' +
+      'Use esta aba para conciliação manual com extrato: casar NF + OB/TED no extrato bancário.';
+    rExp.font  = {size:9, italic:true, color:{argb:'FF92400E'}};
+    rExp.fill  = {type:'pattern', pattern:'solid', fgColor:{argb:LYELLOW}};
+    rExp.alignment = {wrapText:true, vertical:'middle'};
+    rExp.border = BORDER;
+    wsR.getRow(rr).height = 42; rr++;
+
+    hdrRow(wsR, rr, ['#','NF','Emissão','Tomador','CNPJ','Contrato','Vl. Bruto','Vl. Líquido','Discriminação (1ª linha)','Status','Pagamento'], AMBER);
+    rr++;
+
+    // Extrair competência da discriminação
+    function extraiComp(s) {
+      if (!s) return '';
+      const mLong = s.toLowerCase().match(/(janeiro|fevereiro|mar[çc]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)[\/ ]+(2025|25)/);
+      if (mLong) return mLong[0];
+      const mNum = s.match(/(\d{2})\/(2025|25)/);
+      if (mNum) return mNum[0];
+      return '2025';
+    }
+
+    nfs2025Ref.forEach((n, i) => {
+      const bg = i % 2 === 0 ? null : LGRAY;
+      const temVinc = !!n.extrato_id;
+      const statusTxt = temVinc ? '✅ CONCILIADO' : '⚠️ SEM EXTRATO';
+      const statusBg  = temVinc ? LGREEN : LYELLOW;
+      const statusFc  = temVinc ? GREEN  : AMBER;
+      setCell(wsR, rr, 1, i+1,                         null, bg, GRAY, false, 'center');
+      setCell(wsR, rr, 2, n.numero,                    null, bg);
+      setCell(wsR, rr, 3, fmtDt(n.data_emissao),       null, bg);
+      setCell(wsR, rr, 4, n.tomador || '',             null, bg);
+      setCell(wsR, rr, 5, n.cnpj_tomador || '—',       null, bg, GRAY);
+      setCell(wsR, rr, 6, n.contrato_ref || '',        null, bg, GRAY);
+      setMoney(wsR, rr, 7, n.valor_bruto   || 0,       bg);
+      setMoney(wsR, rr, 8, n.valor_liquido || 0,       bg);
+      setCell(wsR, rr, 9, (n.discriminacao||'').split('\n')[0].slice(0,100), null, bg, GRAY);
+      setCell(wsR, rr, 10, statusTxt,                  null, statusBg, statusFc, true);
+      setCell(wsR, rr, 11, fmtDt(n.data_pagamento)||'—', null, bg, GRAY);
+      rr++;
+    });
+
+    const semVinc = nfs2025Ref.filter(n => !n.extrato_id);
+    const comVinc = nfs2025Ref.filter(n =>  n.extrato_id);
+    setCell(wsR, rr, 1, '', null, LBLUE);
+    setCell(wsR, rr, 2, `${nfs2025Ref.length} NFs`, null, LBLUE, BLUE, true);
+    for (let c = 3; c <= 6; c++) setCell(wsR, rr, c, '', null, LBLUE);
+    setMoney(wsR, rr, 7, nfs2025Ref.reduce((s,n) => s + (n.valor_bruto||0), 0), LBLUE, BLUE, true);
+    setMoney(wsR, rr, 8, nfs2025Ref.reduce((s,n) => s + (n.valor_liquido||0), 0), LBLUE, BLUE, true);
+    setCell(wsR, rr, 9, `${comVinc.length} conciliadas · ${semVinc.length} sem extrato (R$ ${brl(semVinc.reduce((s,n)=>s+n.valor_liquido,0))})`, null, LBLUE, BLUE, true);
+    setCell(wsR, rr, 10, '', null, LBLUE);
+    setCell(wsR, rr, 11, '', null, LBLUE);
+  }
+
   return {
     empresa: empresa.key,
     nome: empresa.nome,
@@ -617,6 +718,9 @@ function adicionarAbaEmpresa(wb, empresa, nfs) {
     pisBruto, cofinsBruto, pisDevido, cofinsDevido,
     total: pisDevido + cofinsDevido,
     clientes: clientes.length,
+    nfs_2025_ref: nfs2025Ref.length,
+    nfs_2025_ref_sem_vinc: nfs2025Ref.filter(n => !n.extrato_id).length,
+    nfs_2025_ref_valor_sem_vinc: nfs2025Ref.filter(n => !n.extrato_id).reduce((s,n)=>s+n.valor_liquido,0),
   };
 }
 
