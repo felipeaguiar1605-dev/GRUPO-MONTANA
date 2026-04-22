@@ -132,7 +132,8 @@ async function gerarRelatorio(empresa) {
 
   // ── EXTRATOS DO MÊS ──────────────────────────────────────────
   const rawCreditos = db.prepare(`
-    SELECT id, data_iso, historico, credito, status_conciliacao, contrato_vinculado
+    SELECT id, data_iso, historico, credito, status_conciliacao, contrato_vinculado,
+           pagador_identificado, pagador_cnpj, pagador_metodo
     FROM extratos
     WHERE data_iso BETWEEN ? AND ? AND credito > 0
     ORDER BY data_iso, credito DESC
@@ -159,14 +160,45 @@ async function gerarRelatorio(empresa) {
     return 'RECEITA';
   }
 
+  // Identificação de tomador em 3 camadas:
+  //  1) Se NF(s) foram vinculadas ao extrato → usa tomador das NFs (fonte confiável)
+  //  2) Campo pagador_identificado/pagador_cnpj (pré-classificado no extrato)
+  //  3) Heurística por histórico
+  const nfsPorExtratoMap = new Map(); // ext_id → [tomadores únicos]
+  {
+    const rows = db.prepare(`
+      SELECT extrato_id, tomador, cnpj_tomador FROM notas_fiscais
+      WHERE extrato_id IS NOT NULL AND status_conciliacao NOT IN ('CANCELADA','ASSESSORIA')
+    `).all();
+    for (const r of rows) {
+      if (!nfsPorExtratoMap.has(r.extrato_id)) nfsPorExtratoMap.set(r.extrato_id, new Set());
+      nfsPorExtratoMap.get(r.extrato_id).add(r.tomador || '?');
+    }
+  }
+
   function identificarTomador(c) {
+    // Camada 1: NFs vinculadas (mais confiável)
+    const tomadoresNFs = nfsPorExtratoMap.get(c.id);
+    if (tomadoresNFs && tomadoresNFs.size > 0) {
+      const arr = [...tomadoresNFs];
+      if (arr.length === 1) return arr[0];
+      return arr.slice(0,2).join(' + ') + (arr.length>2 ? ` +${arr.length-2}` : '');
+    }
+    // Camada 2: pagador_identificado pré-classificado
+    if (c.pagador_identificado) {
+      return c.pagador_cnpj
+        ? `${c.pagador_identificado} (${c.pagador_cnpj})`
+        : c.pagador_identificado;
+    }
+    // Camada 3: heurística por histórico
     const h = (c.historico||'').toUpperCase();
     if (h.includes('05149726') || h.includes('FUNDACAO UN'))           return 'UFT — Fundação Univ. Federal do Tocantins';
     if (h.includes('TCE') || h.includes('TRIBUNAL DE CONTAS'))         return 'TCE/TO — Tribunal de Contas';
     if (h.includes('MUNICIPIO DE PALMAS') || h.includes('ORDENS BANC'))return 'Município de Palmas';
     if (h.includes('GOVERNO DO EST') || h.includes('070 0380') || h.includes('01786029')) return 'Governo do Estado do Tocantins';
+    if (h.includes('SEC TES NAC') || h.includes('381788'))             return 'Secretaria do Tesouro Nacional (Federal)';
     if (h.includes('BACEN') || h.includes('JUDICIAL'))                 return 'Desbloqueio Judicial — BacenJud';
-    if (h.includes('MP') || h.includes('MINISTERIO PUBLICO') || h.includes('PROCURADORIA')) return 'MP/TO — Ministério Público';
+    if (h.includes('MINISTERIO PUBLICO') || h.includes('PROCURADORIA'))return 'MP/TO — Ministério Público';
     if (c.contrato_vinculado) return c.contrato_vinculado;
     return 'Não identificado';
   }
@@ -193,17 +225,22 @@ async function gerarRelatorio(empresa) {
     ORDER BY data_emissao ASC
   `).all(dtJanInicio, dtJanFim);
 
-  const todasNFs = nfsConciliadas.length > 0 ? nfsConciliadas : db.prepare(`
+  // Usa TODAS as não-canceladas (conciliadas + pendentes) para permitir matching amplo.
+  // Subset-sum escolhe apenas as que batem com os créditos do mês.
+  // Excluir ASSESSORIA (contaminação WebISS — NFs que pertencem à Assessoria, importadas no banco Segurança).
+  const todasNFs = db.prepare(`
     SELECT id, numero, data_emissao, data_pagamento, tomador, contrato_ref, status_conciliacao,
            valor_bruto, valor_liquido, retencao, pis, cofins, inss, ir, iss, csll
     FROM notas_fiscais
-    WHERE status_conciliacao != 'CANCELADA'
+    WHERE status_conciliacao NOT IN ('CANCELADA','ASSESSORIA')
       AND data_emissao BETWEEN ? AND ?
     ORDER BY data_emissao ASC
   `).all(dtJanInicio, dtJanFim);
 
   const usouTodasNFs = nfsConciliadas.length === 0;
-  console.log(`  NFs disponíveis para matching: ${todasNFs.length} ${usouTodasNFs ? '(todas — sem conciliação)' : '(conciliadas)'}`);
+  const qtdConciliadas = nfsConciliadas.length;
+  const qtdPendentes   = todasNFs.length - qtdConciliadas;
+  console.log(`  NFs disponíveis para matching: ${todasNFs.length} (${qtdConciliadas} conciliadas + ${qtdPendentes} pendentes na janela)`);
 
   function tomadorGrupo(hist) {
     const h = (hist||'').toUpperCase();
@@ -251,28 +288,87 @@ async function gerarRelatorio(empresa) {
     }
   }
 
-  // Pass 2: extratos não cobertos → match por grupo de tomador + NFs mais recentes primeiro
+  // Pass 2: SUBSET-SUM — tenta achar combinação de 2..6 NFs cuja soma ≈ crédito (±0,5%)
+  // Exemplo típico: Palmas OB de R$558.111,42 = 3 × R$186.037,14 (3 competências pagas juntas)
+  //                 MP/TO OB de R$ 82.058,25 = 15 × R$ 5.470,55 (15 postos no mesmo dia)
+  function buscarSubset(valores, target, tol, maxK) {
+    // valores = array de {nf, v}. Retorna array de nfs encontrado ou null
+    const N = valores.length;
+    if (N === 0) return null;
+    // Primeiro: testa se algum combinado de 1..maxK valores bate com target
+    // Usa DFS com poda (ordenar desc ajuda)
+    valores.sort((a,b) => b.v - a.v);
+    let achou = null;
+    function dfs(idx, k, soma, picked) {
+      if (achou) return;
+      if (Math.abs(soma - target) <= tol) { achou = picked.slice(); return; }
+      if (k >= maxK) return;
+      if (idx >= N) return;
+      // Poda: se soma já passou target + tol, sem sentido continuar (valores positivos, desc)
+      for (let i = idx; i < N; i++) {
+        const novoSoma = soma + valores[i].v;
+        // Se já ultrapassou o target + tolerância, próximos (menores) podem completar — mas pulamos só se DEMASIADO além
+        if (novoSoma > target + tol && (k+1) < maxK) {
+          // Ainda podemos complementar com valores menores? Não — com valores positivos, adicionar mais só aumenta
+          // Mas como estão ordenados desc, próximo i terá v menor, pode caber. NÃO podamos aqui.
+        }
+        picked.push(valores[i].nf);
+        dfs(i+1, k+1, novoSoma, picked);
+        picked.pop();
+        if (achou) return;
+      }
+    }
+    dfs(0, 0, 0, []);
+    return achou;
+  }
+
   const naoMatchados = extReceita.filter(ext =>
-    !nfsPagas.some(n => n.match_tipo==='1:1' && Math.abs(n.valor_liquido - ext.credito) <= 0.10 && n.data_pagamento === ext.data_iso)
+    !nfsPagas.some(n => (n.match_tipo==='1:1' || n.match_tipo==='PAG') &&
+                        Math.abs(n.valor_liquido - ext.credito) <= 0.10 &&
+                        n.data_pagamento === ext.data_iso)
   );
+
   for (const ext of naoMatchados) {
+    if (ext.credito < 500) continue; // ignora valores pequenos
     const grupo = tomadorGrupo(ext.historico);
-    let saldo = ext.credito;
+    // NFs candidatas: do grupo (ou todas se grupo null) — até 25 mais recentes
     const cands = todasNFs
       .filter(n => !nfsUsadas.has(n.id) && nfMatchGrupo(n.tomador, grupo))
-      .sort((a,b) => b.data_emissao.localeCompare(a.data_emissao)); // mais recente primeiro
-    for (const nf of cands) {
-      if (saldo < nf.valor_liquido * 0.50) break;
-      nfsUsadas.add(nf.id);
-      nfsPagas.push({...nf, data_pagamento: ext.data_iso, match_tipo: 'LOTE'});
-      saldo -= nf.valor_liquido;
-      if (saldo < 0.10) break;
+      .sort((a,b) => b.data_emissao.localeCompare(a.data_emissao))
+      .slice(0, 25);
+
+    if (cands.length === 0) continue;
+
+    const tol = Math.max(0.50, ext.credito * 0.005); // 0,5% ou R$0,50
+    const valores = cands.map(n => ({ nf: n, v: n.valor_liquido }));
+
+    // Tenta achar subset exato
+    let subset = buscarSubset(valores, ext.credito, tol, 8);
+
+    if (subset && subset.length > 0) {
+      for (const nf of subset) {
+        nfsUsadas.add(nf.id);
+        nfsPagas.push({...nf, data_pagamento: ext.data_iso, match_tipo: subset.length===1 ? '1:1' : 'LOTE'});
+      }
+    } else {
+      // Fallback gulosa: consome NFs em ordem decrescente de valor enquanto cabe
+      let saldo = ext.credito;
+      const ordenadas = cands.filter(n => !nfsUsadas.has(n.id)).sort((a,b) => b.valor_liquido - a.valor_liquido);
+      for (const nf of ordenadas) {
+        if (saldo < nf.valor_liquido * 0.50) continue;
+        if (saldo < nf.valor_liquido - tol) continue; // não pode pegar NF maior que saldo
+        nfsUsadas.add(nf.id);
+        nfsPagas.push({...nf, data_pagamento: ext.data_iso, match_tipo: 'LOTE_APROX'});
+        saldo -= nf.valor_liquido;
+        if (saldo < 0.10) break;
+      }
     }
   }
 
-  const matchPag  = nfsPagas.filter(n => n.match_tipo === 'PAG').length;
-  const match1a1  = nfsPagas.filter(n => n.match_tipo === '1:1').length;
-  const matchLote = nfsPagas.filter(n => n.match_tipo === 'LOTE').length;
+  const matchPag    = nfsPagas.filter(n => n.match_tipo === 'PAG').length;
+  const match1a1    = nfsPagas.filter(n => n.match_tipo === '1:1').length;
+  const matchLote   = nfsPagas.filter(n => n.match_tipo === 'LOTE').length;
+  const matchAprox  = nfsPagas.filter(n => n.match_tipo === 'LOTE_APROX').length;
 
   // ── BASE TRIBUTÁRIA ──────────────────────────────────────────
   const sumNFsPagasBruto   = nfsPagas.reduce((s,n) => s+(n.valor_bruto||0), 0);
@@ -323,7 +419,7 @@ async function gerarRelatorio(empresa) {
   });
   const fornOrdenados = Object.values(despPorForn).sort((a,b) => b.total - a.total);
 
-  console.log(`  Match data_pag: ${matchPag} | 1:1 heurístico: ${match1a1} | Lote: ${matchLote} | Total: ${nfsPagas.length} NFs`);
+  console.log(`  Match data_pag: ${matchPag} | 1:1: ${match1a1} | Lote subset: ${matchLote} | Lote aprox: ${matchAprox} | Total: ${nfsPagas.length} NFs`);
   console.log(`  Base tributária: R$ ${brl_fmt(sumNFsPagasBruto)} | Retenções: R$ ${brl_fmt(ret.total)}`);
   console.log(`  PIS: R$ ${brl_fmt(pisLiq)} | COFINS: R$ ${brl_fmt(cofinsLiq)}`);
   if (semConciliacao > 500) console.log(`  ⚠️  Não identificados: R$ ${brl_fmt(semConciliacao)}`);
@@ -490,54 +586,59 @@ async function gerarRelatorio(empresa) {
 
   // ── ABA 3 — CRÉDITOS BANCÁRIOS ───────────────────────────────
   const ws3 = wb.addWorksheet(`Créditos Bancários ${COMP_ABREV}`);
-  ws3.columns = [{width:12},{width:56},{width:18},{width:25},{width:28}];
-  hdrRow(ws3,1,['Data','Histórico Bancário','Valor (R$)','Classificação','Tomador / Observação'],BLUE);
+  ws3.columns = [{width:12},{width:52},{width:16},{width:20},{width:40},{width:22}];
+  hdrRow(ws3,1,['Data','Histórico Bancário','Valor (R$)','Classificação','Tomador identificado','CNPJ pagador'],BLUE);
   let row3 = 2;
 
-  hdrRow(ws3,row3,['','— RECEITAS DE CLIENTES —','','',''],GREEN,WHITE); row3++;
+  hdrRow(ws3,row3,['','— RECEITAS DE CLIENTES —','','','',''],GREEN,WHITE); row3++;
   receitas.forEach((c,i) => {
     const bg = i%2===0?LGREEN:null;
+    const tomadorNome = identificarTomador(c);
+    const ehIdentificado = tomadorNome !== 'Não identificado';
     setCell(ws3,row3,1,fmtDt(c.data_iso),null,bg);
     setCell(ws3,row3,2,(c.historico||'').slice(0,100),null,bg);
     setMoney(ws3,row3,3,c.credito,bg);
     setCell(ws3,row3,4,'Receita de cliente',null,LGREEN,GREEN);
-    setCell(ws3,row3,5,identificarTomador(c),null,bg);
+    setCell(ws3,row3,5,tomadorNome,null, ehIdentificado ? bg : LYELLOW, ehIdentificado ? '' : AMBER, !ehIdentificado);
+    setCell(ws3,row3,6,c.pagador_cnpj || '',null,bg,GRAY);
     row3++;
   });
   setCell(ws3,row3,1,'Subtotal Receitas',null,LGREEN,GREEN,true);
   setCell(ws3,row3,2,'',null,LGREEN); setMoney(ws3,row3,3,sumCaixaBruto,LGREEN,GREEN,true);
-  setCell(ws3,row3,4,'',null,LGREEN); setCell(ws3,row3,5,'',null,LGREEN); row3+=2;
+  setCell(ws3,row3,4,'',null,LGREEN); setCell(ws3,row3,5,'',null,LGREEN); setCell(ws3,row3,6,'',null,LGREEN); row3+=2;
 
-  hdrRow(ws3,row3,['','— TRANSFERÊNCIAS INTERNAS / REPASSES (não tributável) —','','',''],AMBER,WHITE); row3++;
+  hdrRow(ws3,row3,['','— TRANSFERÊNCIAS INTERNAS / REPASSES (não tributável) —','','','',''],AMBER,WHITE); row3++;
   internos.forEach((c,i) => {
     const bg = i%2===0?LYELLOW:null;
     setCell(ws3,row3,1,fmtDt(c.data_iso),null,bg);
     setCell(ws3,row3,2,(c.historico||'').slice(0,100),null,bg);
     setMoney(ws3,row3,3,c.credito,bg);
     setCell(ws3,row3,4,'Interno',null,LYELLOW,AMBER);
-    setCell(ws3,row3,5,'Repasse grupo Montana',null,bg); row3++;
+    setCell(ws3,row3,5,'Repasse grupo Montana',null,bg);
+    setCell(ws3,row3,6,c.pagador_cnpj || '',null,bg,GRAY); row3++;
   });
   const sumInt = internos.reduce((s,c)=>s+c.credito,0);
   setCell(ws3,row3,1,'Subtotal Internos',null,LYELLOW,AMBER,true);
   setCell(ws3,row3,2,'',null,LYELLOW); setMoney(ws3,row3,3,sumInt,LYELLOW,AMBER,true);
-  setCell(ws3,row3,4,'',null,LYELLOW); setCell(ws3,row3,5,'',null,LYELLOW); row3+=2;
+  setCell(ws3,row3,4,'',null,LYELLOW); setCell(ws3,row3,5,'',null,LYELLOW); setCell(ws3,row3,6,'',null,LYELLOW); row3+=2;
 
-  hdrRow(ws3,row3,['','— RESGATES DE INVESTIMENTO (não tributável) —','','',''],GRAY,WHITE); row3++;
+  hdrRow(ws3,row3,['','— RESGATES DE INVESTIMENTO (não tributável) —','','','',''],GRAY,WHITE); row3++;
   invest.forEach((c,i) => {
     setCell(ws3,row3,1,fmtDt(c.data_iso),null,LGRAY);
     setCell(ws3,row3,2,(c.historico||'').slice(0,100),null,LGRAY);
     setMoney(ws3,row3,3,c.credito,LGRAY);
     setCell(ws3,row3,4,'BB Rende Fácil',null,LGRAY,GRAY);
-    setCell(ws3,row3,5,'Não compõe receita',null,LGRAY); row3++;
+    setCell(ws3,row3,5,'Não compõe receita',null,LGRAY);
+    setCell(ws3,row3,6,'',null,LGRAY); row3++;
   });
   const sumInv = invest.reduce((s,c)=>s+c.credito,0);
   setCell(ws3,row3,1,'Subtotal Investimentos',null,LGRAY,GRAY,true);
   setCell(ws3,row3,2,'',null,LGRAY); setMoney(ws3,row3,3,sumInv,LGRAY,GRAY,true);
-  setCell(ws3,row3,4,'',null,LGRAY); setCell(ws3,row3,5,'',null,LGRAY); row3+=2;
+  setCell(ws3,row3,4,'',null,LGRAY); setCell(ws3,row3,5,'',null,LGRAY); setCell(ws3,row3,6,'',null,LGRAY); row3+=2;
 
   // Conciliação resumo
   const totalGeral = creditosUnicos.reduce((s,c)=>s+c.credito,0);
-  hdrRow(ws3,row3,[`CONCILIAÇÃO — ${COMP_LABEL}`,'','','',''],BLUE); row3++;
+  hdrRow(ws3,row3,[`CONCILIAÇÃO — ${COMP_LABEL}`,'','','','',''],BLUE); row3++;
   [
     ['Total entradas bancárias',             totalGeral,             LBLUE,  BLUE,  true],
     ['(-) Internos + Investimentos',        -(sumInt+sumInv),        LGRAY,  GRAY,  false],
@@ -547,8 +648,71 @@ async function gerarRelatorio(empresa) {
   ].forEach(([label,val,bg,fc,bold]) => {
     setCell(ws3,row3,1,label,null,bg,fc,bold);
     setCell(ws3,row3,2,'',null,bg); setMoney(ws3,row3,3,val,bg,fc,bold);
-    setCell(ws3,row3,4,'',null,bg); setCell(ws3,row3,5,'',null,bg); row3++;
+    setCell(ws3,row3,4,'',null,bg); setCell(ws3,row3,5,'',null,bg); setCell(ws3,row3,6,'',null,bg); row3++;
   });
+
+  // ── ABA 4 — AGREGADO POR TOMADOR ────────────────────────────
+  const ws4 = wb.addWorksheet(`Tomadores ${COMP_ABREV}`);
+  ws4.columns = [{width:48},{width:22},{width:14},{width:18},{width:18},{width:18}];
+  hdrRow(ws4,1,['Tomador identificado','CNPJ (se houver)','Qtd créditos','Total bruto recebido (R$)','Total NFs vinculadas (R$)','% conciliado'],BLUE);
+
+  // Agrupar receitas por tomador
+  const agregado = new Map(); // tomador → {cnpj, qtd, totalCredito, ids[]}
+  for (const c of receitas) {
+    const nome = identificarTomador(c);
+    if (!agregado.has(nome)) agregado.set(nome, { cnpj: c.pagador_cnpj||'', qtd:0, totalCredito:0, ids:[] });
+    const g = agregado.get(nome);
+    g.qtd++;
+    g.totalCredito += c.credito;
+    g.ids.push(c.id);
+    if (!g.cnpj && c.pagador_cnpj) g.cnpj = c.pagador_cnpj;
+  }
+  // Calcular NF liquida vinculada por tomador
+  const nfLiqPorExt = new Map();
+  for (const n of nfsPagas) {
+    // data_pagamento setada artificialmente pelo matching — achar extrato por data_iso é aproximado;
+    // melhor usar extrato_id real da NF (presente em n.extrato_id quando persistido)
+    if (n.extrato_id != null) {
+      if (!nfLiqPorExt.has(n.extrato_id)) nfLiqPorExt.set(n.extrato_id, 0);
+      nfLiqPorExt.set(n.extrato_id, nfLiqPorExt.get(n.extrato_id) + (n.valor_liquido||0));
+    }
+  }
+  let r4 = 2;
+  const agregadoArr = [...agregado.entries()].sort((a,b) => b[1].totalCredito - a[1].totalCredito);
+  for (const [nome, g] of agregadoArr) {
+    const bg = (r4 % 2 === 0) ? null : LGRAY;
+    let liqVinc = 0;
+    for (const extId of g.ids) liqVinc += (nfLiqPorExt.get(extId) || 0);
+    const pctConc = g.totalCredito > 0 ? (liqVinc / g.totalCredito) : 0;
+    const ehNaoIdent = nome === 'Não identificado';
+    setCell(ws4,r4,1, nome, null, ehNaoIdent?LYELLOW:bg, ehNaoIdent?AMBER:'', ehNaoIdent);
+    setCell(ws4,r4,2, g.cnpj || '—', null, bg, GRAY);
+    setCell(ws4,r4,3, g.qtd, null, bg, '', false, 'center');
+    setMoney(ws4,r4,4, g.totalCredito, bg);
+    setMoney(ws4,r4,5, liqVinc, bg);
+    const pctCell = ws4.getRow(r4).getCell(6);
+    pctCell.value = pctConc;
+    pctCell.numFmt = '0.0%';
+    pctCell.alignment = { horizontal:'right', vertical:'middle' };
+    pctCell.border = BORDER;
+    pctCell.font = { size: 9, color: { argb: pctConc >= 0.90 ? GREEN : pctConc >= 0.50 ? AMBER : RED }, bold: true };
+    if (bg) pctCell.fill = { type:'pattern', pattern:'solid', fgColor:{ argb: bg }};
+    r4++;
+  }
+  const totCred = agregadoArr.reduce((s,[_,g]) => s + g.totalCredito, 0);
+  const totLiq  = [...nfLiqPorExt.values()].reduce((s,v) => s+v, 0);
+  setCell(ws4,r4,1,'TOTAL', null, LBLUE, BLUE, true);
+  setCell(ws4,r4,2,'', null, LBLUE);
+  setCell(ws4,r4,3, agregadoArr.reduce((s,[_,g]) => s+g.qtd, 0), null, LBLUE, BLUE, true, 'center');
+  setMoney(ws4,r4,4, totCred, LBLUE, BLUE, true);
+  setMoney(ws4,r4,5, totLiq,  LBLUE, BLUE, true);
+  const pctT = ws4.getRow(r4).getCell(6);
+  pctT.value = totCred > 0 ? (totLiq/totCred) : 0;
+  pctT.numFmt = '0.0%';
+  pctT.alignment = { horizontal:'right' };
+  pctT.border = BORDER;
+  pctT.font = { bold:true, size:9, color:{argb: BLUE }};
+  pctT.fill = { type:'pattern', pattern:'solid', fgColor:{ argb: LBLUE }};
 
   // ── SALVAR ──────────────────────────────────────────────────
   const outName = `relatorio_apuracao_pis_cofins_${empresa.key.toUpperCase()}_${COMP_ABREV}.xlsx`;

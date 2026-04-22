@@ -141,10 +141,13 @@ function carregarNFs(empresa) {
       ex.data_iso AS extrato_data,
       ex.credito  AS extrato_credito,
       ex.historico AS extrato_historico,
+      ex.pagador_identificado AS pagador_nome,
+      ex.pagador_cnpj  AS pagador_cnpj,
+      ex.pagador_metodo AS pagador_metodo,
       COALESCE(n.data_pagamento, ex.data_iso) AS data_caixa
     FROM notas_fiscais n
     LEFT JOIN extratos ex ON ex.id = n.extrato_id
-    WHERE n.status_conciliacao != 'CANCELADA'
+    WHERE n.status_conciliacao NOT IN ('CANCELADA','ASSESSORIA')
       AND COALESCE(n.data_pagamento, ex.data_iso) BETWEEN ? AND ?
     ORDER BY COALESCE(n.data_pagamento, ex.data_iso), n.numero
   `).all(INICIO_CAIXA, FIM_CAIXA);
@@ -417,10 +420,10 @@ function adicionarAbaEmpresa(wb, empresa, nfs) {
   wsD.columns = [
     {width:6}, {width:12}, {width:11}, {width:11}, {width:38}, {width:17},
     {width:23}, {width:14}, {width:14}, {width:12}, {width:10}, {width:10},
-    {width:10}, {width:10}, {width:10}, {width:10},
+    {width:10}, {width:10}, {width:10}, {width:10}, {width:36}, {width:22},
   ];
   let rd = 1;
-  wsD.mergeCells(rd, 1, rd, 16);
+  wsD.mergeCells(rd, 1, rd, 18);
   const dCell = wsD.getRow(rd).getCell(1);
   dCell.value = `${empresa.nome} — NFs PAGAS EM ${ANO} (base tributária PIS/COFINS)`;
   dCell.font  = {bold:true, size:12, color:{argb:WHITE}};
@@ -428,7 +431,7 @@ function adicionarAbaEmpresa(wb, empresa, nfs) {
   dCell.alignment = {horizontal:'center', vertical:'middle'};
   wsD.getRow(rd).height = 28; rd++;
 
-  hdrRow(wsD, rd, ['#','NF','Emissão','Pagamento','Tomador','CNPJ','Contrato','Vl. Bruto','Vl. Líquido','Ret.Total','INSS','IRRF','ISS','CSLL','PIS','COFINS'], BLUE);
+  hdrRow(wsD, rd, ['#','NF','Emissão','Pagamento','Tomador','CNPJ','Contrato','Vl. Bruto','Vl. Líquido','Ret.Total','INSS','IRRF','ISS','CSLL','PIS','COFINS','Pagador (extrato)','CNPJ pagador'], BLUE);
   rd++;
 
   tributaveis.sort((a,b) => (a.data_caixa||'').localeCompare(b.data_caixa||'')).forEach((n, idx) => {
@@ -449,6 +452,11 @@ function adicionarAbaEmpresa(wb, empresa, nfs) {
     setMoney(wsD, rd, 14, n.csll          || 0, bg);
     setMoney(wsD, rd, 15, n.pis           || 0, bg);
     setMoney(wsD, rd, 16, n.cofins        || 0, bg);
+    // Pagador do extrato (quem efetivamente pagou)
+    const pagador = n.pagador_nome || (n.extrato_historico ? n.extrato_historico.slice(0,60) : 'Sem vínculo extrato');
+    const semExt  = !n.extrato_id;
+    setCell(wsD, rd, 17, pagador,              null, semExt?LYELLOW:bg, semExt?AMBER:GRAY);
+    setCell(wsD, rd, 18, n.pagador_cnpj || '', null, bg, GRAY);
     rd++;
   });
 
@@ -476,6 +484,8 @@ function adicionarAbaEmpresa(wb, empresa, nfs) {
   setMoney(wsD, rd, 14, totais.csll,   LBLUE, BLUE, true);
   setMoney(wsD, rd, 15, totais.pisFte, LBLUE, BLUE, true);
   setMoney(wsD, rd, 16, totais.cofFte, LBLUE, BLUE, true);
+  setCell(wsD, rd, 17, '', null, LBLUE);
+  setCell(wsD, rd, 18, '', null, LBLUE);
 
   // ═══════════════════════════════════════════════════════════════
   // ABA: EXCLUÍDAS (se houver)
@@ -531,6 +541,70 @@ function adicionarAbaEmpresa(wb, empresa, nfs) {
     setMoney(wsE, re, 9, excluidas.reduce((s,n)=>s+(n.valor_liquido||0),0), LYELLOW, AMBER, true);
     setCell(wsE, re, 10, 'Total não tributado em ' + ANO, null, LYELLOW, AMBER, true);
   }
+
+  // ═══════════════════════════════════════════════════════════════
+  // ABA: PAGADORES — AGREGADO POR EXTRATO BANCÁRIO
+  // ═══════════════════════════════════════════════════════════════
+  // Agrupa NFs tributáveis pelo pagador_identificado do extrato vinculado
+  // (mostra quem efetivamente fez o crédito em conta)
+  const porPagador = new Map(); // chave: pagador_nome → { cnpj, qtdNFs, qtdExtratos, totalLiq, totalBruto }
+  const extratosSeen = new Map(); // chave: pagador → Set(ext_id)
+  for (const n of tributaveis) {
+    const chave = n.pagador_nome || (n.extrato_id ? (n.extrato_historico||'').slice(0,50) : 'Sem vínculo extrato');
+    if (!porPagador.has(chave)) {
+      porPagador.set(chave, { cnpj: n.pagador_cnpj || '', qtdNFs:0, qtdExt:new Set(), totalLiq:0, totalBruto:0, metodo: n.pagador_metodo || '' });
+    }
+    const g = porPagador.get(chave);
+    g.qtdNFs++;
+    if (n.extrato_id) g.qtdExt.add(n.extrato_id);
+    g.totalLiq   += (n.valor_liquido || 0);
+    g.totalBruto += (n.valor_bruto   || 0);
+    if (!g.cnpj && n.pagador_cnpj) g.cnpj = n.pagador_cnpj;
+  }
+
+  const wsP = wb.addWorksheet(`Pagadores ${label}`);
+  wsP.columns = [{width:48},{width:22},{width:12},{width:14},{width:18},{width:18}];
+  let rp = 1;
+  wsP.mergeCells(rp, 1, rp, 6);
+  const pHdr = wsP.getRow(rp).getCell(1);
+  pHdr.value = `${empresa.nome} — QUEM EFETUOU OS CRÉDITOS EM CONTA (${ANO})`;
+  pHdr.font  = {bold:true, size:12, color:{argb:WHITE}};
+  pHdr.fill  = {type:'pattern', pattern:'solid', fgColor:{argb:BLUE}};
+  pHdr.alignment = {horizontal:'center', vertical:'middle'};
+  wsP.getRow(rp).height = 28; rp++;
+
+  wsP.mergeCells(rp, 1, rp, 6);
+  const pExp = wsP.getRow(rp).getCell(1);
+  pExp.value =
+    'Agrupamento de NFs pagas por pagador identificado no extrato bancário. ' +
+    'Útil para a contabilidade cruzar a origem dos créditos (identificação de quem efetivamente pagou) ' +
+    'com os tomadores das NFs. Em contratos públicos, o pagador CNPJ pode diferir do tomador (ex: TED do tesouro pagando NF emitida contra órgão).';
+  pExp.font  = {size:9, italic:true, color:{argb:GRAY}};
+  pExp.alignment = {wrapText:true, vertical:'middle'};
+  pExp.border = BORDER;
+  wsP.getRow(rp).height = 40; rp++;
+
+  hdrRow(wsP, rp, ['Pagador identificado (extrato)','CNPJ pagador','Método','Qtd NFs','Total Bruto (R$)','Total Líquido (R$)'], BLUE);
+  rp++;
+
+  const pagadoresOrdenados = [...porPagador.entries()].sort((a,b) => b[1].totalBruto - a[1].totalBruto);
+  for (const [nome, g] of pagadoresOrdenados) {
+    const bg = (rp % 2 === 0) ? null : LGRAY;
+    const semExt = nome === 'Sem vínculo extrato';
+    setCell(wsP, rp, 1, nome,            null, semExt?LYELLOW:bg, semExt?AMBER:'', semExt);
+    setCell(wsP, rp, 2, g.cnpj || '—',   null, bg, GRAY);
+    setCell(wsP, rp, 3, g.metodo || '—', null, bg, GRAY, false, 'center');
+    setCell(wsP, rp, 4, g.qtdNFs,        null, bg, '', false, 'center');
+    setMoney(wsP, rp, 5, g.totalBruto, bg);
+    setMoney(wsP, rp, 6, g.totalLiq,   bg);
+    rp++;
+  }
+  setCell(wsP, rp, 1, 'TOTAL', null, LBLUE, BLUE, true);
+  setCell(wsP, rp, 2, '', null, LBLUE);
+  setCell(wsP, rp, 3, '', null, LBLUE);
+  setCell(wsP, rp, 4, pagadoresOrdenados.reduce((s,[_,g]) => s+g.qtdNFs, 0), null, LBLUE, BLUE, true, 'center');
+  setMoney(wsP, rp, 5, pagadoresOrdenados.reduce((s,[_,g]) => s+g.totalBruto, 0), LBLUE, BLUE, true);
+  setMoney(wsP, rp, 6, pagadoresOrdenados.reduce((s,[_,g]) => s+g.totalLiq,   0), LBLUE, BLUE, true);
 
   return {
     empresa: empresa.key,
