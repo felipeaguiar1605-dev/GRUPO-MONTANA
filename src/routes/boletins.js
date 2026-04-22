@@ -6,6 +6,7 @@ const express = require('express');
 const PDFDocument = require('pdfkit');
 const path = require('path');
 const fs = require('fs');
+const archiver = require('archiver');
 const companyMw = require('../companyMiddleware');
 
 const router = express.Router();
@@ -512,6 +513,139 @@ router.get('/download/:boletimNfId', (req, res) => {
   res.download(nf.arquivo_pdf);
 });
 
+// ─── PACOTE FISCAL (ZIP: boletim PDF + NFS-e espelho + XML + ofício) ──
+// Agrupa todos os artefatos do boletim para envio ao gestor/fiscal do contrato
+router.get('/:id/pacote-fiscal.zip', (req, res) => {
+  try {
+    const db = req.db;
+    const bol = db.prepare(`
+      SELECT b.*, bc.nome AS contrato_nome, bc.contratante, bc.numero_contrato,
+             bc.processo, bc.pregao, bc.orgao, bc.insc_municipal AS tomador_cnpj,
+             bc.empresa_razao, bc.empresa_cnpj, bc.empresa_endereco,
+             bc.empresa_email, bc.empresa_telefone
+      FROM bol_boletins b
+      JOIN bol_contratos bc ON b.contrato_id = bc.id
+      WHERE b.id = ?
+    `).get(req.params.id);
+
+    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+
+    const nfs = db.prepare(`
+      SELECT bn.*, bp.campus_nome, bp.municipio
+      FROM bol_boletins_nfs bn
+      LEFT JOIN bol_postos bp ON bp.id = bn.posto_id
+      WHERE bn.boletim_id = ?
+      ORDER BY bp.ordem, bn.id
+    `).all(bol.id);
+
+    // Parse nfse_xml (armazenado como JSON stringified da resposta WebISS)
+    let nfseObj = null;
+    try { nfseObj = bol.nfse_xml ? JSON.parse(bol.nfse_xml) : null; } catch (_) { nfseObj = null; }
+
+    const orgaoSlug = String(bol.contratante || bol.orgao || 'CONTRATANTE')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').toUpperCase().substring(0, 40);
+    const compSlug = String(bol.competencia || 'SEM_COMP').replace(/\s+/g, '_');
+    const nfseNum = bol.nfse_numero || 'SEM_NFSE';
+    const zipName = `Pacote_Fiscal_${orgaoSlug}_${compSlug}_NFSe${nfseNum}.zip`;
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
+
+    const zip = archiver('zip', { zlib: { level: 9 } });
+    zip.on('error', err => {
+      console.error('Erro no archiver:', err);
+      try { res.status(500).end(); } catch (_) {}
+    });
+    zip.pipe(res);
+
+    // 1. Boletins de medição (PDFs gerados por /gerar)
+    let qtdBoletins = 0;
+    for (const n of nfs) {
+      if (n.arquivo_pdf && fs.existsSync(n.arquivo_pdf)) {
+        const fileName = `1_Boletins_Medicao/${path.basename(n.arquivo_pdf)}`;
+        zip.file(n.arquivo_pdf, { name: fileName });
+        qtdBoletins++;
+      }
+    }
+
+    // Resumo de faturamento (mesma pasta dos boletins)
+    if (nfs.length && nfs[0].arquivo_pdf) {
+      const dir = path.dirname(nfs[0].arquivo_pdf);
+      if (fs.existsSync(dir)) {
+        try {
+          const files = fs.readdirSync(dir);
+          for (const f of files) {
+            if (/^Resumo Faturamento/i.test(f)) {
+              zip.file(path.join(dir, f), { name: `1_Boletins_Medicao/${f}` });
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    // 2. XML da NFS-e (resposta WebISS)
+    if (nfseObj) {
+      zip.append(JSON.stringify(nfseObj, null, 2), { name: `2_NFSe/nfse_${nfseNum}_response.json` });
+      // Se tem campo xml específico
+      if (nfseObj.xml) {
+        zip.append(nfseObj.xml, { name: `2_NFSe/nfse_${nfseNum}.xml` });
+      }
+      if (nfseObj.xmlAssinado) {
+        zip.append(nfseObj.xmlAssinado, { name: `2_NFSe/nfse_${nfseNum}_assinado.xml` });
+      }
+    }
+
+    // 3. Espelho/DANFSE PDF gerado a partir dos dados
+    const espelhoBuf = gerarEspelhoNFSePDFBuffer(bol, nfseObj, nfs);
+    espelhoBuf.then(buf => {
+      zip.append(buf, { name: `2_NFSe/Espelho_NFSe_${nfseNum}.pdf` });
+
+      // 4. Ofício de encaminhamento
+      const oficioBuf = gerarOficioEncaminhamentoBuffer(bol, nfseNum, nfs);
+      oficioBuf.then(b2 => {
+        zip.append(b2, { name: `3_Oficio/Oficio_Encaminhamento.pdf` });
+
+        // 5. Resumo texto (README)
+        const totalBol = Number(bol.valor_total || bol.total_geral || 0);
+        const readme = [
+          `PACOTE FISCAL — ${bol.contrato_nome}`,
+          `Competência: ${bol.competencia}`,
+          `Contratante: ${bol.contratante}`,
+          `Contrato Nº: ${bol.numero_contrato || '-'}`,
+          `NFS-e Nº: ${nfseNum}`,
+          `Data Emissão: ${bol.nfse_data_emissao || '-'}`,
+          `Valor total: R$ ${totalBol.toLocaleString('pt-BR',{minimumFractionDigits:2})}`,
+          `Boletins incluídos: ${qtdBoletins}`,
+          ``,
+          `Conteúdo:`,
+          `  1_Boletins_Medicao/  — boletins de medição em PDF`,
+          `  2_NFSe/              — XML + espelho da NFS-e`,
+          `  3_Oficio/            — ofício de encaminhamento`,
+          ``,
+          `Empresa emitente: ${bol.empresa_razao || '-'}`,
+          `CNPJ: ${bol.empresa_cnpj || '-'}`,
+          `Contato: ${bol.empresa_email || '-'} / ${bol.empresa_telefone || '-'}`,
+          ``,
+          `Gerado automaticamente pelo Sistema Montana em ${new Date().toLocaleString('pt-BR')}.`,
+        ].join('\n');
+        zip.append(readme, { name: 'LEIA-ME.txt' });
+
+        zip.finalize();
+      }).catch(e => {
+        console.error('Erro ao gerar ofício:', e);
+        zip.finalize();
+      });
+    }).catch(e => {
+      console.error('Erro ao gerar espelho NFS-e:', e);
+      zip.finalize();
+    });
+  } catch (err) {
+    console.error('Erro ao gerar pacote fiscal:', err);
+    try { res.status(500).json({ error: err.message }); } catch (_) {}
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════
 // GERAÇÃO DE PDFs COM PDFKIT
 // ═══════════════════════════════════════════════════════════════
@@ -736,6 +870,177 @@ function gerarResumoPDF(dadosResumo, contrato, ano, outputPath) {
 
   doc.end();
   return totalMensal;
+}
+
+// ─── PDF helpers: Espelho NFS-e e Ofício (usam buffer em memória) ──
+
+function pdfToBuffer(builder) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
+    const chunks = [];
+    doc.on('data', c => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+    try {
+      builder(doc);
+      doc.end();
+    } catch (e) { reject(e); }
+  });
+}
+
+function gerarEspelhoNFSePDFBuffer(bol, nfseObj, nfs) {
+  return pdfToBuffer(doc => {
+    const margin = 40;
+    const contentW = doc.page.width - 2 * margin;
+
+    // Cabeçalho
+    doc.rect(margin, margin, contentW, 60).fill(AZUL_ESCURO);
+    doc.fill('#FFFFFF').font('Helvetica-Bold').fontSize(14)
+       .text('ESPELHO DE NFS-e', margin, margin + 12, { width: contentW, align: 'center' });
+    doc.fontSize(9).font('Helvetica')
+       .text('Documento auxiliar — consulte a NFS-e oficial no portal da Prefeitura', margin, margin + 34, { width: contentW, align: 'center' });
+
+    let y = margin + 80;
+    doc.fill('#000000').font('Helvetica-Bold').fontSize(10);
+
+    function linha(label, valor) {
+      doc.font('Helvetica-Bold').fontSize(9).text(label + ':', margin, y, { continued: true });
+      doc.font('Helvetica').text(' ' + (valor || '—'));
+      y = doc.y + 4;
+    }
+
+    linha('Número da NFS-e', bol.nfse_numero);
+    linha('Data de Emissão', bol.nfse_data_emissao);
+    linha('Código de Verificação', nfseObj?.codigoVerificacao || nfseObj?.codVerificacao || '—');
+
+    y += 8;
+    doc.rect(margin, y, contentW, 20).fill(CINZA_CLARO);
+    doc.fill('#000000').font('Helvetica-Bold').fontSize(10).text('PRESTADOR DE SERVIÇOS', margin + 6, y + 5);
+    y += 26;
+    linha('Razão Social', bol.empresa_razao);
+    linha('CNPJ', bol.empresa_cnpj);
+    linha('Endereço', bol.empresa_endereco);
+    linha('E-mail / Telefone', `${bol.empresa_email || '-'} / ${bol.empresa_telefone || '-'}`);
+
+    y += 6;
+    doc.rect(margin, y, contentW, 20).fill(CINZA_CLARO);
+    doc.fill('#000000').font('Helvetica-Bold').fontSize(10).text('TOMADOR DE SERVIÇOS', margin + 6, y + 5);
+    y += 26;
+    linha('Razão Social', bol.orgao || bol.contratante);
+    linha('CNPJ', bol.tomador_cnpj);
+    linha('Contrato', `${bol.numero_contrato || '-'}  (Processo ${bol.processo || '-'})`);
+
+    y += 6;
+    doc.rect(margin, y, contentW, 20).fill(CINZA_CLARO);
+    doc.fill('#000000').font('Helvetica-Bold').fontSize(10).text('DISCRIMINAÇÃO DO SERVIÇO', margin + 6, y + 5);
+    y += 26;
+    doc.font('Helvetica').fontSize(9)
+       .text(bol.discriminacao || 'PRESTAÇÃO DE SERVIÇOS', margin, y, { width: contentW, align: 'justify' });
+    y = doc.y + 10;
+
+    y += 4;
+    doc.rect(margin, y, contentW, 20).fill(CINZA_CLARO);
+    doc.fill('#000000').font('Helvetica-Bold').fontSize(10).text('VALORES', margin + 6, y + 5);
+    y += 26;
+    const vtot = Number(bol.valor_total || bol.total_geral || 0);
+    const vbase = Number(bol.valor_base || vtot);
+    const glosas = Number(bol.glosas || 0);
+    const acresc = Number(bol.acrescimos || 0);
+    const aliq = 0.02;
+    const iss = +(vtot * aliq).toFixed(2);
+
+    linha('Valor base do contrato', 'R$ ' + vbase.toFixed(2).replace('.',','));
+    if (glosas) linha('Glosas', '- R$ ' + glosas.toFixed(2).replace('.',','));
+    if (acresc) linha('Acréscimos', '+ R$ ' + acresc.toFixed(2).replace('.',','));
+    linha('Valor total dos serviços', 'R$ ' + vtot.toFixed(2).replace('.',','));
+    linha('Alíquota ISS', (aliq * 100).toFixed(2) + '%');
+    linha('Valor do ISS', 'R$ ' + iss.toFixed(2).replace('.',','));
+
+    if (Array.isArray(nfs) && nfs.length) {
+      y = doc.y + 10;
+      doc.rect(margin, y, contentW, 20).fill(CINZA_CLARO);
+      doc.fill('#000000').font('Helvetica-Bold').fontSize(10).text('BOLETINS DE MEDIÇÃO VINCULADOS', margin + 6, y + 5);
+      y += 26;
+      doc.font('Helvetica').fontSize(9);
+      for (const n of nfs) {
+        const lin = `NF ${n.nf_numero || '-'}  —  ${n.campus_nome || '-'} (${n.municipio || '-'})  —  R$ ${Number(n.valor_total||0).toFixed(2).replace('.',',')}`;
+        doc.text(lin, margin + 6, y, { width: contentW - 12 });
+        y = doc.y + 3;
+      }
+    }
+
+    // Rodapé
+    doc.font('Helvetica').fontSize(8).fill('#64748b')
+       .text('Gerado automaticamente pelo Sistema Montana — ' + new Date().toLocaleString('pt-BR'),
+             margin, doc.page.height - 50, { width: contentW, align: 'center' });
+  });
+}
+
+function gerarOficioEncaminhamentoBuffer(bol, nfseNum, nfs) {
+  return pdfToBuffer(doc => {
+    const margin = 50;
+    const contentW = doc.page.width - 2 * margin;
+    const hoje = new Date().toLocaleDateString('pt-BR');
+    const vtot = Number(bol.valor_total || bol.total_geral || 0);
+
+    doc.font('Helvetica').fontSize(11).text(bol.empresa_razao || '', margin, margin, { width: contentW, align: 'right' });
+    doc.fontSize(9).fill('#64748b').text(`CNPJ: ${bol.empresa_cnpj || '-'}`, { width: contentW, align: 'right' });
+    doc.text(bol.empresa_endereco || '', { width: contentW, align: 'right' });
+    doc.moveDown(2);
+
+    doc.fill('#000000').font('Helvetica-Bold').fontSize(13)
+       .text(`OFÍCIO DE ENCAMINHAMENTO — ${bol.competencia || ''}`, { width: contentW, align: 'center' });
+    doc.moveDown(1);
+
+    doc.font('Helvetica').fontSize(10);
+    doc.text(`Palmas-TO, ${hoje}.`, { width: contentW, align: 'right' });
+    doc.moveDown(1.5);
+
+    doc.font('Helvetica-Bold').text('Ao(À) Gestor(a) / Fiscal do Contrato');
+    doc.font('Helvetica').text(bol.contratante || '');
+    doc.text(`Contrato nº ${bol.numero_contrato || '-'}`);
+    doc.text(`Processo: ${bol.processo || '-'}`);
+    doc.moveDown(1);
+
+    doc.font('Helvetica-Bold').text('Assunto: ', { continued: true });
+    doc.font('Helvetica').text(`Encaminhamento de Nota Fiscal de Serviço e Boletim de Medição — competência ${bol.competencia || ''}.`);
+    doc.moveDown(1);
+
+    doc.text('Prezado(a) Gestor(a),', { width: contentW });
+    doc.moveDown(0.8);
+    doc.text(
+      `Encaminhamos em anexo, para fins de conferência e ateste, a documentação referente à execução contratual do ` +
+      `período em epígrafe, contendo:`,
+      { width: contentW, align: 'justify' }
+    );
+    doc.moveDown(0.6);
+    doc.text(`   •  Boletins de Medição aprovados (${(nfs||[]).length} documento(s));`, { width: contentW });
+    doc.text(`   •  Nota Fiscal de Serviço Eletrônica — NFS-e nº ${nfseNum};`, { width: contentW });
+    doc.text(`   •  XML oficial da NFS-e emitida no portal da Prefeitura Municipal.`, { width: contentW });
+    doc.moveDown(0.8);
+
+    doc.text(
+      `O valor total da medição é de R$ ${vtot.toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.')}, ` +
+      `conforme detalhado nos documentos anexos. Solicitamos a verificação e o devido encaminhamento para pagamento, ` +
+      `de acordo com os prazos e condições pactuados em contrato.`,
+      { width: contentW, align: 'justify' }
+    );
+    doc.moveDown(0.8);
+
+    doc.text(
+      `Colocamo-nos à disposição para eventuais esclarecimentos pelos canais de contato ` +
+      `${bol.empresa_email || ''} / ${bol.empresa_telefone || ''}.`,
+      { width: contentW, align: 'justify' }
+    );
+    doc.moveDown(0.8);
+    doc.text('Atenciosamente,', { width: contentW });
+    doc.moveDown(3);
+
+    doc.moveTo(margin + 80, doc.y).lineTo(margin + 80 + 280, doc.y).stroke();
+    doc.moveDown(0.2);
+    doc.font('Helvetica-Bold').text(bol.empresa_razao || '', margin + 80, doc.y, { width: 280, align: 'center' });
+    doc.font('Helvetica').fontSize(9).text(`CNPJ ${bol.empresa_cnpj || '-'}`, { width: 280, align: 'center' });
+  });
 }
 
 module.exports = router;

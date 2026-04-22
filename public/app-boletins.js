@@ -130,7 +130,7 @@ async function loadBolHistorico() {
     return `<span style="background:${bg};color:${color};padding:2px 8px;border-radius:9px;font-size:11px;font-weight:600;white-space:nowrap">${label}</span>`;
   }
 
-  let html = '<table class="tbl"><thead><tr><th>Contrato</th><th>Competência</th><th>Total Boletim</th><th>NFs vinculadas</th><th>Status</th><th>Data Emissão</th></tr></thead><tbody>';
+  let html = '<table class="tbl"><thead><tr><th>Contrato</th><th>Competência</th><th>Total Boletim</th><th>NFs vinculadas</th><th>Status</th><th>Data Emissão</th><th>Pacote Fiscal</th></tr></thead><tbody>';
   // Agrupar por competencia para facilitar visualização
   const byComp = {};
   for (const b of hist) {
@@ -153,15 +153,21 @@ async function loadBolHistorico() {
       <td>${totalNfs} NFs</td>
       <td>${bolStatusBadge(grpStatus)} <small style="color:#64748b">${okCount}✅ ${divCount}⚠️ ${semCount}❌</small></td>
       <td></td>
+      <td></td>
     </tr>`;
     for (const b of grupo) {
+      const emitida = b.nfse_status === 'EMITIDA';
+      const pacoteCol = emitida
+        ? `<button class="btn btn-xs" style="background:#1d4ed8;color:#fff;border:none;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;font-weight:600" onclick="baixarPacoteFiscal(${b.id})" title="Baixar ZIP com boletim + NFS-e + ofício para o fiscal">📦 Baixar pacote</button>`
+        : `<span style="color:#94a3b8;font-size:11px">NFS-e pendente</span>`;
       html += `<tr>
         <td style="padding-left:24px">${b.contrato_nome}</td>
         <td>${b.competencia}</td>
         <td>${brl(b.total_geral)}</td>
         <td>${b.nfs ? b.nfs.length : 0} NFs</td>
-        <td>${bolStatusBadge(b.status)}</td>
+        <td>${bolStatusBadge(b.status)} ${emitida ? `<small style="color:#15803d">· NFS-e ${b.nfse_numero}</small>` : ''}</td>
         <td style="font-size:11px;color:#64748b">${b.data_emissao||'—'}</td>
+        <td>${pacoteCol}</td>
       </tr>`;
     }
   }
@@ -806,16 +812,20 @@ async function _nfseConfirmarEmissao(boletim_id) {
           <div style="font-weight:800;color:#15803d;font-size:15px;margin-bottom:4px">NFS-e Emitida com Sucesso!</div>
           <div style="font-size:13px;color:#166534">Número: <strong style="font-size:18px">${result.numero_nfse}</strong></div>
           ${result.nfse?.dataEmissao ? `<div style="font-size:11px;color:#64748b;margin-top:4px">Data: ${result.nfse.dataEmissao}</div>` : ''}
+          <button onclick="baixarPacoteFiscal(${boletim_id})"
+            style="margin-top:10px;padding:8px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px">
+            📦 Baixar pacote para o fiscal
+          </button>
         </div>
       `;
       btn.textContent = '✅ Emitida';
       btn.style.background = '#059669';
-      // Fechar modal após 3s
+      // Fechar modal após 6s (tempo pra clicar no pacote)
       setTimeout(() => {
         document.getElementById('modal-emitir-nfse')?.remove();
         document.getElementById('modal-gerar-boletim')?.remove();
         if (typeof loadBolHistorico === 'function') loadBolHistorico();
-      }, 3000);
+      }, 6000);
     } else {
       const erroMsg = result.error || 'Erro desconhecido';
       resultEl.innerHTML = `
@@ -832,6 +842,44 @@ async function _nfseConfirmarEmissao(boletim_id) {
     resultEl.innerHTML = `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;color:#dc2626;font-size:12px">❌ Erro de rede: ${err.message}</div>`;
     btn.disabled = false;
     btn.textContent = '🔄 Tentar Novamente';
+  }
+}
+
+// ─── Download do pacote fiscal (ZIP) ───
+// Autentica via JWT + X-Company (rotas protegidas); blob é salvo com filename do Content-Disposition
+async function baixarPacoteFiscal(boletim_id) {
+  try {
+    toast('Gerando pacote fiscal...', 'info');
+    const token = localStorage.getItem('montana_jwt') || '';
+    const res = await fetch(`/api/boletins/${boletim_id}/pacote-fiscal.zip`, {
+      method: 'GET',
+      headers: {
+        'X-Company': currentCompany,
+        'Authorization': 'Bearer ' + token,
+      },
+    });
+    if (!res.ok) {
+      let msg = `Erro ${res.status}`;
+      try { const j = await res.json(); msg = j.error || msg; } catch (_) {}
+      toast('❌ Falha ao baixar pacote: ' + msg, 'error');
+      return;
+    }
+    // Extrair filename do Content-Disposition
+    const cd = res.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="([^"]+)"/);
+    const filename = m ? m[1] : `Pacote_Fiscal_Boletim_${boletim_id}.zip`;
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast('✅ Pacote gerado: ' + filename, 'success');
+  } catch (err) {
+    console.error('baixarPacoteFiscal:', err);
+    toast('❌ Erro ao baixar pacote: ' + err.message, 'error');
   }
 }
 
