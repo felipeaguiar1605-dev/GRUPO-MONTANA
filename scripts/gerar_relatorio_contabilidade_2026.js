@@ -632,7 +632,6 @@ function adicionarAbaEmpresa(wb, empresa, nfs) {
       )
     ORDER BY tomador, data_emissao, numero
   `).all();
-  dbEmp.close();
 
   if (nfs2025Ref.length > 0) {
     const wsR = wb.addWorksheet(`NFs 2026 ref 2025 ${label}`);
@@ -705,6 +704,132 @@ function adicionarAbaEmpresa(wb, empresa, nfs) {
     setCell(wsR, rr, 9, `${comVinc.length} conciliadas · ${semVinc.length} sem extrato (R$ ${brl(semVinc.reduce((s,n)=>s+n.valor_liquido,0))})`, null, LBLUE, BLUE, true);
     setCell(wsR, rr, 10, '', null, LBLUE);
     setCell(wsR, rr, 11, '', null, LBLUE);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // ABA: PAGAMENTOS PALMAS 2026 → NFs 2025 (via Prodata histórico)
+  // ═══════════════════════════════════════════════════════════════
+  // Usa pagamentos_portal.historico (Prodata SIG) p/ identificar NFs de 2025
+  // pagas em 2026. Casa valor_pago == valor_bruto na competência referenciada.
+  let pagsPalmas2025 = [];
+  try {
+    const existePP = dbEmp.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='pagamentos_portal'").get();
+    if (existePP) {
+      const colsPP = dbEmp.prepare("PRAGMA table_info(pagamentos_portal)").all().map(c => c.name);
+      if (colsPP.includes('historico')) {
+        pagsPalmas2025 = dbEmp.prepare(`
+          SELECT id, data_pagamento_iso, valor_pago, historico, fornecedor, gestao,
+                 cnpj, empenho
+          FROM pagamentos_portal
+          WHERE portal='palmas'
+            AND substr(data_pagamento_iso,1,4) = ?
+            AND historico IS NOT NULL
+            AND (historico LIKE '%2025%' OR historico LIKE '%/25%')
+          ORDER BY data_pagamento_iso, valor_pago
+        `).all(String(ANO));
+      }
+    }
+  } catch (_) { /* sem tabela: ignora */ }
+  dbEmp.close();
+
+  if (pagsPalmas2025.length > 0) {
+    // Reabre DB p/ match com NFs
+    const dbEmp2 = new Database(empresa.db, { readonly: true });
+
+    const MESES = {
+      janeiro:'01',fevereiro:'02','marco':'03','março':'03',abril:'04',
+      maio:'05',junho:'06',julho:'07',agosto:'08',setembro:'09',
+      outubro:'10',novembro:'11',dezembro:'12'
+    };
+    function parseCompRef(h) {
+      if (!h) return null;
+      const low = h.toLowerCase();
+      for (const m of Object.keys(MESES)) {
+        if (new RegExp(m + '[/ ]*(20)?25', 'i').test(low)) return '2025-' + MESES[m];
+      }
+      const m2 = low.match(/\b(0[1-9]|1[0-2])\/(20)?25\b/);
+      return m2 ? '2025-' + m2[1] : null;
+    }
+
+    // Nome limitado a 31 chars (Excel)
+    const wsPPName = `Pgs Palmas ref 2025 ${label}`.substring(0, 31);
+    const wsPP = wb.addWorksheet(wsPPName);
+    wsPP.columns = [
+      {width:5},{width:12},{width:14},{width:10},{width:44},{width:17},
+      {width:18},{width:16},{width:50}
+    ];
+    let rpp = 1;
+    wsPP.mergeCells(rpp, 1, rpp, 9);
+    const pHdr = wsPP.getRow(rpp).getCell(1);
+    pHdr.value = `${empresa.nome} — PAGAMENTOS PREFEITURA DE PALMAS EM ${ANO} REFERENTES A NFs DE 2025`;
+    pHdr.font  = {bold:true, size:12, color:{argb:WHITE}};
+    pHdr.fill  = {type:'pattern', pattern:'solid', fgColor:{argb:AMBER}};
+    pHdr.alignment = {horizontal:'center', vertical:'middle'};
+    wsPP.getRow(rpp).height = 28; rpp++;
+
+    wsPP.mergeCells(rpp, 1, rpp, 9);
+    const pExp = wsPP.getRow(rpp).getCell(1);
+    pExp.value =
+      'Cruzamento de pagamentos do Portal Transparência de Palmas (Prodata SIG) — cada pagamento ' +
+      `em ${ANO} com histórico mencionando competência de 2025. A coluna "NF casada" sugere a nota ` +
+      'fiscal emitida em 2025 cujo valor_bruto bate com valor_pago no mês referenciado. ' +
+      'Quando múltiplas NFs batem no mesmo valor, lista todas para a contabilidade escolher — o Prodata ' +
+      'identifica a correta via Nº Documento no popup "Nota fiscal" da linha.';
+    pExp.font  = {size:9, italic:true, color:{argb:'FF92400E'}};
+    pExp.fill  = {type:'pattern', pattern:'solid', fgColor:{argb:LYELLOW}};
+    pExp.alignment = {wrapText:true, vertical:'middle'};
+    pExp.border = BORDER;
+    wsPP.getRow(rpp).height = 60; rpp++;
+
+    hdrRow(wsPP, rpp, ['#','Dt Pagto','Valor Pago','Comp.Ref','Gestão (pagador)','Empenho','NF casada (2025)','Match','Histórico Prodata'], AMBER);
+    rpp++;
+
+    let um=0, multi=0, semMatch=0, totPago=0;
+    pagsPalmas2025.forEach((p, i) => {
+      const bg = i % 2 === 0 ? null : LGRAY;
+      const comp = parseCompRef(p.historico);
+      let nfs = [];
+      if (comp) {
+        nfs = dbEmp2.prepare(`
+          SELECT numero, tomador, valor_bruto, status_conciliacao
+          FROM notas_fiscais
+          WHERE substr(data_emissao,1,7) = ?
+            AND ABS(valor_bruto - ?) < 0.51
+            AND (status_conciliacao IS NULL OR status_conciliacao NOT IN ('ASSESSORIA','CANCELADA'))
+          LIMIT 10
+        `).all(comp, p.valor_pago);
+      }
+      totPago += (p.valor_pago || 0);
+      let matchTxt, matchBg, matchFc;
+      if (nfs.length === 1) { matchTxt = '✅ 1:1'; matchBg = LGREEN; matchFc = GREEN; um++; }
+      else if (nfs.length > 1) { matchTxt = `⚠️ ${nfs.length} candidatas`; matchBg = LYELLOW; matchFc = AMBER; multi++; }
+      else { matchTxt = '❌ s/ NF no DB'; matchBg = LYELLOW; matchFc = 'FF991B1B'; semMatch++; }
+
+      const nfStr = nfs.length
+        ? nfs.slice(0, 3).map(n => `${n.numero}`).join(', ') + (nfs.length > 3 ? ` (+${nfs.length-3})` : '')
+        : '—';
+
+      setCell(wsPP, rpp, 1, i+1,                        null, bg, GRAY, false, 'center');
+      setCell(wsPP, rpp, 2, fmtDt(p.data_pagamento_iso), null, bg);
+      setMoney(wsPP, rpp, 3, p.valor_pago || 0,          bg);
+      setCell(wsPP, rpp, 4, comp || '—',                 null, bg, GRAY, false, 'center');
+      setCell(wsPP, rpp, 5, (p.gestao || '').substring(0, 50), null, bg, GRAY);
+      setCell(wsPP, rpp, 6, p.empenho || '—',            null, bg, GRAY, false, 'center');
+      setCell(wsPP, rpp, 7, nfStr,                       null, bg, GRAY);
+      setCell(wsPP, rpp, 8, matchTxt,                    null, matchBg, matchFc, true, 'center');
+      setCell(wsPP, rpp, 9, (p.historico || '').substring(0, 80), null, bg, GRAY);
+      rpp++;
+    });
+
+    setCell(wsPP, rpp, 1, '', null, LBLUE);
+    setCell(wsPP, rpp, 2, `${pagsPalmas2025.length} pags`, null, LBLUE, BLUE, true);
+    setMoney(wsPP, rpp, 3, totPago, LBLUE, BLUE, true);
+    for (let c = 4; c <= 6; c++) setCell(wsPP, rpp, c, '', null, LBLUE);
+    setCell(wsPP, rpp, 7, `${um} 1:1 · ${multi} múltiplas · ${semMatch} s/NF`, null, LBLUE, BLUE, true);
+    setCell(wsPP, rpp, 8, '', null, LBLUE);
+    setCell(wsPP, rpp, 9, '', null, LBLUE);
+
+    dbEmp2.close();
   }
 
   return {
