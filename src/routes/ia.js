@@ -32,7 +32,7 @@ function buildContexto(db, company) {
     const fat  = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) v FROM notas_fiscais WHERE (data_emissao>=? AND data_emissao<=?)`).get(from, to);
     const desp = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) v FROM despesas WHERE data_iso>=? AND data_iso<=?`).get(from, to);
     const pend = db.prepare(`SELECT COUNT(*) n FROM extratos WHERE status_conciliacao='PENDENTE'`).get();
-    const ctrs = db.prepare(`SELECT numContrato, contrato, valor_mensal_bruto FROM contratos WHERE status!='encerrado' LIMIT 5`).all();
+    const ctrs = db.prepare(`SELECT numContrato, contrato, valor_mensal_bruto FROM contratos WHERE LOWER(COALESCE(status,'')) NOT LIKE '%encerrad%' AND LOWER(COALESCE(numContrato,'')) NOT LIKE '%encerrad%' LIMIT 5`).all();
     const certs= db.prepare(`SELECT tipo, data_validade FROM certidoes WHERE data_validade <= date('now','+30 days') AND data_validade >= date('now') LIMIT 5`).all().catch?.() ?? [];
 
     const fmt = v => `R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;

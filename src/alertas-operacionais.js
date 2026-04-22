@@ -74,7 +74,8 @@ function faturamentoNaoEmitido(db, company, opcoes = {}) {
     contratos = db.prepare(`
       SELECT numContrato, contrato, orgao, valor_mensal_bruto
       FROM contratos
-      WHERE COALESCE(status,'') != 'encerrado'
+      WHERE LOWER(COALESCE(status,'')) NOT LIKE '%encerrad%'
+        AND LOWER(COALESCE(numContrato,'')) NOT LIKE '%encerrad%'
         AND COALESCE(valor_mensal_bruto, 0) > 0
     `).all();
   } catch (_) { return { itens: [], total: 0, erro: 'tabela contratos indisponível' }; }

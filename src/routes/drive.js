@@ -269,7 +269,7 @@ router.get('/sugestoes', companyMw, async (req, res) => {
     const ano = new Date().getFullYear();
     let erpCtx = '';
     try {
-      const ctrs = db.prepare(`SELECT numContrato, contrato FROM contratos WHERE status!='encerrado' LIMIT 10`).all();
+      const ctrs = db.prepare(`SELECT numContrato, contrato FROM contratos WHERE LOWER(COALESCE(status,'')) NOT LIKE '%encerrad%' AND LOWER(COALESCE(numContrato,'')) NOT LIKE '%encerrad%' LIMIT 10`).all();
       erpCtx = `Contratos ativos: ${ctrs.map(c => c.numContrato).join(', ')}\n`;
       const nfsMes = db.prepare(`SELECT COUNT(*) n FROM notas_fiscais WHERE strftime('%Y-%m',data_emissao)=?`).get(`${ano}-${mes}`);
       erpCtx += `NFs emitidas em ${mes}/${ano}: ${nfsMes?.n || 0}\n`;

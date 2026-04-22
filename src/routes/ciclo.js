@@ -39,10 +39,14 @@ router.get('/', (req, res) => {
     }
 
     // ───────── ETAPA 1: Contratos ativos com faturamento esperado ─────────
+    // Filtro robusto: coluna `status` é texto livre (tem 'Encerrado', 'encerrado',
+    // 'Ativo', 'EMERGENCIAL', emojis como '🔴 CRÍTICO', etc). Casa-insensitivo
+    // + verifica se o próprio numContrato contém '— encerrado' como label
     const contratosAtivos = db.prepare(`
       SELECT numContrato, contrato, orgao, valor_mensal_bruto
       FROM contratos
-      WHERE COALESCE(status,'') != 'encerrado'
+      WHERE LOWER(COALESCE(status,'')) NOT LIKE '%encerrad%'
+        AND LOWER(COALESCE(numContrato,'')) NOT LIKE '%encerrad%'
         AND COALESCE(valor_mensal_bruto, 0) > 0
     `).all();
 
