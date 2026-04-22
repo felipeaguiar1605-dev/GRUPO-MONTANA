@@ -59,7 +59,34 @@ function getBBConfig(db) {
     ultimo_sync:   getCfg(db, 'bb_ultimo_sync'),
     cert_path:     getCfg(db, 'bb_cert_path'),
     key_path:      getCfg(db, 'bb_key_path'),
+    pfx_path:      getCfg(db, 'bb_pfx_path'),
+    pfx_passphrase:getCfg(db, 'bb_pfx_passphrase'),
   };
+}
+
+/**
+ * Retorna opções de TLS para https.request — aceita .pfx (mais simples)
+ * ou o par cert.pem/key.pem tradicional. Se nenhum cert configurado,
+ * retorna {} (sem mTLS — só funciona em sandbox/homologação).
+ */
+function buildTlsOpts(cfg) {
+  if (cfg.ambiente !== 'producao') return {};
+  // Preferência 1: .pfx direto (menos passos, sem extração openssl)
+  if (cfg.pfx_path && fs.existsSync(cfg.pfx_path)) {
+    return {
+      pfx: fs.readFileSync(cfg.pfx_path),
+      passphrase: cfg.pfx_passphrase || undefined,
+    };
+  }
+  // Preferência 2: cert.pem + key.pem
+  if (cfg.cert_path && cfg.key_path &&
+      fs.existsSync(cfg.cert_path) && fs.existsSync(cfg.key_path)) {
+    return {
+      cert: fs.readFileSync(cfg.cert_path),
+      key:  fs.readFileSync(cfg.key_path),
+    };
+  }
+  return {};
 }
 
 // Retorna array de todas as contas: [{agencia, conta, descricao}]
@@ -100,16 +127,19 @@ function getBBApiBase(ambiente) {
 
 // ─── Helper: https.request wrapper (suporta mTLS — fetch/undici não suporta) ─
 
-function httpsReq(urlStr, { method = 'GET', headers = {}, body = null, cert, key } = {}) {
+function httpsReq(urlStr, { method = 'GET', headers = {}, body = null, cert, key, pfx, passphrase } = {}) {
   return new Promise((resolve, reject) => {
     const u = new URL(urlStr);
+    const tls = pfx
+      ? { pfx, ...(passphrase ? { passphrase } : {}) }
+      : (cert && key ? { cert, key } : {});
     const opts = {
       hostname: u.hostname,
       port: u.port || 443,
       path: u.pathname + u.search,
       method,
       headers,
-      ...(cert && key ? { cert, key } : {}),
+      ...tls,
       rejectUnauthorized: true,
     };
     const req = https.request(opts, (res) => {
@@ -135,12 +165,7 @@ async function getBBToken(cfg) {
     : ['extrato-info', '', 'extrato.read'];
 
   // mTLS: usar https.request — fetch/undici do Node.js v20+ não suporta https.Agent com cert/key
-  const tlsOpts = {};
-  if (cfg.ambiente === 'producao' && cfg.cert_path && cfg.key_path &&
-      fs.existsSync(cfg.cert_path) && fs.existsSync(cfg.key_path)) {
-    tlsOpts.cert = fs.readFileSync(cfg.cert_path);
-    tlsOpts.key  = fs.readFileSync(cfg.key_path);
-  }
+  const tlsOpts = buildTlsOpts(cfg);
 
   const url = `${base}/oauth/token`;
   let lastError = null;
@@ -208,13 +233,8 @@ async function getLancamentos(cfg, token, agencia, conta, dataInicio, dataFim, p
     headers['x-br-com-bb-ipa-mciteste'] = conta;
   }
 
-  // mTLS em produção — usar https.request (fetch/undici não suporta mTLS via https.Agent)
-  const tlsOpts = {};
-  if (cfg.ambiente === 'producao' && cfg.cert_path && cfg.key_path &&
-      fs.existsSync(cfg.cert_path) && fs.existsSync(cfg.key_path)) {
-    tlsOpts.cert = fs.readFileSync(cfg.cert_path);
-    tlsOpts.key  = fs.readFileSync(cfg.key_path);
-  }
+  // mTLS em produção — suporta .pfx direto ou cert.pem/key.pem
+  const tlsOpts = buildTlsOpts(cfg);
 
   console.log(`[BB] GET ${url}`);
   const resp = await httpsReq(url, { headers, ...tlsOpts });
@@ -404,14 +424,19 @@ router.get('/status', (req, res) => {
     })),
     total_contas: contas.length,
     ultimo_sync:  cfg.ultimo_sync,
-    tem_cert:     !!(cfg.cert_path && fs.existsSync(cfg.cert_path || '')),
+    tem_cert:     !!((cfg.pfx_path && fs.existsSync(cfg.pfx_path)) ||
+                    (cfg.cert_path && cfg.key_path &&
+                     fs.existsSync(cfg.cert_path) && fs.existsSync(cfg.key_path))),
+    cert_tipo:    cfg.pfx_path && fs.existsSync(cfg.pfx_path) ? 'pfx' :
+                  (cfg.cert_path && fs.existsSync(cfg.cert_path) ? 'pem' : null),
   });
 });
 
 // ─── POST /bb/config ──────────────────────────────────────────────────────────
 
 router.post('/config', (req, res) => {
-  const { client_id, client_secret, app_key, agencia, conta, ambiente, scope, cert_path, key_path } = req.body;
+  const { client_id, client_secret, app_key, agencia, conta, ambiente, scope,
+          cert_path, key_path, pfx_path, pfx_passphrase } = req.body;
 
   if (!client_id || !client_secret || !app_key || !agencia || !conta) {
     return res.status(400).json({ error: 'client_id, client_secret, app_key, agencia e conta são obrigatórios' });
@@ -425,8 +450,10 @@ router.post('/config', (req, res) => {
   setCfg(db, 'bb_conta',         conta);
   setCfg(db, 'bb_ambiente',      ambiente || 'producao');
   setCfg(db, 'bb_scope',         scope    || 'extrato-info');
-  if (cert_path) setCfg(db, 'bb_cert_path', cert_path);
-  if (key_path)  setCfg(db, 'bb_key_path',  key_path);
+  if (cert_path)      setCfg(db, 'bb_cert_path',      cert_path);
+  if (key_path)       setCfg(db, 'bb_key_path',       key_path);
+  if (pfx_path)       setCfg(db, 'bb_pfx_path',       pfx_path);
+  if (pfx_passphrase) setCfg(db, 'bb_pfx_passphrase', pfx_passphrase);
 
   res.json({ ok: true, message: 'Credenciais BB salvas com sucesso' });
 });
@@ -476,7 +503,8 @@ router.delete('/config/conta', (req, res) => {
 router.delete('/config', (req, res) => {
   const db = req.db;
   ['bb_client_id','bb_client_secret','bb_app_key','bb_agencia','bb_conta',
-   'bb_ambiente','bb_scope','bb_ultimo_sync','bb_cert_path','bb_key_path','bb_contas_extra']
+   'bb_ambiente','bb_scope','bb_ultimo_sync','bb_cert_path','bb_key_path',
+   'bb_pfx_path','bb_pfx_passphrase','bb_contas_extra']
     .forEach(k => db.prepare(`DELETE FROM configuracoes WHERE chave=?`).run(k));
   res.json({ ok: true });
 });
