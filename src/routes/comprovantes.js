@@ -20,6 +20,7 @@ const fs = require('fs');
 const path = require('path');
 const companyMw = require('../companyMiddleware');
 const { COMPANIES } = require('../db');
+const { recalcularNF } = require('../status-nf');
 
 const router = express.Router();
 router.use(companyMw);
@@ -239,7 +240,13 @@ router.post('/:id/vincular', (req, res) => {
 
     recomputarStatus(db, cp.id);
 
-    res.json({ ok: true, vinculo_id: info.lastInsertRowid, label });
+    // Fase C: se vínculo for em NF, recalcula status + retencao_efetiva da NF
+    let nfStatus = null;
+    if (tipo_destino === 'NF') {
+      try { nfStatus = recalcularNF(db, destino_id); } catch (_) {}
+    }
+
+    res.json({ ok: true, vinculo_id: info.lastInsertRowid, label, nf_status: nfStatus });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -248,10 +255,14 @@ router.post('/:id/vincular', (req, res) => {
 // DESVINCULAR
 router.delete('/vinculos/:vid', (req, res) => {
   try {
-    const v = req.db.prepare('SELECT comprovante_id FROM comprovante_vinculos WHERE id = ?').get(req.params.vid);
+    const v = req.db.prepare('SELECT comprovante_id, tipo_destino, destino_id FROM comprovante_vinculos WHERE id = ?').get(req.params.vid);
     if (!v) return res.status(404).json({ error: 'Vínculo não encontrado' });
     req.db.prepare('DELETE FROM comprovante_vinculos WHERE id = ?').run(req.params.vid);
     recomputarStatus(req.db, v.comprovante_id);
+    // Fase C: se era NF, recalcula status derivado
+    if (v.tipo_destino === 'NF') {
+      try { recalcularNF(req.db, v.destino_id); } catch (_) {}
+    }
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -338,7 +349,12 @@ router.delete('/:id', (req, res) => {
   try {
     const cp = req.db.prepare('SELECT arquivo_path FROM comprovantes_pagamento WHERE id = ?').get(req.params.id);
     if (!cp) return res.status(404).json({ error: 'Não encontrado' });
+    // Captura NFs vinculadas antes do CASCADE, para recalcular depois
+    const nfDest = req.db.prepare(`SELECT DISTINCT destino_id FROM comprovante_vinculos WHERE comprovante_id = ? AND tipo_destino = 'NF'`).all(req.params.id);
     req.db.prepare('DELETE FROM comprovantes_pagamento WHERE id = ?').run(req.params.id);
+    for (const r of nfDest) {
+      try { recalcularNF(req.db, r.destino_id); } catch (_) {}
+    }
     if (cp.arquivo_path) {
       const abs = path.join(__dirname, '..', '..', cp.arquivo_path);
       try { if (fs.existsSync(abs)) fs.unlinkSync(abs); } catch {}

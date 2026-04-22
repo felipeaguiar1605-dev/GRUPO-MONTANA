@@ -31,14 +31,35 @@ function buscarDRE(db, dateFrom, dateTo) {
   `).get(p);
 
   // 2. Retenções nas mesmas NFs (já filtradas pelo mesmo período)
-  const ret = db.prepare(`
-    SELECT COALESCE(SUM(inss),0) inss, COALESCE(SUM(ir),0) irrf,
-           COALESCE(SUM(iss),0) iss,  COALESCE(SUM(csll),0) csll,
-           COALESCE(SUM(pis),0) pis,  COALESCE(SUM(cofins),0) cofins,
-           COALESCE(SUM(retencao),0) total_ret
-    FROM notas_fiscais
-    WHERE data_emissao>=@from AND data_emissao<=@to
-  `).get(p);
+  //    total_ret usa retencao_efetiva (apurada via comprovantes ENTRADA) quando
+  //    disponível; fallback na retencao declarada da NFS-e. As linhas detalhadas
+  //    (inss/ir/iss/csll/pis/cofins) permanecem vindo da NF — são tributos
+  //    discriminados que só a NF conhece.
+  let ret;
+  try {
+    ret = db.prepare(`
+      SELECT COALESCE(SUM(inss),0) inss, COALESCE(SUM(ir),0) irrf,
+             COALESCE(SUM(iss),0) iss,  COALESCE(SUM(csll),0) csll,
+             COALESCE(SUM(pis),0) pis,  COALESCE(SUM(cofins),0) cofins,
+             COALESCE(SUM(COALESCE(retencao_efetiva, retencao)),0) total_ret,
+             COALESCE(SUM(CASE WHEN retencao_efetiva IS NOT NULL THEN retencao_efetiva ELSE 0 END),0) ret_efetiva,
+             COALESCE(SUM(CASE WHEN retencao_efetiva IS NOT NULL THEN 1 ELSE 0 END),0) qtd_com_efetiva
+      FROM notas_fiscais
+      WHERE data_emissao>=@from AND data_emissao<=@to
+    `).get(p);
+  } catch (_) {
+    // Fallback se migração ainda não rodou
+    ret = db.prepare(`
+      SELECT COALESCE(SUM(inss),0) inss, COALESCE(SUM(ir),0) irrf,
+             COALESCE(SUM(iss),0) iss,  COALESCE(SUM(csll),0) csll,
+             COALESCE(SUM(pis),0) pis,  COALESCE(SUM(cofins),0) cofins,
+             COALESCE(SUM(retencao),0) total_ret
+      FROM notas_fiscais
+      WHERE data_emissao>=@from AND data_emissao<=@to
+    `).get(p);
+    ret.ret_efetiva = 0;
+    ret.qtd_com_efetiva = 0;
+  }
 
   // 3. Despesas por categoria no período (UPPER para normalizar nomes)
   const desps = db.prepare(`
@@ -117,7 +138,13 @@ function buscarDRE(db, dateFrom, dateTo) {
       deducoes: {
         inss: r(ret.inss), irrf: r(ret.irrf), iss: r(ret.iss),
         csll: r(ret.csll), pis: r(ret.pis), cofins: r(ret.cofins),
-        total: r(totalRet)
+        total: r(totalRet),
+        // Fase C: transparência sobre origem do total
+        //   ret_efetiva → apurada via comprovantes (triplo-match)
+        //   qtd_com_efetiva → NFs que já têm retenção apurada
+        //   total usa COALESCE(retencao_efetiva, retencao)
+        retencao_efetiva: r(ret.ret_efetiva || 0),
+        qtd_nfs_com_efetiva: ret.qtd_com_efetiva || 0,
       },
       receita_liquida:         r(recLiq),
       custos: { folha: r(despFolha), fgts: r(despFGTS), inss: r(despINSS), materiais: r(despMateriais), epi: r(despEPI), servicos: r(despServico), total: r(custosCSP) },

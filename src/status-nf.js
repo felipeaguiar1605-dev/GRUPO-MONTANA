@@ -115,6 +115,70 @@ const LABELS = {
   [STATUS.IGNORAR]:              'Ignorar',
 };
 
+/**
+ * Recalcula e persiste o status_conciliacao + retencao_efetiva de uma NF
+ * com base nos vínculos reais (extrato_id + comprovante_vinculos ENTRADA).
+ *
+ * Idempotente. Seguro pra rodar repetidamente em backfills e hooks.
+ *
+ *   temExtrato     → notas_fiscais.extrato_id != NULL
+ *   temComprovante → existe vínculo em comprovante_vinculos (tipo_destino='NF')
+ *                    com direcao='ENTRADA' (tomador pagou Montana)
+ *
+ * retencao_efetiva = valor_bruto - soma(comprovantes ENTRADA vinculados à NF)
+ *   → só persiste quando triplo-match (CONCILIADO) e recebido > 0
+ *   → caso contrário fica NULL e DRE cai no fallback `retencao` declarada
+ */
+function recalcularNF(db, nfId) {
+  const nf = db.prepare(
+    'SELECT id, extrato_id, valor_bruto, status_conciliacao FROM notas_fiscais WHERE id = ?'
+  ).get(nfId);
+  if (!nf) return null;
+
+  const temExtrato = nf.extrato_id != null;
+  let recebido = 0;
+  try {
+    const row = db.prepare(`
+      SELECT COALESCE(SUM(cv.valor_vinculado), 0) AS recebido
+      FROM comprovante_vinculos cv
+      JOIN comprovantes_pagamento c ON c.id = cv.comprovante_id
+      WHERE cv.tipo_destino = 'NF' AND cv.destino_id = ?
+        AND c.direcao = 'ENTRADA'
+    `).get(String(nfId));
+    recebido = Number(row?.recebido || 0);
+  } catch (_) { /* tabelas podem não existir em DB muito antigo */ }
+  const temComprovante = recebido > 0;
+
+  const novoStatus = derivarStatus({
+    temExtratoVinculado: temExtrato,
+    temComprovanteVinculado: temComprovante,
+    statusAtual: nf.status_conciliacao,
+  });
+
+  let retEfet = null;
+  if (novoStatus === STATUS.CONCILIADO && recebido > 0) {
+    retEfet = +Math.max(0, Number(nf.valor_bruto || 0) - recebido).toFixed(2);
+  }
+
+  try {
+    db.prepare('UPDATE notas_fiscais SET status_conciliacao = ?, retencao_efetiva = ? WHERE id = ?')
+      .run(novoStatus, retEfet, nfId);
+  } catch (_) {
+    // Coluna retencao_efetiva ainda não migrada — grava só status
+    db.prepare('UPDATE notas_fiscais SET status_conciliacao = ? WHERE id = ?').run(novoStatus, nfId);
+  }
+
+  return {
+    nfId: nf.id,
+    status: novoStatus,
+    status_anterior: nf.status_conciliacao,
+    retencao_efetiva: retEfet,
+    recebido,
+    temExtrato,
+    temComprovante,
+  };
+}
+
 module.exports = {
   STATUS,
   ABERTOS,
@@ -123,4 +187,5 @@ module.exports = {
   ORDEM_EXIBICAO,
   LABELS,
   derivarStatus,
+  recalcularNF,
 };

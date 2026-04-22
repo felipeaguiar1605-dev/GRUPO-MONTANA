@@ -659,6 +659,11 @@ const MIGRATIONS = [
   "ALTER TABLE notas_fiscais ADD COLUMN data_pagamento TEXT DEFAULT ''",
   "ALTER TABLE notas_fiscais ADD COLUMN extrato_id INTEGER DEFAULT NULL",
   "CREATE INDEX IF NOT EXISTS idx_nfs_extrato ON notas_fiscais(extrato_id)",
+  // Fase C: retenção efetiva apurada via comprovantes (triplo-match)
+  //   = valor_bruto - soma(comprovantes ENTRADA)
+  //   NULL quando não conciliado → DRE cai no fallback COALESCE(retencao_efetiva, retencao)
+  "ALTER TABLE notas_fiscais ADD COLUMN retencao_efetiva REAL DEFAULT NULL",
+  "CREATE INDEX IF NOT EXISTS idx_nfs_retencao_efetiva ON notas_fiscais(retencao_efetiva)",
   // Sprint 4: Pagamentos de portais de transparência (Palmas, TCE/TO, etc.)
   `CREATE TABLE IF NOT EXISTS pagamentos_portal (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

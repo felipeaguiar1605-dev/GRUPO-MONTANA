@@ -20,6 +20,7 @@ const router = express.Router();
 const { spawn } = require('child_process');
 const path = require('path');
 const { getDb } = require('../db');
+const { recalcularNF } = require('../status-nf');
 
 // Helper que resolve empresa a partir do header X-Company
 function getEmpresa(req, res) {
@@ -195,12 +196,10 @@ router.post('/vincular', (req, res) => {
     const ext = e.db.prepare('SELECT id, data_iso, credito FROM extratos WHERE id = ?').get(extrato_id);
     if (!ext) return res.status(404).json({ error: 'Extrato não encontrado' });
 
+    // Atualiza apenas extrato_id + data_pagamento; recalcularNF deriva o status
+    // (CONCILIADO só quando comprovante anexado, senão PAGO_SEM_COMPROVANTE)
     const updNf = e.db.prepare(`
-      UPDATE notas_fiscais SET
-        status_conciliacao='CONCILIADO',
-        data_pagamento=?,
-        extrato_id=?
-      WHERE id = ?
+      UPDATE notas_fiscais SET data_pagamento=?, extrato_id=? WHERE id = ?
     `);
     const updExt = e.db.prepare(`
       UPDATE extratos SET
@@ -210,13 +209,17 @@ router.post('/vincular', (req, res) => {
       WHERE id = ?
     `);
 
+    const statusResults = [];
     const trx = e.db.transaction(() => {
-      for (const nfId of nf_ids) updNf.run(ext.data_iso, ext.id, nfId);
+      for (const nfId of nf_ids) {
+        updNf.run(ext.data_iso, ext.id, nfId);
+        statusResults.push(recalcularNF(e.db, nfId));
+      }
       const tag = `manual NFs:${nf_ids.join(',')}`;
       updExt.run(tag, tag, ext.id);
     });
     trx();
-    res.json({ ok: true, vinculadas: nf_ids.length });
+    res.json({ ok: true, vinculadas: nf_ids.length, status: statusResults });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -228,12 +231,15 @@ router.post('/desvincular', (req, res) => {
   const { extrato_id } = req.body || {};
   if (!extrato_id) return res.status(400).json({ error: 'extrato_id obrigatório' });
   try {
+    // Captura ids das NFs antes de zerar o extrato_id
+    const nfRows = e.db.prepare('SELECT id FROM notas_fiscais WHERE extrato_id = ?').all(extrato_id);
     const trx = e.db.transaction(() => {
-      e.db.prepare(`UPDATE notas_fiscais SET status_conciliacao='PENDENTE', data_pagamento='', extrato_id=NULL WHERE extrato_id = ?`).run(extrato_id);
+      e.db.prepare(`UPDATE notas_fiscais SET data_pagamento='', extrato_id=NULL WHERE extrato_id = ?`).run(extrato_id);
       e.db.prepare(`UPDATE extratos SET status_conciliacao='PENDENTE', obs='' WHERE id = ?`).run(extrato_id);
+      for (const { id } of nfRows) recalcularNF(e.db, id);
     });
     trx();
-    res.json({ ok: true });
+    res.json({ ok: true, nfs_recalculadas: nfRows.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
