@@ -111,6 +111,9 @@ app.use('/api/fluxo-caixa', require('./routes/fluxo-caixa-projetado'));
 // ─── Comprovantes de Pagamento (upload + vinculação multi-empresa) ─
 app.use('/api/comprovantes', require('./routes/comprovantes'));
 
+// ─── Ciclo Completo (funil boletim→NF→pagamento→comprovante→conciliação) ─
+app.use('/api/ciclo',        require('./routes/ciclo'));
+
 // ─── Módulo Assistente IA (Claude) ──────────────────────────────
 app.use('/api/ia',           require('./routes/ia'));
 

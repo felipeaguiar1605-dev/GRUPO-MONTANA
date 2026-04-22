@@ -577,6 +577,52 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_pagador_cnpj ON pagador_alias(cnpj);
   CREATE INDEX IF NOT EXISTS idx_pagador_raiz ON pagador_alias(cnpj_raiz);
   CREATE INDEX IF NOT EXISTS idx_pagador_ativo ON pagador_alias(ativo);
+
+  -- ═══════════════════════════════════════════════════════════════
+  --  MÓDULO COMPROVANTES DE PAGAMENTO (OB / TED / PIX / Boleto)
+  --  Anexos + vínculos totais/parciais com NF, Despesa, Contrato, Extrato
+  --  Consolidado do scripts/_migrate_comprovantes.js em 2026-04-22
+  -- ═══════════════════════════════════════════════════════════════
+  CREATE TABLE IF NOT EXISTS comprovantes_pagamento (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo TEXT NOT NULL,                   -- 'OB','TED','DOC','PIX','BOLETO','DEBITO','CHEQUE','OUTRO'
+    direcao TEXT NOT NULL DEFAULT 'SAIDA',-- 'ENTRADA' (recebimento de tomador) | 'SAIDA' (pagamento a fornecedor)
+    data_pagamento TEXT NOT NULL,         -- ISO 'YYYY-MM-DD'
+    valor REAL NOT NULL,
+    valor_vinculado REAL DEFAULT 0,       -- soma dos vínculos (saldo livre = valor - valor_vinculado)
+    banco_pagador TEXT,
+    conta_pagador TEXT,
+    cnpj_pagador TEXT,                    -- nossa empresa — validado contra sessão
+    cnpj_destinatario TEXT,
+    nome_destinatario TEXT,
+    numero_documento TEXT,                -- OB/TED/ID PIX
+    arquivo_path TEXT,
+    arquivo_hash TEXT,                    -- SHA256 dedup
+    arquivo_mimetype TEXT,
+    arquivo_tamanho INTEGER,
+    observacao TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDENTE', -- 'PENDENTE' | 'PARCIAL' | 'TOTAL'
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_comp_data ON comprovantes_pagamento(data_pagamento);
+  CREATE INDEX IF NOT EXISTS idx_comp_cnpj_dest ON comprovantes_pagamento(cnpj_destinatario);
+  CREATE INDEX IF NOT EXISTS idx_comp_hash ON comprovantes_pagamento(arquivo_hash);
+  CREATE INDEX IF NOT EXISTS idx_comp_status ON comprovantes_pagamento(status);
+
+  CREATE TABLE IF NOT EXISTS comprovante_vinculos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    comprovante_id INTEGER NOT NULL,
+    tipo_destino TEXT NOT NULL,           -- 'NF' | 'DESPESA' | 'CONTRATO_CREDITO' | 'EXTRATO'
+    destino_id TEXT NOT NULL,             -- texto p/ suportar numContrato composto
+    destino_label TEXT,
+    valor_vinculado REAL NOT NULL,
+    observacao TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (comprovante_id) REFERENCES comprovantes_pagamento(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_compv_cpm ON comprovante_vinculos(comprovante_id);
+  CREATE INDEX IF NOT EXISTS idx_compv_dest ON comprovante_vinculos(tipo_destino, destino_id);
 `;
 
 const MIGRATIONS = [

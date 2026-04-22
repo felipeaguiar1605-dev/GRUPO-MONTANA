@@ -120,6 +120,7 @@
     <div class="nav-group-items">
       <div class="tab active" data-tab="dash" onclick="navGo('dash',this)">📊 Dashboard</div>
       <div class="tab" data-tab="consolidado" onclick="navGo('consolidado',this)">🏛️ Consolidado</div>
+      <div class="tab" data-tab="ciclo" onclick="navGo('ciclo',this);setTimeout(()=>cicloInit&&cicloInit(),50)">🔄 Ciclo Completo</div>
     </div>
   </div>
 
@@ -246,6 +247,18 @@
 
 
 <!-- Dashboard -->
+<div id="pg-ciclo" class="pg">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <h2 style="margin:0;font-size:18px;color:#1e293b">🔄 Ciclo Completo — Funil de Receita e Conciliação</h2>
+    <div style="display:flex;gap:8px;align-items:center">
+      <label style="font-size:12px;color:#64748b">Competência:</label>
+      <input type="month" id="ciclo-competencia" onchange="cicloCarregar()" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px">
+      <button onclick="cicloCarregar()" style="padding:6px 14px;background:#3b82f6;color:white;border:0;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">Atualizar</button>
+    </div>
+  </div>
+  <div id="ciclo-body"><div class="loading" style="padding:30px;text-align:center;color:#94a3b8">Selecione um mês para carregar o funil.</div></div>
+</div>
+
 <div id="pg-dash" class="pg active">
   <!-- Alerta: créditos sem NF correspondente -->
   <div id="dash-alerta-sem-nf" style="display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 16px;margin-bottom:10px;display:flex;align-items:center;gap:10px;cursor:pointer" onclick="navGo('ext',document.querySelector('[data-tab=ext]'))">
@@ -3520,5 +3533,6 @@
 <script src="/app-concilia-robusta.js"></script>
 <script src="/app-pagamentos-contrato.js"></script>
 <script src="/app-comprovantes.js"></script>
+<script src="/app-ciclo.js"></script>
 </body>
 </html>

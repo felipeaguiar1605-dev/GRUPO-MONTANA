@@ -1,14 +1,20 @@
 /**
  * Montana ERP — Alertas Operacionais (lógica de negócio proativa)
  *
- * 3 lógicas deterministas (sem LLM) que fecham ciclos de feedback:
+ * 4 lógicas deterministas (sem LLM) que fecham ciclos de feedback:
  *   1. Faturamento esperado × realizado por contrato
  *   2. Cobrança: NFs emitidas com atraso acima do SLA do tomador
  *   3. Folha RH sem contrapartida no extrato bancário
+ *   4. Certificados A1 (.pfx) vencendo em ≤30 dias
  *
  * Cada função recebe (db, company, opcoes) e retorna { itens: [...], total: N }.
  * Consumo: cron 08h em routes/notificacoes.js e endpoints em routes/alertas-operacionais.js
  */
+
+const fs          = require('fs');
+const path        = require('path');
+const crypto      = require('crypto');
+const { execSync } = require('child_process');
 
 const TOLERANCIA_FATURAMENTO = 0.10;   // 10% → se realizado < esperado*(1-tol), alerta
 const TOLERANCIA_FOLHA       = 0.05;   // 5%  → débito no extrato ≈ total_liquido da folha
@@ -17,6 +23,7 @@ const SLA_MIN_AMOSTRAS       = 3;      // mínimo de NFs pagas para calcular SLA
 const SLA_PADRAO_DIAS        = 30;     // fallback quando não há histórico suficiente
 const COBRANCA_JANELA_DIAS   = 180;    // só alerta NFs emitidas nos últimos N dias (NFs antigas são ruído)
 const COBRANCA_LIMITE_ITENS  = 50;     // top N NFs mais valiosas no relatório detalhado
+const CERT_ALERTA_DIAS       = 30;     // alerta se cert A1 vence em ≤N dias
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -331,7 +338,97 @@ function folhaSemContrapartida(db, company, opcoes = {}) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Agregador — chama as 3 lógicas e retorna tudo num relatório
+// #4 — Certificados A1 (.pfx) vencendo
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Verifica o certificado A1 da empresa (certificados/<key>.pfx).
+ * Se vence em ≤30 dias (ou já venceu), gera alerta com severidade:
+ *   vencido     → critica
+ *   ≤7 dias     → critica
+ *   ≤14 dias    → alta
+ *   ≤30 dias    → media
+ * A passphrase vem do .env (WEBISS_CERT_SENHA_<EMPRESA>).
+ * Se não conseguir abrir o .pfx (passphrase errada, arquivo faltando),
+ * gera alerta "configuração" — não sabe a data de validade.
+ */
+function certificadosA1Vencendo(db, company, opcoes = {}) {
+  const diasLimite = opcoes.dias_limite ?? CERT_ALERTA_DIAS;
+  const key        = company?.key;
+  if (!key) return { itens: [], total: 0 };
+
+  // Localiza .pfx — 2 caminhos possíveis (company.certificadoPfx ou certificados/<key>.pfx)
+  const pfxPath = company.certificadoPfx ||
+                  path.join(__dirname, '..', 'certificados', `${key}.pfx`);
+
+  const itens = [];
+  if (!fs.existsSync(pfxPath)) {
+    itens.push({
+      empresa: company.nome || key,
+      arquivo: pfxPath,
+      status:  'arquivo_ausente',
+      mensagem: `Certificado A1 não encontrado: ${pfxPath}`,
+      severidade: 'media',
+    });
+    return { itens, total: itens.length };
+  }
+
+  const passphrase = process.env[`WEBISS_CERT_SENHA_${key.toUpperCase()}`] || '';
+  const tmpPem = path.join(require('os').tmpdir(), `cert_alerta_${Date.now()}_${Math.random().toString(36).slice(2)}.pem`);
+  let cert = null, lastErr = '';
+  for (const flag of ['', ' -legacy']) {
+    try {
+      execSync(
+        `openssl pkcs12 -in "${pfxPath}" -nokeys -clcerts -passin pass:${JSON.stringify(passphrase)}${flag} -out "${tmpPem}"`,
+        { stdio: 'pipe' }
+      );
+      const pem = fs.readFileSync(tmpPem, 'utf8');
+      if (pem.includes('-----BEGIN CERTIFICATE-----')) {
+        cert = new crypto.X509Certificate(pem);
+        break;
+      }
+    } catch (e) {
+      lastErr = (e.stderr?.toString() || e.message).split('\n')[0].substring(0, 80);
+    }
+  }
+  try { fs.unlinkSync(tmpPem); } catch {}
+
+  if (!cert) {
+    itens.push({
+      empresa: company.nome || key,
+      arquivo: pfxPath,
+      status: 'senha_invalida',
+      mensagem: `Não foi possível abrir ${path.basename(pfxPath)} — ${lastErr || 'passphrase inválida'}. Ajustar WEBISS_CERT_SENHA_${key.toUpperCase()} no .env.`,
+      severidade: 'alta',
+    });
+    return { itens, total: itens.length };
+  }
+
+  const validTo = new Date(cert.validTo);
+  const dias = Math.floor((validTo - Date.now()) / 86400000);
+  if (dias > diasLimite) return { itens, total: 0 };
+
+  let severidade = 'media';
+  if (dias < 0)       severidade = 'critica';
+  else if (dias <= 7) severidade = 'critica';
+  else if (dias <= 14) severidade = 'alta';
+
+  itens.push({
+    empresa: company.nome || key,
+    arquivo: path.basename(pfxPath),
+    subject: (cert.subject || '').replace(/\n/g, ' / ').substring(0, 120),
+    validade: validTo.toISOString().substring(0, 10),
+    dias_restantes: dias,
+    status: dias < 0 ? 'vencido' : 'vencendo',
+    mensagem: dias < 0
+      ? `Certificado A1 VENCIDO há ${Math.abs(dias)} dia(s) — renovação URGENTE`
+      : `Certificado A1 vence em ${dias} dia(s) (${validTo.toISOString().substring(0, 10)})`,
+    severidade,
+  });
+  return { itens, total: itens.length };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Agregador — chama as 4 lógicas e retorna tudo num relatório
 // ─────────────────────────────────────────────────────────────────────────────
 function rodarTodos(db, company, opcoes = {}) {
   const resultado = {
@@ -340,6 +437,7 @@ function rodarTodos(db, company, opcoes = {}) {
     faturamento: { itens: [], total: 0 },
     cobrancas:   { itens: [], total: 0 },
     folha:       { itens: [], total: 0 },
+    certificados:{ itens: [], total: 0 },
     total_geral: 0,
   };
 
@@ -352,7 +450,10 @@ function rodarTodos(db, company, opcoes = {}) {
   try { resultado.folha = folhaSemContrapartida(db, company, opcoes.folha || {}); }
   catch (e) { resultado.folha.erro = e.message; }
 
-  resultado.total_geral = resultado.faturamento.total + resultado.cobrancas.total + resultado.folha.total;
+  try { resultado.certificados = certificadosA1Vencendo(db, company, opcoes.certificados || {}); }
+  catch (e) { resultado.certificados.erro = e.message; }
+
+  resultado.total_geral = resultado.faturamento.total + resultado.cobrancas.total + resultado.folha.total + resultado.certificados.total;
   return resultado;
 }
 
@@ -426,6 +527,24 @@ function formatarHTML(rel) {
     html += `</table>`;
   }
 
+  // #4 Certificados A1
+  const certs = rel.certificados || { itens: [], total: 0 };
+  html += `<h3>4) Certificados A1 vencendo (${certs.total})</h3>`;
+  if (certs.total === 0) {
+    html += `<p>✅ Certificado A1 com mais de ${CERT_ALERTA_DIAS} dias de validade.</p>`;
+  } else {
+    html += `<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-size:13px">`;
+    html += `<tr style="background:#f1f3f5"><th>Empresa</th><th>Arquivo</th><th>Validade</th><th>Dias</th><th>Status</th><th>Mensagem</th></tr>`;
+    for (const i of certs.itens) {
+      html += `<tr style="background:${cor[i.severidade]}10">`;
+      html += `<td>${i.empresa || ''}</td><td>${i.arquivo || ''}</td>`;
+      html += `<td>${i.validade || '—'}</td>`;
+      html += `<td style="color:${cor[i.severidade]};font-weight:bold;text-align:center">${i.dias_restantes ?? '—'}</td>`;
+      html += `<td>${i.status || ''}</td><td>${i.mensagem || ''}</td></tr>`;
+    }
+    html += `</table>`;
+  }
+
   return html;
 }
 
@@ -433,6 +552,7 @@ module.exports = {
   faturamentoNaoEmitido,
   cobrancasAtrasadas,
   folhaSemContrapartida,
+  certificadosA1Vencendo,
   rodarTodos,
   formatarHTML,
 };
