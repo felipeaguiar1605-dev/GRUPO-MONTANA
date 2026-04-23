@@ -267,11 +267,31 @@ async function gerarRelatorio(empresa) {
   const nfsPagas   = [];
   const nfsUsadas  = new Set();
 
-  // Pass 0: NFs cuja data_pagamento JÁ cai no mês de apuração — match direto sem heurística
+  // Pass 0a: NFs com extrato_id linkado a um crédito do mês — fonte mais confiável (regime de caixa puro)
+  const extIdsMes = new Set(extReceita.map(e => e.id));
+  const nfsPorExtrato = db.prepare(`
+    SELECT nf.id, nf.numero, nf.data_emissao, nf.data_pagamento, nf.tomador, nf.contrato_ref,
+           nf.status_conciliacao, nf.valor_bruto, nf.valor_liquido, nf.retencao,
+           nf.pis, nf.cofins, nf.inss, nf.ir, nf.iss, nf.csll,
+           nf.extrato_id, e.data_iso as data_extrato
+    FROM notas_fiscais nf
+    JOIN extratos e ON e.id = nf.extrato_id
+    WHERE nf.extrato_id IN (SELECT id FROM extratos WHERE data_iso BETWEEN ? AND ? AND credito > 0)
+      AND nf.status_conciliacao NOT IN ('CANCELADA','ASSESSORIA')
+  `).all(dataInicio, dataFim);
+  for (const n of nfsPorExtrato) {
+    nfsUsadas.add(n.id);
+    nfsPagas.push({...n, data_pagamento: n.data_extrato, match_tipo: 'PAG_EXTRATO'});
+  }
+
+  // Pass 0b: NFs CONCILIADO cuja data_pagamento cai no mês (sem extrato_id — conciliações legadas)
+  // Exclui PAGO_SEM_COMPROVANTE (CGE confirma mas sem entrada bancária real)
   for (const n of todasNFs) {
     if (nfsUsadas.has(n.id)) continue;
     if (!n.data_pagamento) continue;
     if (n.data_pagamento < dataInicio || n.data_pagamento > dataFim) continue;
+    if (n.status_conciliacao === 'PAGO_SEM_COMPROVANTE') continue; // ← excluir: sem extrato bancário real
+    if (n.status_conciliacao !== 'CONCILIADO') continue;           // ← só confirmados
     nfsUsadas.add(n.id);
     nfsPagas.push({...n, data_pagamento: n.data_pagamento, match_tipo: 'PAG'});
   }
