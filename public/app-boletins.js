@@ -845,6 +845,379 @@ async function _nfseConfirmarEmissao(boletim_id) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// PAINEL DE FATURAMENTO MENSAL
+// ═══════════════════════════════════════════════════════════════
+
+let _painelMes = (() => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+})();
+
+function abrirPainelFaturamento() {
+  _bolView = 'painel';
+  renderPainelFaturamento();
+}
+
+async function renderPainelFaturamento() {
+  const el = document.getElementById('bol-content');
+  el.innerHTML = '<div class="loading">Carregando painel...</div>';
+
+  const token = localStorage.getItem('montana_jwt') || '';
+  const headers = { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token };
+
+  let data;
+  try {
+    const r = await fetch(`/api/boletins/painel-faturamento?mes=${_painelMes}`, { headers });
+    data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Erro ao carregar painel');
+  } catch (err) {
+    el.innerHTML = `<div style="color:#dc2626;padding:12px">❌ ${err.message}</div>`;
+    return;
+  }
+
+  const { contratos, stats, mes } = data;
+  const [ano, mesNum] = mes.split('-');
+  const MESES_NOMES = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const mesNome = MESES_NOMES[parseInt(mesNum)] || mes;
+
+  // Meses para selector (6 meses atrás até 3 à frente)
+  const now = new Date();
+  const mesOpts = [];
+  for (let i = -6; i <= 3; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    const v = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const n = `${MESES_NOMES[d.getMonth()+1]}/${d.getFullYear()}`;
+    mesOpts.push(`<option value="${v}" ${v===_painelMes?'selected':''}>${n}</option>`);
+  }
+
+  const brl = v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+  // Contagem por status para o badge batch-emitir
+  const qtdAprovados = contratos.filter(c => c.boletim?.status === 'aprovado' && c.boletim?.nfse_status !== 'EMITIDA').length;
+
+  el.innerHTML = `
+  <div style="margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <button onclick="_bolView='lista';renderBolLista()" style="background:#f1f5f9;border:none;border-radius:7px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;color:#475569">← Voltar</button>
+    <h3 style="margin:0;font-size:16px;font-weight:800;color:#1e293b">📊 Painel de Faturamento</h3>
+    <select onchange="_painelMes=this.value;renderPainelFaturamento()"
+      style="padding:7px 12px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;font-weight:600;background:#fff;cursor:pointer;color:#1e293b">
+      ${mesOpts.join('')}
+    </select>
+    <span style="font-size:11px;color:#64748b;margin-left:2px">Competência: <strong>${mesNome}/${ano}</strong></span>
+  </div>
+
+  <!-- KPIs -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:18px">
+    ${[
+      ['Contratos', stats.total, '#1e293b', '🏢'],
+      ['Sem Boletim', stats.sem_boletim, stats.sem_boletim>0?'#dc2626':'#16a34a', '⚠'],
+      ['Rascunho', stats.rascunho, '#d97706', '📝'],
+      ['Aprovado', stats.aprovado, '#2563eb', '✅'],
+      ['Emitido', stats.emitido, '#059669', '✔'],
+      ['Total R$', brl(stats.valor_total), '#7c3aed', '💰'],
+    ].map(([lbl, val, cor, ico]) => `
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;text-align:center">
+        <div style="font-size:18px">${ico}</div>
+        <div style="font-size:20px;font-weight:800;color:${cor}">${val}</div>
+        <div style="font-size:10px;color:#64748b;font-weight:600">${lbl}</div>
+      </div>`).join('')}
+  </div>
+
+  <!-- Ações em lote -->
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+    <button onclick="painelGerarTodos('${mes}')"
+      style="padding:8px 16px;background:#0f172a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">
+      ⚡ Gerar Todos (${stats.sem_boletim} sem boletim)
+    </button>
+    <button onclick="painelAprovarTodos('${mes}')"
+      style="padding:8px 16px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">
+      ✅ Aprovar Todos Rascunhos (${stats.rascunho})
+    </button>
+    <button onclick="painelEmitirLote('${mes}')"
+      style="padding:8px 16px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer${qtdAprovados===0?';opacity:.5':''}"
+      ${qtdAprovados===0?'disabled':''}>
+      🚀 Emitir NFS-e Lote (${qtdAprovados} aprovados)
+    </button>
+  </div>
+
+  <!-- Tabela de contratos -->
+  <div style="overflow-x:auto">
+  <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead>
+      <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">
+        <th style="padding:10px 12px;text-align:left;font-weight:700;color:#475569">Contrato</th>
+        <th style="padding:10px 8px;text-align:left;font-weight:700;color:#475569">Contratante</th>
+        <th style="padding:10px 8px;text-align:right;font-weight:700;color:#475569">Valor Base</th>
+        <th style="padding:10px 8px;text-align:right;font-weight:700;color:#475569">Valor Boletim</th>
+        <th style="padding:10px 8px;text-align:center;font-weight:700;color:#475569">Status</th>
+        <th style="padding:10px 8px;text-align:center;font-weight:700;color:#475569">NFS-e</th>
+        <th style="padding:10px 8px;text-align:center;font-weight:700;color:#475569">Ações</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${contratos.map((c, i) => _renderLinhaContratoPainel(c, i, mes)).join('')}
+    </tbody>
+    <tfoot>
+      <tr style="background:#f1f5f9;font-weight:800;border-top:2px solid #cbd5e1">
+        <td colspan="3" style="padding:10px 12px;color:#1e293b">TOTAL</td>
+        <td style="padding:10px 8px;text-align:right;color:#7c3aed">${brl(stats.valor_total)}</td>
+        <td colspan="3"></td>
+      </tr>
+    </tfoot>
+  </table>
+  </div>`;
+}
+
+function _renderLinhaContratoPainel(c, idx, mes) {
+  const brl = v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const bg = idx % 2 === 0 ? '#fff' : '#f8fafc';
+  const bol = c.boletim;
+
+  let statusBadge, nfseBadge, acoes;
+
+  if (!bol) {
+    statusBadge = `<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700">SEM BOLETIM</span>`;
+    nfseBadge   = `<span style="color:#94a3b8;font-size:10px">—</span>`;
+    acoes = `<button onclick="painelGerarUm(${c.contrato_id},'${mes}')"
+      style="padding:4px 10px;background:#0f172a;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">Gerar</button>`;
+  } else {
+    const statusCor = {rascunho:'#fef3c7|#92400e', aprovado:'#dbeafe|#1d4ed8', emitido:'#d1fae5|#065f46'}[bol.status] || '#f1f5f9|#475569';
+    const [bg2, col2] = statusCor.split('|');
+    statusBadge = `<span style="background:${bg2};color:${col2};padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700">${bol.status.toUpperCase()}</span>`;
+
+    if (bol.nfse_status === 'EMITIDA') {
+      nfseBadge = `<span style="background:#d1fae5;color:#065f46;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700" title="NFS-e ${bol.nfse_numero}">✔ ${bol.nfse_numero}</span>`;
+    } else if (bol.nfse_status === 'ERRO') {
+      nfseBadge = `<span style="background:#fef2f2;color:#dc2626;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700" title="${bol.nfse_erro||''}">❌ ERRO</span>`;
+    } else if (bol.nfse_status === 'ENVIANDO') {
+      nfseBadge = `<span style="background:#eff6ff;color:#3b82f6;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700">⏳ ENVIANDO</span>`;
+    } else {
+      nfseBadge = `<span style="color:#94a3b8;font-size:10px">PENDENTE</span>`;
+    }
+
+    const btnAjustar = bol.nfse_status !== 'EMITIDA'
+      ? `<button onclick="painelAjustar(${bol.id},'${mes}')" title="Ajustar glosas/acréscimos"
+           style="padding:4px 8px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">✏️</button>`
+      : '';
+
+    const btnAprovar = (bol.status === 'rascunho' && bol.nfse_status !== 'EMITIDA')
+      ? `<button onclick="painelAprovar(${bol.id},'${mes}')"
+           style="padding:4px 9px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">✅ Aprovar</button>`
+      : '';
+
+    const btnEmitir = (bol.status === 'aprovado' && bol.nfse_status !== 'EMITIDA')
+      ? `<button onclick="emitirNFSe(${bol.id},'${mes}',${bol.valor_total})"
+           style="padding:4px 9px;background:#059669;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">🚀 Emitir NFS-e</button>`
+      : '';
+
+    const btnPacote = bol.nfse_status === 'EMITIDA'
+      ? `<button onclick="baixarPacoteFiscal(${bol.id})" title="Baixar pacote fiscal (ZIP)"
+           style="padding:4px 8px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">📦 ZIP</button>`
+      : '';
+
+    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${btnAjustar}${btnAprovar}${btnEmitir}${btnPacote}</div>`;
+  }
+
+  const valorBase   = brl(c.valor_mensal_bruto);
+  const valorBoletim = bol ? brl(bol.valor_total) : `<span style="color:#94a3b8">—</span>`;
+  const glosaTag    = (bol?.glosas > 0) ? `<span style="color:#dc2626;font-size:9px"> (-${brl(bol.glosas)})</span>` : '';
+
+  return `
+  <tr style="background:${bg};border-bottom:1px solid #f1f5f9">
+    <td style="padding:10px 12px;font-weight:700;color:#1e293b;max-width:180px">${c.nome}</td>
+    <td style="padding:10px 8px;color:#475569;font-size:11px;max-width:160px">${c.contratante}</td>
+    <td style="padding:10px 8px;text-align:right;color:#64748b;font-weight:600">${valorBase}</td>
+    <td style="padding:10px 8px;text-align:right;color:#1e293b;font-weight:700">${valorBoletim}${glosaTag}</td>
+    <td style="padding:10px 8px;text-align:center">${statusBadge}</td>
+    <td style="padding:10px 8px;text-align:center">${nfseBadge}</td>
+    <td style="padding:10px 8px;text-align:center">${acoes}</td>
+  </tr>`;
+}
+
+// ─── Ações do Painel ──────────────────────────────────────────
+
+async function painelGerarTodos(mes) {
+  const token = localStorage.getItem('montana_jwt') || '';
+  const btn = event?.target;
+  if (btn) { btn.disabled = true; btn.textContent = 'Gerando...'; }
+  try {
+    const r = await fetch('/api/boletins/gerar-mes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ mes }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    toast(`✅ ${d.criados} boletim(ns) criado(s) | ${d.existentes} já existiam`, 'success');
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; }
+  }
+}
+
+async function painelGerarUm(contrato_id, mes) {
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch('/api/boletins/gerar-boletim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ contrato_id, competencia: mes }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    toast(d.novo ? '✅ Boletim criado' : '⚠ Boletim já existia', d.novo ? 'success' : 'info');
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+  }
+}
+
+async function painelAprovar(boletim_id, mes) {
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch(`/api/boletins/${boletim_id}/aprovar`, {
+      method: 'POST',
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    toast('✅ Boletim aprovado', 'success');
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+  }
+}
+
+async function painelAprovarTodos(mes) {
+  const token = localStorage.getItem('montana_jwt') || '';
+  const btn = event?.target;
+  if (btn) { btn.disabled = true; btn.textContent = 'Aprovando...'; }
+  try {
+    // Busca boletins rascunho do mês
+    const r = await fetch(`/api/boletins/historico-mes?mes=${mes}`, {
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+    });
+    const lista = await r.json();
+    const rascunhos = (Array.isArray(lista) ? lista : []).filter(b => b.status === 'rascunho' && b.nfse_status !== 'EMITIDA');
+    let aprovados = 0;
+    for (const b of rascunhos) {
+      const rr = await fetch(`/api/boletins/${b.id}/aprovar`, {
+        method: 'POST',
+        headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+      });
+      if (rr.ok) aprovados++;
+    }
+    toast(`✅ ${aprovados} boletim(ns) aprovado(s)`, 'success');
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; }
+  }
+}
+
+function painelAjustar(boletim_id, mes) {
+  const token = localStorage.getItem('montana_jwt') || '';
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+  overlay.id = 'modal-ajustar-boletim';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:28px;width:380px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.35)">
+      <h3 style="margin:0 0 16px;font-size:16px;font-weight:800;color:#1e293b">✏️ Ajustar Boletim #${boletim_id}</h3>
+      <div style="margin-bottom:12px">
+        <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Glosas (R$)</label>
+        <input id="ajuste-glosas" type="number" step="0.01" min="0" value="0"
+          style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box">
+      </div>
+      <div style="margin-bottom:12px">
+        <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Acréscimos (R$)</label>
+        <input id="ajuste-acrescimos" type="number" step="0.01" min="0" value="0"
+          style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box">
+      </div>
+      <div style="margin-bottom:16px">
+        <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Observação</label>
+        <textarea id="ajuste-obs" rows="2"
+          style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;resize:vertical;box-sizing:border-box"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button onclick="document.getElementById('modal-ajustar-boletim').remove()"
+          style="padding:8px 16px;background:#f1f5f9;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">Cancelar</button>
+        <button id="ajuste-btn-salvar" onclick="_painelSalvarAjuste(${boletim_id},'${mes}')"
+          style="padding:8px 16px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">Salvar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function _painelSalvarAjuste(boletim_id, mes) {
+  const token = localStorage.getItem('montana_jwt') || '';
+  const btn = document.getElementById('ajuste-btn-salvar');
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+  try {
+    const glosas      = parseFloat(document.getElementById('ajuste-glosas').value) || 0;
+    const acrescimos  = parseFloat(document.getElementById('ajuste-acrescimos').value) || 0;
+    const obs         = document.getElementById('ajuste-obs').value || '';
+    const r = await fetch(`/api/boletins/${boletim_id}/ajustar`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ glosas, acrescimos, obs }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    document.getElementById('modal-ajustar-boletim')?.remove();
+    toast('✅ Ajuste salvo', 'success');
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Salvar'; }
+  }
+}
+
+async function painelEmitirLote(mes) {
+  const qtd = parseInt(event?.target?.textContent?.match(/\d+/)?.[0] || '0');
+  if (qtd === 0) { toast('Nenhum boletim aprovado para emitir', 'info'); return; }
+  if (!confirm(`Emitir NFS-e para ${qtd} boletim(ns) aprovado(s) de ${mes}?\n\nEsta ação envia para o WebISS e não pode ser desfeita.`)) return;
+
+  const token = localStorage.getItem('montana_jwt') || '';
+  toast('⏳ Emitindo NFS-e em lote...', 'info');
+
+  try {
+    const r = await fetch(`/api/boletins/historico-mes?mes=${mes}`, {
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+    });
+    const lista = await r.json();
+    const aprovados = (Array.isArray(lista) ? lista : []).filter(b => b.status === 'aprovado' && b.nfse_status !== 'EMITIDA');
+
+    let emitidos = 0, erros = [];
+    for (const b of aprovados) {
+      const rr = await fetch(`/api/boletins/${b.id}/emitir-nfse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({}),
+      });
+      const dd = await rr.json();
+      if (dd.ok) {
+        emitidos++;
+        toast(`✅ NFS-e ${dd.numero_nfse} emitida (boletim #${b.id})`, 'success');
+      } else {
+        erros.push(`Boletim #${b.id}: ${dd.error || 'erro desconhecido'}`);
+      }
+      // Pausa entre emissões para não sobrecarregar WebISS
+      await new Promise(res => setTimeout(res, 1500));
+    }
+
+    renderPainelFaturamento();
+    if (erros.length) {
+      alert(`⚠ ${emitidos} NFS-e emitidas com sucesso.\n\nErros (${erros.length}):\n${erros.join('\n')}`);
+    } else {
+      toast(`✅ ${emitidos} NFS-e emitidas com sucesso!`, 'success');
+    }
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+  }
+}
+
 // ─── Download do pacote fiscal (ZIP) ───
 // Autentica via JWT + X-Company (rotas protegidas); blob é salvo com filename do Content-Disposition
 async function baixarPacoteFiscal(boletim_id) {

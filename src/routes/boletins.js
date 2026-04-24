@@ -51,6 +51,12 @@ router.use((req, res, next) => {
 
 // ─── HELPERS ──────────────────────────────────────────────────
 
+function formatCnpj(raw) {
+  const c = (raw || '').replace(/\D/g, '');
+  if (c.length !== 14) return raw || '';
+  return `${c.slice(0,2)}.${c.slice(2,5)}.${c.slice(5,8)}/${c.slice(8,12)}-${c.slice(12)}`;
+}
+
 function formatMoeda(v) {
   return 'R$ ' + Number(v).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 }
@@ -469,10 +475,62 @@ router.post('/:id/emitir-nfse', async (req, res) => {
 
     if (result.ok && result.nfse?.numero) {
       const nfseNum = result.nfse.numero;
+      const today   = new Date().toISOString().slice(0, 10);
+
       db.prepare(`UPDATE bol_boletins SET
         nfse_status='EMITIDA', nfse_numero=?, nfse_data_emissao=datetime('now'),
-        nfse_xml=?, nfse_erro=NULL, status='aprovado', updated_at=datetime('now')
+        nfse_xml=?, nfse_erro=NULL, status='emitido', updated_at=datetime('now')
         WHERE id=?`).run(nfseNum, JSON.stringify(result.nfse), bol.id);
+
+      // ── Auto-sync: cria NF em notas_fiscais se ainda não existe ──
+      try {
+        const jaExiste = db.prepare(`SELECT id FROM notas_fiscais WHERE numero=? OR webiss_numero_nfse=?`).get(nfseNum, nfseNum);
+        if (!jaExiste) {
+          // Retorna objeto NFS-e
+          const nfse = result.nfse;
+          const valorBruto   = nfse.valorServicos  || bol.valor_total || 0;
+          const valorLiquido = nfse.valorLiquido    || nfse.valorLiquidoNfse || (valorBruto - (nfse.valorIss || 0));
+          const competencia  = bol.competencia;   // "2026-04"
+          const tomador      = bol.orgao_contrato || bol.orgao || tomadorRazao;
+          const cnpjTomador  = tomadorCnpj ? formatCnpj(tomadorCnpj) : '';
+
+          // Garante colunas webiss_numero_nfse e discriminacao
+          try { db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN webiss_numero_nfse TEXT`).run(); } catch (_) {}
+          try { db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN discriminacao TEXT`).run(); } catch (_) {}
+
+          db.prepare(`INSERT OR IGNORE INTO notas_fiscais
+            (numero, competencia, cidade, tomador, cnpj_tomador,
+             valor_bruto, valor_liquido,
+             inss, ir, iss, csll, pis, cofins, retencao,
+             data_emissao, status_conciliacao,
+             webiss_numero_nfse, discriminacao)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+              nfseNum,
+              competencia,
+              'Palmas/TO',
+              tomador,
+              cnpjTomador,
+              +(valorBruto).toFixed(2),
+              +(valorLiquido).toFixed(2),
+              +(nfse.valorInss   || 0).toFixed(2),
+              +(nfse.valorIr     || 0).toFixed(2),
+              +(nfse.valorIss    || 0).toFixed(2),
+              +(nfse.valorCsll   || 0).toFixed(2),
+              +(nfse.valorPis    || 0).toFixed(2),
+              +(nfse.valorCofins || 0).toFixed(2),
+              +((nfse.valorInss||0)+(nfse.valorIr||0)+(nfse.valorIss||0)+(nfse.valorCsll||0)+(nfse.valorPis||0)+(nfse.valorCofins||0)).toFixed(2),
+              today,
+              'PENDENTE',
+              nfseNum,
+              bol.discriminacao || '',
+          );
+          console.log(`[boletins] Auto-sync NF ${nfseNum} → notas_fiscais`);
+        }
+      } catch (syncErr) {
+        console.error('[boletins] Aviso: falha no auto-sync NF:', syncErr.message);
+        // Não falha a resposta — NFS-e já foi emitida
+      }
+
       return res.json({
         ok: true,
         numero_nfse: nfseNum,
@@ -1042,5 +1100,176 @@ function gerarOficioEncaminhamentoBuffer(bol, nfseNum, nfs) {
     doc.font('Helvetica').fontSize(9).text(`CNPJ ${bol.empresa_cnpj || '-'}`, { width: 280, align: 'center' });
   });
 }
+
+// ─── PAINEL DE FATURAMENTO MENSAL ──────────────────────────────
+// GET /api/boletins/painel-faturamento?mes=YYYY-MM
+// Retorna todos os contratos ativos com status do boletim no mês
+router.get('/painel-faturamento', (req, res) => {
+  try {
+    const { mes } = req.query; // "2026-04"
+    if (!mes || !/^\d{4}-\d{2}$/.test(mes)) {
+      return res.status(400).json({ error: 'Parâmetro mes obrigatório (YYYY-MM)' });
+    }
+    const db = req.db;
+
+    const contratos = db.prepare(`
+      SELECT bc.*, c.valor_mensal_bruto, c.orgao as orgao_contrato
+      FROM bol_contratos bc
+      LEFT JOIN contratos c ON bc.contrato_ref = c.numContrato
+      WHERE bc.ativo = 1
+      ORDER BY bc.nome
+    `).all();
+
+    const resultado = contratos.map(bc => {
+      const boletim = db.prepare(`
+        SELECT * FROM bol_boletins
+        WHERE contrato_id = ? AND competencia = ?
+      `).get(bc.id, mes);
+
+      const [ano, mesNum] = mes.split('-');
+      const mesNome = MESES_NOME_COMPLETO[parseInt(mesNum)] || mes;
+
+      return {
+        contrato_id:       bc.id,
+        nome:              bc.nome,
+        contratante:       bc.contratante,
+        contrato_ref:      bc.contrato_ref,
+        valor_mensal_bruto: bc.valor_mensal_bruto || 0,
+        orgao:             bc.orgao || bc.orgao_contrato || bc.contratante,
+        insc_municipal:    bc.insc_municipal || '',
+        mes_nome:          `${mesNome}/${ano}`,
+        boletim: boletim ? {
+          id:          boletim.id,
+          status:      boletim.status,
+          nfse_status: boletim.nfse_status,
+          nfse_numero: boletim.nfse_numero,
+          valor_base:  boletim.valor_base  || 0,
+          valor_total: boletim.valor_total || 0,
+          glosas:      boletim.glosas      || 0,
+          acrescimos:  boletim.acrescimos  || 0,
+          discriminacao: boletim.discriminacao || '',
+          nfse_erro:   boletim.nfse_erro   || null,
+        } : null,
+      };
+    });
+
+    const stats = {
+      total:    resultado.length,
+      sem_boletim: resultado.filter(r => !r.boletim).length,
+      rascunho:    resultado.filter(r => r.boletim?.status === 'rascunho').length,
+      aprovado:    resultado.filter(r => r.boletim?.status === 'aprovado').length,
+      emitido:     resultado.filter(r => r.boletim?.nfse_status === 'EMITIDA').length,
+      valor_total: resultado.reduce((s, r) => s + (r.boletim?.valor_total || 0), 0),
+    };
+
+    res.json({ mes, contratos: resultado, stats });
+  } catch (err) {
+    console.error('Erro painel-faturamento:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GERAR MÊS (batch) ─────────────────────────────────────────
+// POST /api/boletins/gerar-mes  { mes: "YYYY-MM" }
+// Cria boletins em rascunho para TODOS os contratos ativos sem boletim no mês
+router.post('/gerar-mes', (req, res) => {
+  try {
+    const { mes } = req.body;
+    if (!mes || !/^\d{4}-\d{2}$/.test(mes)) {
+      return res.status(400).json({ error: 'Campo mes obrigatório (YYYY-MM)' });
+    }
+    const db = req.db;
+
+    const contratos = db.prepare(`
+      SELECT bc.*, c.valor_mensal_bruto
+      FROM bol_contratos bc
+      LEFT JOIN contratos c ON bc.contrato_ref = c.numContrato
+      WHERE bc.ativo = 1
+    `).all();
+
+    const [ano, mesNum] = mes.split('-');
+    const mesNome = MESES_NOME_COMPLETO[parseInt(mesNum)] || mes;
+
+    const ins = db.prepare(`INSERT INTO bol_boletins
+      (contrato_id, competencia, data_emissao, valor_base, valor_total, glosas, acrescimos, discriminacao, status, nfse_status)
+      VALUES (?, ?, date('now'), ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')`);
+
+    let criados = 0, existentes = 0;
+
+    const criar = db.transaction(() => {
+      for (const bc of contratos) {
+        const existe = db.prepare('SELECT id FROM bol_boletins WHERE contrato_id=? AND competencia=?').get(bc.id, mes);
+        if (existe) { existentes++; continue; }
+
+        const valor_base = Math.round((bc.valor_mensal_bruto || 0) * 100) / 100;
+        const tipoServico = bc.descricao_servico || 'SERVIÇOS';
+        const numContrato  = bc.contrato_ref || bc.numero_contrato || '';
+        const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServico.toUpperCase()} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. VALOR MENSAL CONFORME BOLETIM DE MEDIÇÃO APROVADO.`;
+
+        ins.run(bc.id, mes, valor_base, valor_base, discriminacao);
+        criados++;
+      }
+    });
+    criar();
+
+    res.json({ ok: true, mes, criados, existentes, total: contratos.length });
+  } catch (err) {
+    console.error('Erro gerar-mes:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── APROVAR BOLETIM ───────────────────────────────────────────
+// POST /api/boletins/:id/aprovar
+router.post('/:id/aprovar', (req, res) => {
+  try {
+    const db = req.db;
+    const bol = db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id);
+    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+    if (bol.nfse_status === 'EMITIDA') {
+      return res.status(400).json({ error: 'NFS-e já emitida — não é possível alterar status' });
+    }
+    db.prepare(`UPDATE bol_boletins SET status='aprovado', updated_at=datetime('now') WHERE id=?`).run(req.params.id);
+    res.json({ ok: true, data: db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── REABRIR BOLETIM ──────────────────────────────────────────
+// POST /api/boletins/:id/reabrir
+router.post('/:id/reabrir', (req, res) => {
+  try {
+    const db = req.db;
+    const bol = db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id);
+    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+    if (bol.nfse_status === 'EMITIDA') {
+      return res.status(400).json({ error: 'NFS-e já emitida — não é possível reabrir' });
+    }
+    db.prepare(`UPDATE bol_boletins SET status='rascunho', updated_at=datetime('now') WHERE id=?`).run(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── HISTÓRICO simplificado por mês ───────────────────────────
+// GET /api/boletins/historico-mes?mes=YYYY-MM
+router.get('/historico-mes', (req, res) => {
+  const { mes } = req.query;
+  if (!mes) return res.status(400).json({ error: 'mes obrigatório' });
+  try {
+    const rows = req.db.prepare(`
+      SELECT b.*, bc.nome as contrato_nome, bc.contratante
+      FROM bol_boletins b
+      JOIN bol_contratos bc ON bc.id = b.contrato_id
+      WHERE b.competencia = ?
+      ORDER BY bc.nome
+    `).all(mes);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 module.exports = router;
