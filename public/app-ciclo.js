@@ -144,6 +144,51 @@
       <div style="font-size:10px;color:#94a3b8;margin-top:4px">${ret.nfs_com_retencao_apurada} NF(s) com comprovante ENTRADA anexado.</div>
     </div>`;
 
+    // ─── Painel de Aging ───
+    let cardAging = '';
+    const ag = data.aging_resumo;
+    if (ag && ag.total_nfs > 0) {
+      const total = ag.total_valor || 1;
+      const faixas = [
+        { label: '0–30 dias',  val: ag.val_0_30,   cor: '#22c55e' },
+        { label: '31–60 dias', val: ag.val_31_60,  cor: '#f59e0b' },
+        { label: '61–90 dias', val: ag.val_61_90,  cor: '#f97316' },
+        { label: '+90 dias',   val: ag.val_90plus, cor: '#ef4444' },
+      ];
+      const barras = faixas.map(f => {
+        const pct = Math.max(2, (f.val / total) * 100).toFixed(1);
+        if (f.val <= 0) return '';
+        return `<div style="margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
+            <span style="color:#475569;font-weight:600">${f.label}</span>
+            <span style="color:${f.cor};font-weight:700">${fmt(f.val)}</span>
+          </div>
+          <div style="background:#f1f5f9;border-radius:4px;height:18px;overflow:hidden">
+            <div style="background:${f.cor};height:100%;width:${pct}%"></div>
+          </div>
+        </div>`;
+      }).join('');
+      cardAging = `<div style="background:#fff;border:1px solid #e5e7eb;border-left:4px solid #ef4444;border-radius:8px;padding:14px;grid-column:1/-1">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:18px">📅</span>
+            <b style="color:#1e293b">Aging de Recebíveis — ${ag.total_nfs} NFs PENDENTE · ${fmt(ag.total_valor)}</b>
+          </div>
+          <a href="#" onclick="event.preventDefault();navGo('nfs',document.querySelector('[data-tab=nfs]'))" style="color:#3b82f6;font-size:11px;font-weight:600;text-decoration:none">Ver NFs →</a>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px">
+          ${faixas.map(f => {
+            const pct = total > 0 ? ((f.val/total)*100).toFixed(0) : 0;
+            return `<div style="background:#f8fafc;border-radius:6px;padding:10px">
+              <div style="font-size:10px;color:#64748b;font-weight:600;margin-bottom:4px">${f.label}</div>
+              <div style="font-size:17px;font-weight:800;color:${f.cor}">${fmt(f.val)}</div>
+              <div style="font-size:10px;color:#94a3b8">${pct}% do total pendente</div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }
+
     // ─── Monta layout final ───
     body.innerHTML = `
       <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin-bottom:14px">
@@ -153,6 +198,7 @@
         </div>
         ${funilHTML}
       </div>
+      ${cardAging ? `<div style="margin-bottom:12px">${cardAging}</div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">
         ${cardContratos}
         ${cardBoletins}

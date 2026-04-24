@@ -54,13 +54,13 @@ router.get('/', (req, res) => {
     let boletinsMes = [];
     try {
       boletinsMes = db.prepare(`
-        SELECT b.id, b.contrato_id, b.competencia, b.valor_total,
-               b.status AS status_boletim, b.nfse_numero, b.nfse_status,
-               bc.contrato_ref, bc.orgao
+        SELECT b.id, b.contrato_id, b.competencia, b.total_geral AS valor_total,
+               b.status AS status_boletim,
+               bc.nome AS contrato_ref, bc.contratante AS orgao, bc.numero_contrato
         FROM bol_boletins b
         JOIN bol_contratos bc ON bc.id = b.contrato_id
-        WHERE b.competencia = ? OR b.competencia LIKE ?
-      `).all(competencia, `%${competencia}%`);
+        WHERE b.competencia = ?
+      `).all(competencia);
     } catch (_) { /* módulo boletins não disponível */ }
 
     const boletinsPorContrato = new Map();
@@ -205,22 +205,84 @@ router.get('/', (req, res) => {
         declarada_nfs:      retencaoDeclaradaNFs,
         apurada_comprovantes: retencaoApuradaComprovantes,
         nfs_com_retencao_apurada: nfsComRetencaoApurada,
-        divergencia_pct: retencaoDeclaradaNFs > 0
+        divergencia_pct: (retencaoDeclaradaNFs > 0 && nfsComRetencaoApurada > 0)
           ? +((retencaoApuradaComprovantes - retencaoDeclaradaNFs) / retencaoDeclaradaNFs * 100).toFixed(1)
           : null,
       },
 
       // Meta
       meta: {
-        total_nfs_mes: nfsEmitidas,
+        total_nfs_mes:       nfsEmitidas,
         valor_total_emitido: valorEmitido,
       },
+
+      // Aging de recebíveis — NFs PENDENTE por faixa (ano corrente)
+      aging_resumo: (() => {
+        try {
+          const hoje = new Date().toISOString().slice(0, 10);
+          const ano  = competencia.slice(0, 4);
+          return db.prepare(`
+            SELECT
+              COUNT(*) total_nfs,
+              COALESCE(SUM(valor_bruto), 0) total_valor,
+              COALESCE(SUM(CASE WHEN julianday(?) - julianday(data_emissao) <= 30
+                           THEN valor_bruto END), 0) val_0_30,
+              COALESCE(SUM(CASE WHEN julianday(?) - julianday(data_emissao) BETWEEN 31 AND 60
+                           THEN valor_bruto END), 0) val_31_60,
+              COALESCE(SUM(CASE WHEN julianday(?) - julianday(data_emissao) BETWEEN 61 AND 90
+                           THEN valor_bruto END), 0) val_61_90,
+              COALESCE(SUM(CASE WHEN julianday(?) - julianday(data_emissao) > 90
+                           THEN valor_bruto END), 0) val_90plus
+            FROM notas_fiscais
+            WHERE status_conciliacao = 'PENDENTE'
+              AND data_emissao >= ? || '-01-01'
+              AND data_emissao != ''
+          `).get(hoje, hoje, hoje, hoje, ano);
+        } catch (_) { return null; }
+      })(),
     };
 
     res.json(payload);
   } catch (err) {
     console.error('[ciclo] erro:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/ciclo/aging — Aging de recebíveis por contrato (ano corrente) ────
+router.get('/aging', (req, res) => {
+  try {
+    const db   = req.db;
+    const hoje = new Date().toISOString().slice(0, 10);
+    const ano  = req.query.ano || hoje.slice(0, 4);
+
+    const rows = db.prepare(`
+      SELECT
+        nf.contrato_ref,
+        COUNT(*) total_nfs,
+        COALESCE(SUM(nf.valor_bruto), 0) total_valor,
+        MIN(nf.data_emissao) mais_antiga,
+        COALESCE(SUM(CASE WHEN julianday(?) - julianday(nf.data_emissao) <= 30
+                     THEN nf.valor_bruto END), 0) val_0_30,
+        COALESCE(SUM(CASE WHEN julianday(?) - julianday(nf.data_emissao) BETWEEN 31 AND 60
+                     THEN nf.valor_bruto END), 0) val_31_60,
+        COALESCE(SUM(CASE WHEN julianday(?) - julianday(nf.data_emissao) BETWEEN 61 AND 90
+                     THEN nf.valor_bruto END), 0) val_61_90,
+        COALESCE(SUM(CASE WHEN julianday(?) - julianday(nf.data_emissao) > 90
+                     THEN nf.valor_bruto END), 0) val_90plus
+      FROM notas_fiscais nf
+      WHERE nf.status_conciliacao = 'PENDENTE'
+        AND nf.data_emissao >= ? || '-01-01'
+        AND nf.data_emissao != ''
+        AND COALESCE(nf.contrato_ref,'') != ''
+      GROUP BY nf.contrato_ref
+      ORDER BY total_valor DESC
+    `).all(hoje, hoje, hoje, hoje, ano);
+
+    res.json({ ok: true, aging: rows, hoje, ano });
+  } catch (e) {
+    console.error('[ciclo/aging]', e);
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
