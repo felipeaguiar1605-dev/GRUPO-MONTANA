@@ -114,15 +114,19 @@ router.post('/contratos', (req, res) => {
 
 router.put('/contratos/:id', (req, res) => {
   const b = req.body;
+  // FIX2: inclui contrato_ref, orgao (CNPJ tomador), insc_municipal
   req.db.prepare(`
     UPDATE bol_contratos SET nome=?, contratante=?, numero_contrato=?, processo=?, pregao=?,
       descricao_servico=?, escala=?, empresa_razao=?, empresa_cnpj=?, empresa_endereco=?,
-      empresa_email=?, empresa_telefone=?, updated_at=datetime('now')
+      empresa_email=?, empresa_telefone=?,
+      contrato_ref=?, orgao=?, insc_municipal=?,
+      updated_at=datetime('now')
     WHERE id=?
   `).run(
     b.nome, b.contratante, b.numero_contrato, b.processo||'', b.pregao||'',
     b.descricao_servico||'', b.escala||'12x36', b.empresa_razao||'',
     b.empresa_cnpj||'', b.empresa_endereco||'', b.empresa_email||'', b.empresa_telefone||'',
+    b.contrato_ref||'', b.orgao||'', b.insc_municipal||'',
     req.params.id
   );
   res.json({ ok: true });
@@ -370,21 +374,37 @@ router.post('/:id/emitir-nfse', async (req, res) => {
   const companyKey = req.companyKey;
 
   try {
+    // FIX1: COALESCE(valor_total, total_geral) — suporta boletins importados do legado
+    // FIX2: JOIN duplo — tenta contrato_ref exato primeiro, fallback LIKE numero_contrato
+    // FIX3: c.orgao = CNPJ do tomador; bc.contratante = razão social
     const bol = db.prepare(`
-      SELECT b.*, bc.contrato_ref, bc.orgao, bc.descricao_servico as bc_descricao,
+      SELECT b.*,
+             COALESCE(b.valor_total, b.total_geral, 0) AS valor_efetivo,
+             bc.contrato_ref, bc.contratante as bc_contratante,
+             bc.orgao as bc_orgao, bc.descricao_servico as bc_descricao,
              bc.insc_municipal as insc_contratante,
-             c.numContrato, c.orgao as orgao_contrato
+             COALESCE(
+               (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+               (SELECT c2.orgao FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1)
+             ) AS cnpj_tomador_contrato,
+             COALESCE(
+               (SELECT c1.numContrato FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+               (SELECT c2.numContrato FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1)
+             ) AS num_contrato_encontrado
       FROM bol_boletins b
       JOIN bol_contratos bc ON b.contrato_id = bc.id
-      LEFT JOIN contratos c ON bc.contrato_ref = c.numContrato
       WHERE b.id=?`).get(req.params.id);
 
     if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
     if (bol.nfse_status === 'EMITIDA') {
       return res.status(400).json({ error: `NFS-e ${bol.nfse_numero} já emitida para este boletim` });
     }
-    if (!bol.valor_total || bol.valor_total <= 0) {
-      return res.status(400).json({ error: 'Valor do boletim inválido (zero ou negativo)' });
+    // FIX4: exige status 'aprovado' no backend (não só no frontend)
+    if (bol.status !== 'aprovado') {
+      return res.status(400).json({ error: `Boletim deve estar com status "aprovado" para emitir NFS-e (atual: ${bol.status})` });
+    }
+    if (!bol.valor_efetivo || bol.valor_efetivo <= 0) {
+      return res.status(400).json({ error: 'Valor do boletim inválido (zero ou negativo) — ajuste o valor antes de emitir' });
     }
 
     // Verificar certificado
@@ -403,8 +423,15 @@ router.post('/:id/emitir-nfse', async (req, res) => {
       return res.status(400).json({ error: `Inscrição Municipal não configurada (WEBISS_INSC_${companyKey.toUpperCase()} no .env)` });
     }
 
-    // Número do RPS único baseado no id do boletim
-    const rpsNum = String(bol.id).padStart(10, '0');
+    // FIX4: RPS idempotente — reutiliza rps_numero gravado se for retentativa
+    // Garante coluna rps_numero
+    try { db.prepare(`ALTER TABLE bol_boletins ADD COLUMN rps_numero TEXT`).run(); } catch (_) {}
+    const rpsNum = bol.rps_numero || String(bol.id).padStart(10, '0');
+    // Persiste rps_numero imediatamente para garantir idempotência em retentativas
+    if (!bol.rps_numero) {
+      db.prepare(`UPDATE bol_boletins SET rps_numero=? WHERE id=?`).run(rpsNum, bol.id);
+    }
+
     const today  = new Date().toISOString().substring(0, 10);
 
     // Competência no formato YYYY-MM-DD (primeiro dia do mês)
@@ -413,13 +440,18 @@ router.post('/:id/emitir-nfse', async (req, res) => {
       : bol.competencia;
 
     // Alíquota ISS — 2% padrão (contratos federais isentos/suspensos; municipais 3%)
-    // O campo IssRetido=2 indica ISS NÃO retido pelo tomador
     const aliqISS = 0.02;
-    const valorISS = Math.round(bol.valor_total * aliqISS * 100) / 100;
+    const valorISS = Math.round(bol.valor_efetivo * aliqISS * 100) / 100;
 
-    // Tomador: usar CNPJ do insc_contratante ou razão social do órgão
-    const tomadorCnpj = (bol.insc_contratante || '').replace(/\D/g, '');
-    const tomadorRazao = bol.orgao || bol.orgao_contrato || 'TOMADOR';
+    // FIX3: CNPJ = c.orgao (contratos.orgao armazena CNPJ do tomador neste sistema)
+    // Prioridade: insc_municipal (manual) > cnpj_tomador_contrato (join) > vazio
+    const tomadorCnpj = (bol.insc_contratante || bol.cnpj_tomador_contrato || '').replace(/\D/g, '');
+    // Razão social: bc_contratante (sempre preenchido) > bc_orgao > fallback
+    const tomadorRazao = bol.bc_contratante || bol.bc_orgao || 'TOMADOR NÃO CONFIGURADO';
+
+    if (!tomadorCnpj) {
+      console.warn(`[boletins] Boletim #${bol.id}: tomadorCnpj vazio — WebISS pode rejeitar. Configure insc_municipal ou contrato_ref.`);
+    }
 
     // Registrar tentativa
     db.prepare(`UPDATE bol_boletins SET nfse_status='ENVIANDO', nfse_erro=NULL, updated_at=datetime('now') WHERE id=?`)
@@ -437,7 +469,7 @@ router.post('/:id/emitir-nfse', async (req, res) => {
         dataEmissao:  today,
         competencia:  competenciaData,
         servico: {
-          valorServicos:     bol.valor_total,
+          valorServicos:     bol.valor_efetivo,
           valorDeducoes:     0,
           valorPis:          0,
           valorCofins:       0,
@@ -486,12 +518,17 @@ router.post('/:id/emitir-nfse', async (req, res) => {
       try {
         const jaExiste = db.prepare(`SELECT id FROM notas_fiscais WHERE numero=? OR webiss_numero_nfse=?`).get(nfseNum, nfseNum);
         if (!jaExiste) {
-          // Retorna objeto NFS-e
           const nfse = result.nfse;
-          const valorBruto   = nfse.valorServicos  || bol.valor_total || 0;
-          const valorLiquido = nfse.valorLiquido    || nfse.valorLiquidoNfse || (valorBruto - (nfse.valorIss || 0));
-          const competencia  = bol.competencia;   // "2026-04"
-          const tomador      = bol.orgao_contrato || bol.orgao || tomadorRazao;
+          // FIX1: usa valor_efetivo (COALESCE já aplicado) como fallback
+          const valorBruto   = nfse.valorServicos  || bol.valor_efetivo || 0;
+          // FIX: valorLiquido = bruto - TODAS as retenções (não só ISS)
+          const totalRetencoes = (nfse.valorInss||0)+(nfse.valorIr||0)+(nfse.valorIss||0)+
+                                 (nfse.valorCsll||0)+(nfse.valorPis||0)+(nfse.valorCofins||0);
+          const valorLiquido = nfse.valorLiquido || nfse.valorLiquidoNfse
+                                 || (valorBruto - totalRetencoes);
+          const competencia  = bol.competencia;
+          // FIX3: usa bc_contratante e cnpj_tomador_contrato resolvidos pelo JOIN
+          const tomador      = bol.bc_contratante || tomadorRazao;
           const cnpjTomador  = tomadorCnpj ? formatCnpj(tomadorCnpj) : '';
 
           // Garante colunas webiss_numero_nfse e discriminacao
@@ -1112,17 +1149,29 @@ router.get('/painel-faturamento', (req, res) => {
     }
     const db = req.db;
 
+    // FIX2: JOIN duplo — contrato_ref exato OU LIKE numero_contrato
     const contratos = db.prepare(`
-      SELECT bc.*, c.valor_mensal_bruto, c.orgao as orgao_contrato
+      SELECT bc.*,
+        COALESCE(
+          (SELECT c1.valor_mensal_bruto FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+          (SELECT c2.valor_mensal_bruto FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1),
+          0
+        ) AS valor_mensal_bruto,
+        COALESCE(
+          (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+          (SELECT c2.orgao FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1),
+          ''
+        ) AS cnpj_tomador_contrato
       FROM bol_contratos bc
-      LEFT JOIN contratos c ON bc.contrato_ref = c.numContrato
       WHERE bc.ativo = 1
       ORDER BY bc.nome
     `).all();
 
     const resultado = contratos.map(bc => {
+      // FIX1: COALESCE(valor_total, total_geral)
       const boletim = db.prepare(`
-        SELECT * FROM bol_boletins
+        SELECT *, COALESCE(valor_total, total_geral, 0) AS valor_efetivo
+        FROM bol_boletins
         WHERE contrato_id = ? AND competencia = ?
       `).get(bc.id, mes);
 
@@ -1135,16 +1184,19 @@ router.get('/painel-faturamento', (req, res) => {
         contratante:       bc.contratante,
         contrato_ref:      bc.contrato_ref,
         valor_mensal_bruto: bc.valor_mensal_bruto || 0,
-        orgao:             bc.orgao || bc.orgao_contrato || bc.contratante,
+        // FIX3: expõe cnpj_tomador_contrato para diagnóstico e para o emitir
+        orgao:             bc.orgao || bc.contratante,
         insc_municipal:    bc.insc_municipal || '',
+        cnpj_tomador_contrato: bc.cnpj_tomador_contrato || '',
         mes_nome:          `${mesNome}/${ano}`,
         boletim: boletim ? {
           id:          boletim.id,
           status:      boletim.status,
           nfse_status: boletim.nfse_status,
           nfse_numero: boletim.nfse_numero,
-          valor_base:  boletim.valor_base  || 0,
-          valor_total: boletim.valor_total || 0,
+          // FIX1: usa valor_efetivo (COALESCE já aplicado na query)
+          valor_base:  boletim.valor_base  || boletim.total_geral || 0,
+          valor_total: boletim.valor_efetivo || 0,
           glosas:      boletim.glosas      || 0,
           acrescimos:  boletim.acrescimos  || 0,
           discriminacao: boletim.discriminacao || '',
@@ -1153,13 +1205,21 @@ router.get('/painel-faturamento', (req, res) => {
       };
     });
 
+    // FIX: aviso se algum contrato tem CNPJ não resolvido
+    const semCnpj = resultado.filter(r => !r.insc_municipal && !r.cnpj_tomador_contrato);
+    if (semCnpj.length) {
+      console.warn(`[painel-faturamento] ${semCnpj.length} contrato(s) sem CNPJ tomador: ${semCnpj.map(r=>r.nome).join(', ')}`);
+    }
+
     const stats = {
       total:    resultado.length,
       sem_boletim: resultado.filter(r => !r.boletim).length,
       rascunho:    resultado.filter(r => r.boletim?.status === 'rascunho').length,
       aprovado:    resultado.filter(r => r.boletim?.status === 'aprovado').length,
       emitido:     resultado.filter(r => r.boletim?.nfse_status === 'EMITIDA').length,
+      // FIX1: usa valor_efetivo
       valor_total: resultado.reduce((s, r) => s + (r.boletim?.valor_total || 0), 0),
+      sem_cnpj:    semCnpj.length,
     };
 
     res.json({ mes, contratos: resultado, stats });

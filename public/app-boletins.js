@@ -411,32 +411,104 @@ async function bolDeletarContrato(id) {
   renderBolLista();
 }
 
-async function bolEditarContrato(id) {
+function bolEditarContrato(id) {
   const c = _bolContratoSelecionado;
   if (!c) return;
-  const nome = prompt('Nome:', c.nome);
-  if (nome === null) return;
+  document.getElementById('modal-editar-contrato-bol')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-editar-contrato-bol';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;overflow-y:auto;padding:20px';
+
+  const fld = (lbl, key, hint) => `
+    <div style="margin-bottom:10px">
+      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:3px">${lbl}${hint?`<span style="font-weight:400;color:#94a3b8"> — ${hint}</span>`:''}</label>
+      <input id="bec-${key}" value="${(c[key]||'').replace(/"/g,'&quot;')}"
+        style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+    </div>`;
+
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:28px;width:560px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.35)">
+      <h3 style="margin:0 0 18px;font-size:16px;font-weight:800;color:#1e293b">✏️ Editar Contrato de Boletim</h3>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+        ${fld('Nome','nome')}
+        ${fld('Nº Contrato','numero_contrato')}
+      </div>
+      ${fld('Contratante (Razão Social do Órgão)','contratante')}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+        ${fld('Processo','processo')}
+        ${fld('Pregão','pregao')}
+      </div>
+      ${fld('Descrição do Serviço','descricao_servico')}
+      ${fld('Escala','escala')}
+
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;margin:12px 0">
+        <div style="font-size:11px;font-weight:800;color:#1d4ed8;margin-bottom:8px">🔗 Vinculação Financeira (necessário para emissão NFS-e)</div>
+        ${fld('Referência do Contrato Financeiro','contrato_ref','numContrato exato da tabela contratos — ex: UFT 16/2025')}
+        ${fld('CNPJ do Tomador','insc_municipal','CNPJ do órgão contratante — 18 caracteres c/ máscara')}
+        ${fld('Orgão/Campo auxiliar','orgao','deixe vazio — preenchido automaticamente se contrato_ref estiver correto')}
+      </div>
+
+      <div style="background:#f8fafc;border-radius:8px;padding:12px;margin:12px 0">
+        <div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:8px">Dados da Empresa Emitente</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+          ${fld('Razão Social','empresa_razao')}
+          ${fld('CNPJ','empresa_cnpj')}
+        </div>
+        ${fld('Endereço','empresa_endereco')}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+          ${fld('E-mail','empresa_email')}
+          ${fld('Telefone','empresa_telefone')}
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+        <button onclick="document.getElementById('modal-editar-contrato-bol').remove()"
+          style="padding:8px 18px;background:#f1f5f9;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">Cancelar</button>
+        <button id="bec-salvar-btn" onclick="_bolSalvarContrato(${id})"
+          style="padding:8px 18px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">💾 Salvar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function _bolSalvarContrato(id) {
+  const btn = document.getElementById('bec-salvar-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+  const get = key => document.getElementById('bec-'+key)?.value || '';
   const token = localStorage.getItem('montana_jwt') || '';
-  await fetch('/api/boletins/contratos/' + id, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
-    body: JSON.stringify({
-      ...c, nome,
-      contratante: prompt('Contratante:', c.contratante) || c.contratante,
-      numero_contrato: prompt('Nº Contrato:', c.numero_contrato) || c.numero_contrato,
-      processo: prompt('Processo:', c.processo) || '',
-      pregao: prompt('Pregão:', c.pregao) || '',
-      descricao_servico: prompt('Descrição do serviço:', c.descricao_servico) || '',
-      escala: prompt('Escala:', c.escala) || '12x36',
-      empresa_razao: prompt('Razão social:', c.empresa_razao) || '',
-      empresa_cnpj: prompt('CNPJ:', c.empresa_cnpj) || '',
-      empresa_endereco: prompt('Endereço:', c.empresa_endereco) || '',
-      empresa_email: prompt('E-mail:', c.empresa_email) || '',
-      empresa_telefone: prompt('Telefone:', c.empresa_telefone) || ''
-    })
-  });
-  toast('Contrato atualizado!');
-  bolAbrirContrato(id);
+  try {
+    const r = await fetch('/api/boletins/contratos/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({
+        nome:              get('nome'),
+        contratante:       get('contratante'),
+        numero_contrato:   get('numero_contrato'),
+        processo:          get('processo'),
+        pregao:            get('pregao'),
+        descricao_servico: get('descricao_servico'),
+        escala:            get('escala') || '12x36',
+        empresa_razao:     get('empresa_razao'),
+        empresa_cnpj:      get('empresa_cnpj'),
+        empresa_endereco:  get('empresa_endereco'),
+        empresa_email:     get('empresa_email'),
+        empresa_telefone:  get('empresa_telefone'),
+        // FIX2: campos de vinculação financeira
+        contrato_ref:      get('contrato_ref'),
+        orgao:             get('orgao'),
+        insc_municipal:    get('insc_municipal'),
+      })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Erro ao salvar');
+    document.getElementById('modal-editar-contrato-bol')?.remove();
+    toast('✅ Contrato atualizado!', 'success');
+    bolAbrirContrato(id);
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Salvar'; }
+  }
 }
 
 async function bolNovoPosto(contratoId) {
@@ -924,6 +996,13 @@ async function renderPainelFaturamento() {
       </div>`).join('')}
   </div>
 
+  <!-- Aviso CNPJ não resolvido -->
+  ${stats.sem_cnpj > 0 ? `
+  <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#92400e">
+    ⚠ <strong>${stats.sem_cnpj} contrato(s)</strong> sem CNPJ do tomador configurado — emissão NFS-e falhará para eles.
+    Clique em ✏️ Editar no contrato e preencha <strong>contrato_ref</strong> ou <strong>CNPJ do Tomador</strong>.
+  </div>` : ''}
+
   <!-- Ações em lote -->
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
     <button onclick="painelGerarTodos('${mes}')"
@@ -996,8 +1075,11 @@ function _renderLinhaContratoPainel(c, idx, mes) {
       nfseBadge = `<span style="color:#94a3b8;font-size:10px">PENDENTE</span>`;
     }
 
+    // FIX: usa mapa global para evitar problemas de escape no onclick inline
+    window._painelBoletins = window._painelBoletins || {};
+    if (bol) window._painelBoletins[bol.id] = bol;
     const btnAjustar = bol.nfse_status !== 'EMITIDA'
-      ? `<button onclick="painelAjustar(${bol.id},'${mes}')" title="Ajustar glosas/acréscimos"
+      ? `<button onclick="painelAjustar(${bol.id},'${mes}',window._painelBoletins[${bol.id}])" title="Ajustar glosas/acréscimos"
            style="padding:4px 8px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">✏️</button>`
       : '';
 
@@ -1117,28 +1199,42 @@ async function painelAprovarTodos(mes) {
   }
 }
 
-function painelAjustar(boletim_id, mes) {
-  const token = localStorage.getItem('montana_jwt') || '';
+// FIX: recebe objeto boletim completo para pre-preencher valores existentes
+function painelAjustar(boletim_id, mes, bolObj) {
+  // bolObj pode ser passado inline ou buscamos via closure
+  const glosas     = bolObj?.glosas     || 0;
+  const acrescimos = bolObj?.acrescimos || 0;
+  const obs        = bolObj?.obs        || '';
+  const valorBase  = bolObj?.valor_base || bolObj?.valor_total || 0;
+  const brl = v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2});
+
+  document.getElementById('modal-ajustar-boletim')?.remove();
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
   overlay.id = 'modal-ajustar-boletim';
   overlay.innerHTML = `
-    <div style="background:#fff;border-radius:14px;padding:28px;width:380px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.35)">
-      <h3 style="margin:0 0 16px;font-size:16px;font-weight:800;color:#1e293b">✏️ Ajustar Boletim #${boletim_id}</h3>
+    <div style="background:#fff;border-radius:14px;padding:28px;width:400px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.35)">
+      <h3 style="margin:0 0 4px;font-size:16px;font-weight:800;color:#1e293b">✏️ Ajustar Boletim #${boletim_id}</h3>
+      <div style="font-size:11px;color:#64748b;margin-bottom:16px">Valor base: <strong>${brl(valorBase)}</strong></div>
       <div style="margin-bottom:12px">
-        <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Glosas (R$)</label>
-        <input id="ajuste-glosas" type="number" step="0.01" min="0" value="0"
+        <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Glosas (R$) — desconto por serviço não executado</label>
+        <input id="ajuste-glosas" type="number" step="0.01" min="0" value="${glosas}"
+          oninput="_ajustePreview(${valorBase})"
           style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box">
       </div>
       <div style="margin-bottom:12px">
         <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Acréscimos (R$)</label>
-        <input id="ajuste-acrescimos" type="number" step="0.01" min="0" value="0"
+        <input id="ajuste-acrescimos" type="number" step="0.01" min="0" value="${acrescimos}"
+          oninput="_ajustePreview(${valorBase})"
           style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box">
+      </div>
+      <div id="ajuste-preview" style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;text-align:center;color:#1e293b">
+        Valor final: <strong id="ajuste-preview-val">${brl(valorBase - glosas + acrescimos)}</strong>
       </div>
       <div style="margin-bottom:16px">
         <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Observação</label>
         <textarea id="ajuste-obs" rows="2"
-          style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;resize:vertical;box-sizing:border-box"></textarea>
+          style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;resize:vertical;box-sizing:border-box">${obs}</textarea>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button onclick="document.getElementById('modal-ajustar-boletim').remove()"
@@ -1148,6 +1244,14 @@ function painelAjustar(boletim_id, mes) {
       </div>
     </div>`;
   document.body.appendChild(overlay);
+}
+
+function _ajustePreview(base) {
+  const g = parseFloat(document.getElementById('ajuste-glosas')?.value) || 0;
+  const a = parseFloat(document.getElementById('ajuste-acrescimos')?.value) || 0;
+  const total = base - g + a;
+  const el = document.getElementById('ajuste-preview-val');
+  if (el) el.textContent = 'R$ ' + total.toLocaleString('pt-BR',{minimumFractionDigits:2});
 }
 
 async function _painelSalvarAjuste(boletim_id, mes) {
@@ -1203,8 +1307,8 @@ async function painelEmitirLote(mes) {
       } else {
         erros.push(`Boletim #${b.id}: ${dd.error || 'erro desconhecido'}`);
       }
-      // Pausa entre emissões para não sobrecarregar WebISS
-      await new Promise(res => setTimeout(res, 1500));
+      // FIX: pausa de 2500ms — WebISS limita ~1 req/2s
+      await new Promise(res => setTimeout(res, 2500));
     }
 
     renderPainelFaturamento();
