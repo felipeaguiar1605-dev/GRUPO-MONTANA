@@ -14,7 +14,7 @@ const rateLimit = require('express-rate-limit');
 const LOG_DIR  = path.join(__dirname, '..', 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'erros.log');
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
-const { getDb, COMPANIES } = require('./db_pg');
+const { getDb, COMPANIES } = require('./db');
 const apiRouter = require('./api');
 const { authMiddleware, loginHandler } = require('./auth');
 

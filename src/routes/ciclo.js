@@ -30,7 +30,7 @@ const STATUS_NF_PAGA = [
   STATUS.CONCILIADO,
 ];
 
-router.get('/', async (req, res) => {
+router.get('/', (req, res) => {
   try {
     const db = req.db;
     const competencia = (req.query.competencia || hojeMes()).slice(0, 7);
@@ -42,7 +42,7 @@ router.get('/', async (req, res) => {
     // Filtro robusto: coluna `status` é texto livre (tem 'Encerrado', 'encerrado',
     // 'Ativo', 'EMERGENCIAL', emojis como '🔴 CRÍTICO', etc). Casa-insensitivo
     // + verifica se o próprio numContrato contém '— encerrado' como label
-    const contratosAtivos = await db.prepare(`
+    const contratosAtivos = db.prepare(`
       SELECT numContrato, contrato, orgao, valor_mensal_bruto
       FROM contratos
       WHERE LOWER(COALESCE(status,'')) NOT LIKE '%encerrad%'
@@ -53,7 +53,7 @@ router.get('/', async (req, res) => {
     // ───────── ETAPA 2: Boletins da competência ─────────
     let boletinsMes = [];
     try {
-      boletinsMes = await db.prepare(`
+      boletinsMes = db.prepare(`
         SELECT b.id, b.contrato_id, b.competencia, b.total_geral AS valor_total,
                b.status AS status_boletim,
                bc.nome AS contrato_ref, bc.contratante AS orgao, bc.numero_contrato
@@ -70,7 +70,7 @@ router.get('/', async (req, res) => {
     }
 
     // ───────── ETAPA 3: NFs emitidas na competência ─────────
-    const nfsMes = await db.prepare(`
+    const nfsMes = db.prepare(`
       SELECT id, numero, tomador, contrato_ref, data_emissao, data_pagamento,
              valor_bruto, valor_liquido, status_conciliacao, extrato_id,
              inss, ir, iss, csll, pis, cofins, COALESCE(retencao, 0) AS retencao
@@ -83,7 +83,7 @@ router.get('/', async (req, res) => {
     // ───────── ETAPA 4+5+6: cruzar NF com comprovantes ─────────
     let nfsComComprovante = new Set();
     try {
-      const rows = await db.prepare(`
+      const rows = db.prepare(`
         SELECT DISTINCT destino_id
         FROM comprovante_vinculos
         WHERE tipo_destino = 'NF'
@@ -143,7 +143,7 @@ router.get('/', async (req, res) => {
     let retencaoApuradaComprovantes = 0;
     let nfsComRetencaoApurada = 0;
     try {
-      const rows = await db.prepare(`
+      const rows = db.prepare(`
         SELECT cv.destino_id AS nf_id,
                SUM(cv.valor_vinculado) AS valor_recebido
         FROM comprovante_vinculos cv
@@ -217,21 +217,21 @@ router.get('/', async (req, res) => {
       },
 
       // Aging de recebíveis — NFs PENDENTE por faixa (ano corrente)
-      aging_resumo: await (async () => {
+      aging_resumo: (() => {
         try {
           const hoje = new Date().toISOString().slice(0, 10);
           const ano  = competencia.slice(0, 4);
-          return await db.prepare(`
+          return db.prepare(`
             SELECT
               COUNT(*) total_nfs,
               COALESCE(SUM(valor_bruto), 0) total_valor,
-              COALESCE(SUM(CASE WHEN (?::date - data_emissao::date) <= 30
+              COALESCE(SUM(CASE WHEN julianday(?) - julianday(data_emissao) <= 30
                            THEN valor_bruto END), 0) val_0_30,
-              COALESCE(SUM(CASE WHEN (?::date - data_emissao::date) BETWEEN 31 AND 60
+              COALESCE(SUM(CASE WHEN julianday(?) - julianday(data_emissao) BETWEEN 31 AND 60
                            THEN valor_bruto END), 0) val_31_60,
-              COALESCE(SUM(CASE WHEN (?::date - data_emissao::date) BETWEEN 61 AND 90
+              COALESCE(SUM(CASE WHEN julianday(?) - julianday(data_emissao) BETWEEN 61 AND 90
                            THEN valor_bruto END), 0) val_61_90,
-              COALESCE(SUM(CASE WHEN (?::date - data_emissao::date) > 90
+              COALESCE(SUM(CASE WHEN julianday(?) - julianday(data_emissao) > 90
                            THEN valor_bruto END), 0) val_90plus
             FROM notas_fiscais
             WHERE status_conciliacao = 'PENDENTE'
@@ -250,25 +250,25 @@ router.get('/', async (req, res) => {
 });
 
 // ── GET /api/ciclo/aging — Aging de recebíveis por contrato (ano corrente) ────
-router.get('/aging', async (req, res) => {
+router.get('/aging', (req, res) => {
   try {
     const db   = req.db;
     const hoje = new Date().toISOString().slice(0, 10);
     const ano  = req.query.ano || hoje.slice(0, 4);
 
-    const rows = await db.prepare(`
+    const rows = db.prepare(`
       SELECT
         nf.contrato_ref,
         COUNT(*) total_nfs,
         COALESCE(SUM(nf.valor_bruto), 0) total_valor,
         MIN(nf.data_emissao) mais_antiga,
-        COALESCE(SUM(CASE WHEN (?::date - nf.data_emissao::date) <= 30
+        COALESCE(SUM(CASE WHEN julianday(?) - julianday(nf.data_emissao) <= 30
                      THEN nf.valor_bruto END), 0) val_0_30,
-        COALESCE(SUM(CASE WHEN (?::date - nf.data_emissao::date) BETWEEN 31 AND 60
+        COALESCE(SUM(CASE WHEN julianday(?) - julianday(nf.data_emissao) BETWEEN 31 AND 60
                      THEN nf.valor_bruto END), 0) val_31_60,
-        COALESCE(SUM(CASE WHEN (?::date - nf.data_emissao::date) BETWEEN 61 AND 90
+        COALESCE(SUM(CASE WHEN julianday(?) - julianday(nf.data_emissao) BETWEEN 61 AND 90
                      THEN nf.valor_bruto END), 0) val_61_90,
-        COALESCE(SUM(CASE WHEN (?::date - nf.data_emissao::date) > 90
+        COALESCE(SUM(CASE WHEN julianday(?) - julianday(nf.data_emissao) > 90
                      THEN nf.valor_bruto END), 0) val_90plus
       FROM notas_fiscais nf
       WHERE nf.status_conciliacao = 'PENDENTE'

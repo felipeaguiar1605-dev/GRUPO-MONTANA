@@ -18,12 +18,12 @@ function resolvePeriodo(query) {
   return { dateFrom: `${now.getFullYear()}-01-01`, dateTo: `${now.getFullYear()}-12-31`, periodo: String(now.getFullYear()) };
 }
 
-async function buscarDRE(db, dateFrom, dateTo) {
+function buscarDRE(db, dateFrom, dateTo) {
   const p = { from: dateFrom, to: dateTo };
 
   // 1. Receita bruta = valor bruto das NFs emitidas no período (base competência)
   //    Exclui NFs canceladas. Fonte limpa: não contamina com transf. internas nem resgates.
-  const receita = await db.prepare(`
+  const receita = db.prepare(`
     SELECT COALESCE(SUM(valor_bruto),0) bruta,
            COUNT(*) qtd_nfs
     FROM notas_fiscais
@@ -37,7 +37,7 @@ async function buscarDRE(db, dateFrom, dateTo) {
   //    discriminados que só a NF conhece.
   let ret;
   try {
-    ret = await db.prepare(`
+    ret = db.prepare(`
       SELECT COALESCE(SUM(inss),0) inss, COALESCE(SUM(ir),0) irrf,
              COALESCE(SUM(iss),0) iss,  COALESCE(SUM(csll),0) csll,
              COALESCE(SUM(pis),0) pis,  COALESCE(SUM(cofins),0) cofins,
@@ -49,7 +49,7 @@ async function buscarDRE(db, dateFrom, dateTo) {
     `).get(p);
   } catch (_) {
     // Fallback se migração ainda não rodou
-    ret = await db.prepare(`
+    ret = db.prepare(`
       SELECT COALESCE(SUM(inss),0) inss, COALESCE(SUM(ir),0) irrf,
              COALESCE(SUM(iss),0) iss,  COALESCE(SUM(csll),0) csll,
              COALESCE(SUM(pis),0) pis,  COALESCE(SUM(cofins),0) cofins,
@@ -62,7 +62,7 @@ async function buscarDRE(db, dateFrom, dateTo) {
   }
 
   // 3. Despesas por categoria no período (UPPER para normalizar nomes)
-  const desps = await db.prepare(`
+  const desps = db.prepare(`
     SELECT UPPER(TRIM(categoria)) as categoria, COALESCE(SUM(valor_bruto),0) total
     FROM despesas WHERE data_iso>=@from AND data_iso<=@to GROUP BY UPPER(TRIM(categoria))
   `).all(p);
@@ -82,7 +82,7 @@ async function buscarDRE(db, dateFrom, dateTo) {
   const despOpOther  = despTotal - custosCSP;
 
   // 4. Comparativo mensal — NFs por mês de emissão
-  const porMes = await db.prepare(`
+  const porMes = db.prepare(`
     SELECT substr(data_emissao,1,7) mes_ano,
            COALESCE(SUM(valor_bruto),0) receita,
            0 saidas
@@ -93,7 +93,7 @@ async function buscarDRE(db, dateFrom, dateTo) {
   `).all(p);
 
   // Adicionar saídas (despesas) ao comparativo mensal
-  const despMes = await db.prepare(`
+  const despMes = db.prepare(`
     SELECT substr(data_iso,1,7) mes_ano, COALESCE(SUM(valor_bruto),0) saidas
     FROM despesas WHERE data_iso>=@from AND data_iso<=@to AND data_iso!=''
     GROUP BY substr(data_iso,1,7)
@@ -102,7 +102,7 @@ async function buscarDRE(db, dateFrom, dateTo) {
   despMes.forEach(m => { despMesMap[m.mes_ano] = m.saidas; });
   porMes.forEach(m => { m.saidas = despMesMap[m.mes_ano] || 0; });
 
-  const r = v => +Number(v || 0).toFixed(2);
+  const r = v => +v.toFixed(2);
 
   const recBruta    = receita.bruta;
   const totalRet    = ret.total_ret;
@@ -184,9 +184,9 @@ async function buscarDRE(db, dateFrom, dateTo) {
 }
 
 // GET /api/dre
-router.get('/', async (req, res) => {
+router.get('/', (req, res) => {
   const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
-  const dados = await buscarDRE(req.db, dateFrom, dateTo);
+  const dados = buscarDRE(req.db, dateFrom, dateTo);
   res.json({ periodo, ...dados });
 });
 
@@ -195,7 +195,7 @@ router.get('/excel', async (req, res) => {
   try {
     const ExcelJS = require('exceljs');
     const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
-    const { dre, despesas_detalhe } = await buscarDRE(req.db, dateFrom, dateTo);
+    const { dre, despesas_detalhe } = buscarDRE(req.db, dateFrom, dateTo);
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'Montana';
@@ -274,7 +274,7 @@ router.get('/excel', async (req, res) => {
 });
 
 // GET /api/dre/pdf
-router.get('/pdf', async (req, res) => {
+router.get('/pdf', (req, res) => {
   try {
     const PDFDocument = require('pdfkit');
     const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
@@ -353,16 +353,16 @@ router.get('/pdf', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 // GET /api/dre — DRE principal
-router.get('/', async (req, res) => {
+router.get('/', (req, res) => {
   const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
-  const dados = await buscarDRE(req.db, dateFrom, dateTo);
+  const dados = buscarDRE(req.db, dateFrom, dateTo);
   res.json({ periodo, ...dados });
 });
 
 // GET /api/dre/historico — apuração mensal salva pelo cron
-router.get('/historico', async (req, res) => {
+router.get('/historico', (req, res) => {
   try {
-    const rows = await req.db.prepare(`
+    const rows = req.db.prepare(`
       SELECT * FROM apuracao_mensal ORDER BY competencia DESC LIMIT 24
     `).all();
     res.json({ data: rows, total: rows.length });
@@ -373,7 +373,7 @@ router.get('/historico', async (req, res) => {
 });
 
 // POST /api/dre/apurar-agora — força apuração do mês atual manualmente
-router.post('/apurar-agora', async (req, res) => {
+router.post('/apurar-agora', (req, res) => {
   try {
     const db = req.db;
     const { ano, mes, competencia } = req.body;
@@ -388,7 +388,7 @@ router.post('/apurar-agora', async (req, res) => {
     const to   = `${A}-${M}-31`;
     const comp = `${A}-${M}`;
 
-    await db.prepare(`CREATE TABLE IF NOT EXISTS apuracao_mensal (
+    db.prepare(`CREATE TABLE IF NOT EXISTS apuracao_mensal (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       competencia TEXT UNIQUE,
       receita_bruta REAL DEFAULT 0,
@@ -411,7 +411,7 @@ router.post('/apurar-agora', async (req, res) => {
     const pisAPagar  = (dre.tributos_proprios && dre.tributos_proprios.pis_a_pagar)    || 0;
     const cofAPagar  = (dre.tributos_proprios && dre.tributos_proprios.cofins_a_pagar) || 0;
 
-    await db.prepare(`INSERT INTO apuracao_mensal
+    db.prepare(`INSERT OR REPLACE INTO apuracao_mensal
       (competencia, receita_bruta, retencoes, receita_liquida, despesas_total,
        resultado, qtd_nfs, pis_a_pagar, cofins_a_pagar, irpj_estimado, csll_estimado, obs)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`

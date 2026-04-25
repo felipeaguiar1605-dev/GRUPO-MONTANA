@@ -6,7 +6,7 @@
 require('dotenv').config();
 const jwt    = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const { getDb } = require('./db_pg');
+const { getDb } = require('./db');
 
 const JWT_SECRET  = process.env.JWT_SECRET  || 'montana_seg_secret_2026_!xK9#';
 const JWT_EXPIRES = process.env.JWT_EXPIRES || '8h';
@@ -55,10 +55,10 @@ async function loginHandler(req, res) {
   try {
     const { seedAdmin, ensureTable } = require('./routes/usuarios');
     const db = getDb(companyKey);
-    await ensureTable(db);
-    await seedAdmin(db);  // garante admin padrão na primeira vez
+    ensureTable(db);
+    seedAdmin(db);  // garante admin padrão na primeira vez
 
-    const user = await db.prepare('SELECT * FROM usuarios WHERE usuario = ? AND ativo = 1').get(usuario);
+    const user = db.prepare('SELECT * FROM usuarios WHERE usuario = ? AND ativo = 1').get(usuario);
     if (!user) {
       return res.status(401).json({ error: 'Usuário ou senha incorretos' });
     }

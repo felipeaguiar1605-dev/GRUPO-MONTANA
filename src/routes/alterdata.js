@@ -92,8 +92,8 @@ function getValor(linha, mapa, chave) {
 }
 
 // ── POST /api/alterdata/importar-funcionarios ─────────────────────
-router.post('/importar-funcionarios', async (req, res) => {
-  upload.single('arquivo')(req, res, async (err) => {
+router.post('/importar-funcionarios', (req, res) => {
+  upload.single('arquivo')(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado. Use o campo "arquivo".' });
 
@@ -132,7 +132,7 @@ router.post('/importar-funcionarios', async (req, res) => {
       const db = req.db;
 
       // Tenta adicionar coluna cargo (texto) se ainda não existir — Alterdata não usa cargo_id
-      try { await db.exec(`ALTER TABLE rh_funcionarios ADD COLUMN IF NOT EXISTS cargo TEXT DEFAULT ''`); } catch (_) {}
+      try { db.exec(`ALTER TABLE rh_funcionarios ADD COLUMN cargo TEXT DEFAULT ''`); } catch (_) {}
 
       // Statements reutilizáveis (preparados fora da transaction para melhor performance)
       const stmtBusca   = db.prepare(`SELECT id FROM rh_funcionarios WHERE cpf=? AND cpf!='' LIMIT 1`);
@@ -142,7 +142,7 @@ router.post('/importar-funcionarios', async (req, res) => {
            cargo, lotacao, salario_base, status, created_at, updated_at)
         VALUES
           (@matricula, @nome, @cpf, @pis, @data_admissao, @data_demissao,
-           @cargo, @lotacao, @salario_base, @status, NOW(), NOW())
+           @cargo, @lotacao, @salario_base, @status, datetime('now'), datetime('now'))
       `);
       const stmtUpdate  = db.prepare(`
         UPDATE rh_funcionarios SET
@@ -155,7 +155,7 @@ router.post('/importar-funcionarios', async (req, res) => {
           lotacao       = @lotacao,
           salario_base  = @salario_base,
           status        = @status,
-          updated_at=NOW()
+          updated_at    = datetime('now')
         WHERE cpf = @cpf AND cpf != ''
       `);
 
@@ -163,7 +163,7 @@ router.post('/importar-funcionarios', async (req, res) => {
       let atualizados = 0;
       const erros = [];
 
-      const processar = db.transaction(async () => {
+      const processar = db.transaction(() => {
         for (let i = 1; i < linhas.length; i++) {
           const cols = linhas[i].split(sep);
           // Linha vazia ou com apenas separadores
@@ -188,17 +188,17 @@ router.post('/importar-funcionarios', async (req, res) => {
               data_demissao: dataDem, cargo, lotacao, salario_base: salario, status };
 
             if (cpf) {
-              const jaExiste = await stmtBusca.get(cpf);
+              const jaExiste = stmtBusca.get(cpf);
               if (jaExiste) {
-                await stmtUpdate.run(params);
+                stmtUpdate.run(params);
                 atualizados++;
               } else {
-                await stmtInsert.run(params);
+                stmtInsert.run(params);
                 importados++;
               }
             } else {
               // Sem CPF: sempre insere (não há chave de dedup)
-              await stmtInsert.run(params);
+              stmtInsert.run(params);
               importados++;
             }
           } catch (e) {
@@ -207,11 +207,11 @@ router.post('/importar-funcionarios', async (req, res) => {
         }
       });
 
-      await processar();
+      processar();
 
       // Registra importação
       try {
-        await db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros, status) VALUES ('ALTERDATA', @arquivo, @registros, 'OK')`).run({
+        db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros, status) VALUES ('ALTERDATA', @arquivo, @registros, 'OK')`).run({
           arquivo: req.file.originalname,
           registros: importados + atualizados
         });
@@ -233,7 +233,7 @@ router.post('/importar-funcionarios', async (req, res) => {
 });
 
 // ── GET /api/alterdata/template — CSV de exemplo para a contabilidade ─
-router.get('/template', async (req, res) => {
+router.get('/template', (req, res) => {
   const cabecalho = COLUNAS_PADRAO.join(';');
   const exemplo1  = '001;JOÃO DA SILVA SANTOS;123.456.789-09;123.45678.90-1;01/03/2024;;VIGILANTE;1.500,00;UFT - BLOCO A;A';
   const exemplo2  = '002;MARIA APARECIDA SOUSA;987.654.321-00;987.65432.10-0;15/06/2023;31/01/2026;SUPERVISORA;2.200,00;DETRAN - SEDE;D';

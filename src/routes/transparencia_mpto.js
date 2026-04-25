@@ -65,7 +65,7 @@ router.post('/coletar', async (req, res) => {
         tipo_licitacao, modalidade, objeto, raw_json, status_match,
         coletado_em, atualizado_em
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente',
-                datetime('now','localtime'), datetime('now','localtime'))
+                NOW(), NOW())
     `);
 
     let salvos = 0;

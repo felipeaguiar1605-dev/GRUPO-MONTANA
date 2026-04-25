@@ -5,7 +5,15 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { getDb, COMPANIES } = require('./db');
+
+// ─── ANTI-DUPLICAÇÃO ─────────────────────────────────────────────
+// Hash determinístico para deduplicação de despesas
+// Campos: empresa | data_iso | valor_bruto | fornecedor | descricao
+function dedupHash(...parts) {
+  return crypto.createHash('md5').update(parts.map(String).join('|')).digest('hex').slice(0, 32);
+}
 
 const router = express.Router();
 
@@ -423,12 +431,94 @@ router.get('/dashboard', (req, res) => {
   if (from) { dateFilter += ' AND e.data_iso >= @from'; params.from = from; }
   if (to) { dateFilter += ' AND e.data_iso <= @to'; params.to = to; }
 
+  // Contas vinculadas (IN SEGES/MP 05/2017) — não são fluxo operacional.
+  // Assessoria: conta BRB 031.015.240-2 (UFT). Ajustar conforme outras forem descobertas.
+  const CONTAS_VINCULADAS = ["'031.015.240-2'"]; // extensível
+  const CONTA_VINC_FILTER = ` AND (conta IS NULL OR conta NOT IN (${CONTAS_VINCULADAS.join(',')}))`;
+
+  // Status que NUNCA entram no fluxo operacional (mesmo que o valor tenha entrado na conta)
+  const STATUS_NAO_OPERACIONAL = `'INTERNO','INVESTIMENTO','TRANSFERENCIA','DEVOLVIDO','CONTA_VINCULADA'`;
+
+  // Palavras no histórico que indicam movimentação não-operacional mesmo quando status ainda não classificado
+  const HIST_NAO_OPERACIONAL = `(
+    UPPER(historico) LIKE '%TED DEVOLVIDA%' OR
+    UPPER(historico) LIKE '%BOLETO DEVOLVIDO%' OR
+    UPPER(historico) LIKE '%DESBL JUDICIAL%' OR
+    UPPER(historico) LIKE '%BACEN JUD%' OR
+    UPPER(historico) LIKE '%ESTORNO%' OR
+    UPPER(historico) LIKE '%RESGATE DEP%' OR
+    UPPER(historico) LIKE '%TRANSFERIDO DA POUPAN%' OR
+    UPPER(historico) LIKE '%MONTANA S LTDA%' OR
+    UPPER(historico) LIKE '%MONTANA ASS%' OR
+    UPPER(historico) LIKE '%NEVADA M LIMPEZA%' OR
+    UPPER(historico) LIKE '%PORTO DO VAU%' OR
+    UPPER(historico) LIKE '%MUSTANG%'
+  )`;
+
+  // Padrões de histórico que identificam débitos NÃO-operacionais:
+  //  (a) aplicações financeiras — dinheiro que sai para investimento próprio (volta como crédito)
+  //  (b) transferências intragrupo — Montana ↔ Nevada/Mustang/Montreal/Porto do Vau/Montana Seg etc.
+  //   (mesmo CNPJ raiz ou empresas-irmãs; NÃO é despesa operacional).
+  const DEBITO_APLICACAO = `(
+    UPPER(historico) LIKE '%BB RENDE%' OR
+    UPPER(historico) LIKE '%RENDE FACIL%' OR
+    UPPER(historico) LIKE '%RENDE F_CIL%' OR
+    UPPER(historico) LIKE '%CDB%' OR
+    UPPER(historico) LIKE '%LCI%' OR
+    UPPER(historico) LIKE '%LCA%' OR
+    UPPER(historico) LIKE '%POUPAN%' OR
+    UPPER(historico) LIKE '%APLICAC%' OR
+    UPPER(historico) LIKE '%APLICA_%'
+  )`;
+  const DEBITO_INTRAGRUPO = `(
+    (
+      UPPER(historico) LIKE '%MONTANA ASS%' OR
+      UPPER(historico) LIKE '%MONTANA S LTDA%' OR
+      UPPER(historico) LIKE '%MONTANA SERVICOS%' OR
+      UPPER(historico) LIKE '%MONTANA SEG%' OR
+      UPPER(historico) LIKE '%MONTREAL%' OR
+      UPPER(historico) LIKE '%NEVADA%' OR
+      UPPER(historico) LIKE '%PORTO DO VAU%' OR
+      UPPER(historico) LIKE '%PORTODOVAU%' OR
+      UPPER(historico) LIKE '%MUSTANG%' OR
+      UPPER(historico) LIKE '%OHIO MED%' OR
+      UPPER(historico) LIKE '%MESMA TITULARIDADE%' OR
+      UPPER(historico) LIKE '%CH.AVULSO ENTRE AG%' OR
+      UPPER(historico) LIKE '%TED MESMA TITUL%'
+    )
+    /* exclui salários/benefícios a funcionários (ex.: MONTANASEG FUNC/EMPREG) */
+    AND NOT (UPPER(historico) LIKE '%FUNC%' OR UPPER(historico) LIKE '%EMPREG%')
+  )`;
+
   // 1. Totais gerais dos extratos
   const totais = req.db.prepare(`
     SELECT
       COUNT(*) as total,
       COALESCE(SUM(credito), 0) as total_creditos,
       COALESCE(SUM(debito), 0) as total_debitos,
+      /* Débitos de aplicações financeiras (não são despesa) */
+      COALESCE(SUM(CASE WHEN debito > 0 AND ${DEBITO_APLICACAO} THEN debito END), 0) as debito_aplicacoes,
+      /* Débitos de transferências intragrupo (não são despesa) */
+      COALESCE(SUM(CASE WHEN debito > 0 AND ${DEBITO_INTRAGRUPO} THEN debito END), 0) as debito_intragrupo,
+      /* DESPESA OPERACIONAL = todos débitos − aplicações − intragrupo */
+      COALESCE(SUM(CASE
+        WHEN debito > 0
+         AND NOT ${DEBITO_APLICACAO}
+         AND NOT ${DEBITO_INTRAGRUPO}
+        THEN debito END), 0) as despesa_operacional,
+      /* Receita operacional: exclui transferências internas, investimentos, devoluções, conta vinculada */
+      COALESCE(SUM(CASE
+        WHEN credito > 0
+         AND (status_conciliacao IS NULL OR status_conciliacao NOT IN (${STATUS_NAO_OPERACIONAL}))
+         AND NOT ${HIST_NAO_OPERACIONAL}
+         ${CONTA_VINC_FILTER.replace(/AND /, 'AND ')}
+        THEN credito END), 0) as receita_operacional,
+      /* Quebra: quanto foi excluído e por qual motivo */
+      COALESCE(SUM(CASE WHEN credito > 0 AND status_conciliacao = 'INTERNO'       THEN credito END), 0) as cr_interno,
+      COALESCE(SUM(CASE WHEN credito > 0 AND status_conciliacao = 'INVESTIMENTO'  THEN credito END), 0) as cr_investimento,
+      COALESCE(SUM(CASE WHEN credito > 0 AND status_conciliacao = 'TRANSFERENCIA' THEN credito END), 0) as cr_transferencia,
+      COALESCE(SUM(CASE WHEN credito > 0 AND status_conciliacao = 'DEVOLVIDO'     THEN credito END), 0) as cr_devolvido,
+      COALESCE(SUM(CASE WHEN credito > 0 AND conta IN (${CONTAS_VINCULADAS.join(',')}) THEN credito END), 0) as cr_conta_vinculada,
       COUNT(CASE WHEN status_conciliacao = 'CONCILIADO' THEN 1 END) as conciliados,
       COUNT(CASE WHEN status_conciliacao = 'PENDENTE' THEN 1 END) as pendentes,
       COUNT(CASE WHEN status_conciliacao = 'PARCIAL' THEN 1 END) as parciais,
@@ -465,8 +555,10 @@ router.get('/dashboard', (req, res) => {
   const despesas = req.db.prepare(`SELECT COUNT(*) as total, COALESCE(SUM(valor_bruto),0) as total_bruto, COALESCE(SUM(valor_liquido),0) as total_liquido, COALESCE(SUM(CASE WHEN UPPER(categoria) IN ('IMPOSTOS','DARF','FGTS','INSS') THEN valor_bruto ELSE 0 END),0) as total_impostos FROM despesas WHERE 1=1 ${despDateFilter}`).get(despParams);
 
   // 7. Fluxo mensal — filtrado pelo período quando informado, senão últimos 6 meses
-  // Exclui créditos classificados como INTERNO (transferências entre contas) ou INVESTIMENTO (resgates)
-  const EXCLUIR_FLUXO = `AND status_conciliacao NOT IN ('INTERNO','INVESTIMENTO')`;
+  // Aplica os mesmos filtros da receita_operacional (status, histórico, conta vinculada)
+  const EXCLUIR_FLUXO = `AND (status_conciliacao IS NULL OR status_conciliacao NOT IN (${STATUS_NAO_OPERACIONAL}))
+     AND NOT ${HIST_NAO_OPERACIONAL}
+     ${CONTA_VINC_FILTER}`;
   const fluxoFilter = (from ? ' AND data_iso >= @from' : '') + (to ? ' AND data_iso <= @to' : '');
   const fluxoMensal = from || to
     ? req.db.prepare(`
@@ -511,8 +603,9 @@ router.get('/dashboard', (req, res) => {
 
   // 10. Alertas
   const alertas = [];
-  const semVinculo = req.db.prepare(`SELECT COUNT(*) as n FROM extratos WHERE credito > 0 AND (status_conciliacao = 'PENDENTE' OR status_conciliacao = '' OR status_conciliacao IS NULL)`).get();
-  if (semVinculo.n > 0) alertas.push({ tipo: 'warning', msg: `${semVinculo.n} créditos sem vínculo a contrato`, icon: '⚠️' });
+  // Alerta apenas para extratos de 2026 (anos anteriores não são prioridade operacional)
+  const semVinculo = req.db.prepare(`SELECT COUNT(*) as n FROM extratos WHERE credito > 0 AND data_iso >= '2026-01-01' AND (status_conciliacao = 'PENDENTE' OR status_conciliacao = '' OR status_conciliacao IS NULL)`).get();
+  if (semVinculo.n > 0) alertas.push({ tipo: 'warning', msg: `${semVinculo.n} créditos de 2026 sem vínculo a contrato`, icon: '⚠️' });
 
   const parciais = req.db.prepare(`SELECT COUNT(*) as n FROM extratos WHERE status_conciliacao = 'PARCIAL'`).get();
   if (parciais.n > 0) alertas.push({ tipo: 'info', msg: `${parciais.n} lançamentos com conciliação parcial`, icon: '🔶' });
@@ -549,18 +642,202 @@ router.get('/dashboard', (req, res) => {
   } catch(e) { errRes(res, e); }
 });
 
+// ─── DASHBOARD: APURAÇÃO POR TOMADOR (Regime de Caixa) ───────────
+// Base: Lei 10.833/2003 art. 10 §2° — considera NFs PAGAS no período (não emitidas).
+// NFs são consideradas pagas quando: status_conciliacao='CONCILIADO' E
+//   - data_pagamento BETWEEN from..to (preferencial), OU
+//   - extrato_id → extratos.data_iso BETWEEN from..to (fallback)
+router.get('/dashboard/apuracao-caixa', (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from e to obrigatórios (YYYY-MM-DD)' });
+
+    // Usa COALESCE: prefere data_pagamento; cai em data_iso do extrato vinculado se faltar
+    const rows = req.db.prepare(`
+      SELECT
+        COALESCE(NULLIF(nf.contrato_ref,''), '(sem contrato)') as contrato_ref,
+        COALESCE(NULLIF(nf.tomador,''),      '—')              as tomador,
+        COUNT(*)                                                as qtd,
+        COALESCE(SUM(nf.valor_bruto), 0)                        as total_bruto,
+        COALESCE(SUM(nf.valor_liquido), 0)                      as total_liquido,
+        COALESCE(SUM(nf.retencao), 0)                           as total_retencao,
+        COALESCE(SUM(nf.iss), 0)                                as total_iss,
+        COALESCE(SUM(nf.inss), 0)                               as total_inss,
+        COALESCE(SUM(nf.ir), 0)                                 as total_ir,
+        COALESCE(SUM(nf.csll), 0)                               as total_csll,
+        COALESCE(SUM(nf.pis), 0)                                as total_pis_ret,
+        COALESCE(SUM(nf.cofins), 0)                             as total_cofins_ret
+      FROM notas_fiscais nf
+      LEFT JOIN extratos e ON e.id = nf.extrato_id
+      WHERE nf.status_conciliacao = 'CONCILIADO'
+        AND (
+          (NULLIF(nf.data_pagamento,'') IS NOT NULL AND nf.data_pagamento BETWEEN @from AND @to)
+          OR
+          (NULLIF(nf.data_pagamento,'') IS NULL AND e.data_iso BETWEEN @from AND @to)
+        )
+      GROUP BY contrato_ref, tomador
+      ORDER BY total_bruto DESC
+    `).all({ from, to });
+
+    // Totais e apuração tributária (aplicável apenas à Assessoria — Lucro Real)
+    const totalBruto    = rows.reduce((s, r) => s + (r.total_bruto || 0), 0);
+    const totalLiquido  = rows.reduce((s, r) => s + (r.total_liquido || 0), 0);
+    const totalRetencao = rows.reduce((s, r) => s + (r.total_retencao || 0), 0);
+
+    const isAssessoria = req.companyKey === 'assessoria';
+    // Lucro Real não-cumulativo: 1,65% PIS + 7,60% COFINS sobre receita
+    // Lucro Real Anual cumulativo (Segurança): 0,65% PIS + 3,00% COFINS
+    const aliq = isAssessoria
+      ? { pis: 0.0165, cofins: 0.0760, regime: 'Lucro Real — não-cumulativo' }
+      : req.companyKey === 'seguranca'
+        ? { pis: 0.0065, cofins: 0.0300, regime: 'Lucro Real — cumulativo' }
+        : { pis: 0,      cofins: 0,     regime: 'Simples Nacional (sem PIS/COFINS próprio)' };
+
+    const pisDevido    = +(totalBruto * aliq.pis).toFixed(2);
+    const cofinsDevido = +(totalBruto * aliq.cofins).toFixed(2);
+
+    // Retenções na fonte (apenas federais: UFT, UFNT) atuam como crédito
+    const pisRetido    = rows.reduce((s, r) => s + (r.total_pis_ret    || 0), 0);
+    const cofinsRetido = rows.reduce((s, r) => s + (r.total_cofins_ret || 0), 0);
+
+    res.json({
+      periodo: { from, to },
+      empresa: req.companyKey,
+      regime: aliq.regime,
+      tomadores: rows.map(r => ({
+        contrato_ref:    r.contrato_ref,
+        tomador:         r.tomador,
+        qtd:             r.qtd,
+        total_bruto:     +(+r.total_bruto).toFixed(2),
+        total_liquido:   +(+r.total_liquido).toFixed(2),
+        total_retencao:  +(+r.total_retencao).toFixed(2),
+        pct_retencao:    r.total_bruto > 0 ? +((r.total_retencao / r.total_bruto) * 100).toFixed(2) : 0,
+      })),
+      totais: {
+        qtd_nfs:        rows.reduce((s, r) => s + r.qtd, 0),
+        total_bruto:    +totalBruto.toFixed(2),
+        total_liquido:  +totalLiquido.toFixed(2),
+        total_retencao: +totalRetencao.toFixed(2),
+      },
+      apuracao: {
+        pis_aliquota:      aliq.pis,
+        cofins_aliquota:   aliq.cofins,
+        pis_devido:        pisDevido,
+        cofins_devido:     cofinsDevido,
+        pis_retido_fonte:  +pisRetido.toFixed(2),
+        cofins_retido_fonte: +cofinsRetido.toFixed(2),
+        pis_a_pagar:       +(pisDevido - pisRetido).toFixed(2),
+        cofins_a_pagar:    +(cofinsDevido - cofinsRetido).toFixed(2),
+      },
+    });
+  } catch(e) { errRes(res, e); }
+});
+
+// ─── EXPOSIÇÃO INTRAGRUPO ────────────────────────────────────────
+// Consolida NFs emitidas por empresas do grupo (Nevada, Montreal, Porto do Vau, Mustang,
+// Montana) que ainda estão em aberto (sem extrato vinculado). Cruza as 4 bases.
+router.get('/dashboard/exposicao-intragrupo', (_req, res) => {
+  try {
+    const GRUPO = [
+      { pat: 'NEVADA',       nome: 'Nevada Embalagens/Limpeza' },
+      { pat: 'MONTREAL',     nome: 'Montreal Máq./Ferramentas' },
+      { pat: 'PORTO DO VAU', nome: 'Porto do Vau' },
+      { pat: 'MUSTANG',      nome: 'Mustang' },
+      { pat: 'MONTANA S',    nome: 'Montana Segurança' },
+      { pat: 'MONTANA ASS',  nome: 'Montana Assessoria' },
+    ];
+    const hoje = new Date().toISOString().slice(0, 10);
+
+    const exposicao = [];
+    for (const [empKey, empMeta] of Object.entries(COMPANIES)) {
+      let dbEmp;
+      try { dbEmp = getDb(empKey); } catch { continue; }
+      // Verifica se tabela despesas existe e tem linhas
+      const hasTab = dbEmp.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='despesas'`).get();
+      if (!hasTab) continue;
+
+      const selfName = (empMeta.nomeAbrev || '').toUpperCase();
+      for (const grp of GRUPO) {
+        // Pula self-match (ex: padrão "MONTANA ASS" no DB Assessoria, "MONTANA S" no DB Segurança)
+        if (selfName.includes(grp.pat)) continue;
+        const row = dbEmp.prepare(`
+          SELECT
+            COUNT(*) q_total,
+            COALESCE(SUM(valor_liquido),0) v_total,
+            COUNT(CASE WHEN extrato_id IS NULL THEN 1 END) q_aberto,
+            COALESCE(SUM(CASE WHEN extrato_id IS NULL THEN valor_liquido END),0) v_aberto,
+            MIN(CASE WHEN extrato_id IS NULL THEN data_iso END) mais_antiga,
+            MAX(CASE WHEN extrato_id IS NULL THEN data_iso END) mais_recente
+          FROM despesas
+          WHERE UPPER(COALESCE(fornecedor,'') || ' ' || COALESCE(descricao,'')) LIKE '%' || @pat || '%'
+        `).get({ pat: grp.pat });
+
+        if (row.q_total === 0) continue;
+        // Calcula idade (dias) da NF mais antiga em aberto
+        let diasMax = 0;
+        if (row.mais_antiga) {
+          diasMax = Math.floor((new Date(hoje) - new Date(row.mais_antiga)) / 86400000);
+        }
+        exposicao.push({
+          empresa_devedora: empMeta.nomeAbrev || empKey,
+          empresa_devedora_key: empKey,
+          credor: grp.nome,
+          credor_pat: grp.pat,
+          q_total: row.q_total,
+          v_total: row.v_total,
+          q_aberto: row.q_aberto,
+          v_aberto: row.v_aberto,
+          mais_antiga_aberto: row.mais_antiga,
+          mais_recente_aberto: row.mais_recente,
+          dias_max_aberto: diasMax,
+          alerta: diasMax >= 60 ? 'critico' : diasMax >= 30 ? 'atencao' : 'ok',
+        });
+      }
+    }
+
+    // Rank por valor em aberto
+    exposicao.sort((a, b) => b.v_aberto - a.v_aberto);
+
+    const total_aberto = exposicao.reduce((s, r) => s + r.v_aberto, 0);
+    const total_pago   = exposicao.reduce((s, r) => s + (r.v_total - r.v_aberto), 0);
+    const q_aberto     = exposicao.reduce((s, r) => s + r.q_aberto, 0);
+    const maior_atraso = exposicao.reduce((m, r) => r.dias_max_aberto > m ? r.dias_max_aberto : m, 0);
+
+    res.json({
+      exposicao,
+      resumo: {
+        total_aberto,
+        total_pago,
+        q_aberto,
+        q_linhas: exposicao.length,
+        maior_atraso_dias: maior_atraso,
+        ref: hoje,
+      },
+    });
+  } catch(e) { errRes(res, e); }
+});
+
 // ─── EXTRATOS ────────────────────────────────────────────────────
 // Meses disponíveis no banco para o período selecionado (para botões dinâmicos)
+// Deriva o mês a partir de data_iso (fonte de verdade) em vez de ler a coluna
+// `mes` — que historicamente foi poluida com formatos diversos: 'ABR', 'abril
+// 2026', '2026-04', 'Extrato....csv.xls', etc. Assim o filtro sempre funciona
+// independente de como a importação populou `mes`.
 router.get('/extratos/meses', (req, res) => {
   try {
     const { from, to } = req.query;
-    let where = '1=1';
+    let where = `data_iso IS NOT NULL AND length(data_iso) >= 7`;
     const params = {};
     if (from) { where += ' AND data_iso >= @from'; params.from = from; }
     if (to)   { where += ' AND data_iso <= @to';   params.to   = to;   }
     const MES_ORDER = ['JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DEZ'];
-    const rows = req.db.prepare(`SELECT DISTINCT mes FROM extratos WHERE ${where} AND length(mes)=3`).all(params);
-    const meses = rows.map(r => r.mes).filter(m => MES_ORDER.includes(m))
+    const rows = req.db.prepare(`
+      SELECT DISTINCT substr(data_iso, 6, 2) as mm
+      FROM extratos WHERE ${where}
+    `).all(params);
+    const meses = rows
+      .map(r => MES_ORDER[parseInt(r.mm, 10) - 1])
+      .filter(m => !!m)
       .sort((a,b) => MES_ORDER.indexOf(a) - MES_ORDER.indexOf(b));
     res.json({ meses });
   } catch(e) { errRes(res, e); }
@@ -568,14 +845,21 @@ router.get('/extratos/meses', (req, res) => {
 
 router.get('/extratos', (req, res) => {
   try {
-  const { from, to, status, mes, posto, page = 1, limit = 100 } = req.query;
+  const { from, to, status, mes, posto, page = 1, limit = 100, somente_creditos } = req.query;
   let where = '1=1';
   const params = {};
   if (from) { where += ' AND data_iso >= @from'; params.from = from; }
   if (to) { where += ' AND data_iso <= @to'; params.to = to; }
   if (status) { where += ' AND status_conciliacao = @status'; params.status = status; }
-  if (mes) { where += ' AND mes = @mes'; params.mes = mes; }
+  if (mes) {
+    // Filtro por mês derivado de data_iso (coluna `mes` é poluida por imports legados).
+    // Aceita tanto 'ABR'/'FEV' quanto '04'/'02' vindos do frontend.
+    const MES_NUM = { JAN:'01',FEV:'02',MAR:'03',ABR:'04',MAI:'05',JUN:'06',JUL:'07',AGO:'08',SET:'09',OUT:'10',NOV:'11',DEZ:'12' };
+    const mm = MES_NUM[String(mes).toUpperCase()] || (String(mes).length === 2 ? mes : null);
+    if (mm) { where += ` AND substr(data_iso, 6, 2) = @mm AND length(data_iso) >= 7`; params.mm = mm; }
+  }
   if (posto) { where += ' AND posto = @posto'; params.posto = posto; }
+  if (somente_creditos === '1') { where += ' AND credito > 0'; }
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit);
@@ -625,7 +909,9 @@ router.get('/contratos/saude', (req, res) => {
     // nfWhere: fragmento WHERE para notas_fiscais (tomador matching)
     // nfParams: parâmetros para o fragmento
     // Para UFT limpeza vs motorista: usamos discriminacao para diferenciar
-    const NF_DATE_FROM = '2024-01-01'; // Só NFs do período relevante (contratos ativos)
+    // Período dinâmico (from/to) ou default 2024-01-01 (histórico relevante)
+    const NF_DATE_FROM = req.query.from || '2024-01-01';
+    const NF_DATE_TO   = req.query.to   || '9999-12-31';
 
     const MAPA_SAUDE = {
       'UFT 16/2025': {
@@ -648,13 +934,13 @@ router.get('/contratos/saude', (req, res) => {
         nfWhere: `(tomador LIKE ? OR tomador LIKE ?)`,
         nfParams: ['%PREVIPALMAS%','%PREVIDENCIA SOCIAL DO MUNICIPIO DE PALMAS%'],
       },
-      'SEDUC Limpeza/Copeiragem': {
+      'SEDUC 016/2023': {
         nfWhere: `tomador LIKE ?`,
         nfParams: ['%SECRETARIA DA EDUCACAO%'],
       },
       'SESAU 178/2022': {
-        nfWhere: `tomador LIKE ?`,
-        nfParams: ['%SECRETARIA DE ESTADO DA SAUDE DO TOCANTINS%'],
+        nfWhere: `(tomador LIKE ? OR tomador LIKE ? OR tomador LIKE ?)`,
+        nfParams: ['%SECRETARIA DE ESTADO DA SAUDE%','%SECRETARIA DE ESTADO DE SAUDE%','%SECRETARIA DE ESTADO DE SAÚDE%'],
       },
       'UFNT 30/2022': {
         nfWhere: `(tomador LIKE ? OR tomador LIKE ?)`,
@@ -675,6 +961,18 @@ router.get('/contratos/saude', (req, res) => {
       'CBMTO 011/2023 + 5°TA': {
         nfWhere: `(tomador LIKE ? OR tomador LIKE ?)`,
         nfParams: ['%CORPO DE BOMBEIROS%','%CBMTO%'],
+      },
+      'PREFEITURA 062/2024': {
+        nfWhere: `tomador LIKE ?`,
+        nfParams: ['%MUNICIPIO DE PALMAS%'],
+      },
+      'TJ 73/2020': {
+        nfWhere: `tomador LIKE ? AND data_emissao < '2024-06-01'`,
+        nfParams: ['%FUNDO ESPECIAL DE MODERNIZACAO%'],
+      },
+      'TJ 440/2024': {
+        nfWhere: `tomador LIKE ? AND data_emissao >= '2024-06-01'`,
+        nfParams: ['%FUNDO ESPECIAL DE MODERNIZACAO%'],
       },
     };
 
@@ -703,6 +1001,7 @@ router.get('/contratos/saude', (req, res) => {
                  MAX(CASE WHEN status_conciliacao='CONCILIADO' THEN data_emissao END) as ultima_conciliada
           FROM notas_fiscais
           WHERE data_emissao >= '${NF_DATE_FROM}'
+            AND data_emissao <= '${NF_DATE_TO}'
             AND (${mapa.nfWhere})
         `).get(...mapa.nfParams);
         qtdNFs = nfRow.qtd; totalNFs = nfRow.total;
@@ -995,19 +1294,26 @@ router.patch('/parcelas/:id', (req, res) => {
 
 // ─── NOTAS FISCAIS ───────────────────────────────────────────────
 router.get('/nfs', (req, res) => {
-  const { cidade, tomador, from, to, page = 1, limit = 100 } = req.query;
+  const { cidade, tomador, from, to, aberto, page = 1, limit = 100 } = req.query;
   let where = '1=1';
   const params = {};
   if (cidade) { where += ' AND cidade = @cidade'; params.cidade = cidade; }
   if (tomador) { where += ' AND tomador = @tomador'; params.tomador = tomador; }
   if (from) { where += ' AND data_emissao >= @from'; params.from = from; }
   if (to)   { where += ' AND data_emissao <= @to';   params.to = to; }
+  // aberto=1 → só NFs em aberto (não conciliadas e valor_liquido > 0)
+  if (aberto === '1' || aberto === 'true') {
+    where += ` AND (status_conciliacao IS NULL OR status_conciliacao NOT IN ('CONCILIADO','CONCILIADA','ASSESSORIA'))
+               AND COALESCE(valor_liquido,0) > 0`;
+  }
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit); params.offset = offset;
 
   const total = req.db.prepare(`SELECT COUNT(*) as cnt FROM notas_fiscais WHERE ${where}`).get(params).cnt;
-  const rows = req.db.prepare(`SELECT * FROM notas_fiscais WHERE ${where} ORDER BY id DESC LIMIT @limit OFFSET @offset`).all(params);
-  res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
+  const rows = req.db.prepare(`SELECT * FROM notas_fiscais WHERE ${where} ORDER BY data_emissao DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
+  // Soma total (útil p/ KPI independente do paginado)
+  const soma = req.db.prepare(`SELECT COALESCE(SUM(valor_liquido),0) as soma_liq, COALESCE(SUM(valor_bruto),0) as soma_bruto FROM notas_fiscais WHERE ${where}`).get(params);
+  res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows, soma_liquido: soma.soma_liq, soma_bruto: soma.soma_bruto });
 });
 
 router.delete('/nfs/:id', (req, res) => {
@@ -1102,6 +1408,85 @@ router.post('/nfs/corrigir-lote', (req, res) => {
     audit(req, 'UPDATE_LOTE', 'notas_fiscais', '', `Correção em lote: ${total} NFs`);
     dashCacheInvalidate(req.companyKey);
     res.json({ ok: true, atualizadas: total });
+  } catch(e) { errRes(res, e); }
+});
+
+// ─── AUTO-VINCULAÇÃO DE NFs ───────────────────────────────────────
+// POST /api/nfs/auto-vincular
+// Percorre NFs sem contrato_ref e vincula automaticamente por tomador.
+// Aceita body opcional: { somente_sem_contrato: true (default), competencia: '2026-04' }
+router.post('/nfs/auto-vincular', (req, res) => {
+  try {
+    const { somente_sem_contrato = true, competencia } = req.body || {};
+
+    // Regras de vinculação automática: tomador_like → contrato
+    // Regras com data_condicao para split de contratos TJ
+    const REGRAS = [
+      { like: '%MUNICIPIO DE PALMAS%',                    contrato: 'PREFEITURA 062/2024' },
+      { like: '%FUNDO ESPECIAL DE MODERNIZACAO%',         contrato: 'TJ 73/2020',   data_ate: '2024-05-31' },
+      { like: '%FUNDO ESPECIAL DE MODERNIZACAO%',         contrato: 'TJ 440/2024',  data_de:  '2024-06-01' },
+      { like: '%FUNDACAO UNIVERSIDADE FEDERAL DO TOCANTIN%', contrato: 'UFT 16/2025',
+        discriminacao_not: `UPPER(discriminacao) NOT LIKE '%MOTORISTA%' AND UPPER(discriminacao) NOT LIKE '%MOTOCICLISTA%' AND UPPER(discriminacao) NOT LIKE '%TRATORISTA%'` },
+      { like: '%FUNDACAO UNIVERSIDADE FEDERAL DO TOCANTIN%', contrato: 'UFT MOTORISTA 05/2025',
+        discriminacao_req: `(UPPER(discriminacao) LIKE '%MOTORISTA%' OR UPPER(discriminacao) LIKE '%MOTOCICLISTA%' OR UPPER(discriminacao) LIKE '%TRATORISTA%')` },
+      { like: '%UNIVERSIDADE FEDERAL DO NORTE DO TOCANTINS%', contrato: 'UFNT 30/2022' },
+      { like: '%UFNT%',                                    contrato: 'UFNT 30/2022' },
+      { like: '%UNIVERSIDADE ESTADUAL DO TOCANTINS%',      contrato: 'UNITINS 003/2023 + 3°TA' },
+      { like: '%DEPARTAMENTO ESTADUAL DE TRANSITO%',       contrato: 'DETRAN 41/2023 + 2°TA' },
+      { like: '%SECRETARIA DO MEIO AMBIENTE%',             contrato: 'SEMARH 32/2024' },
+      { like: '%PREVIPALMAS%',                             contrato: 'PREVI PALMAS — em vigor' },
+      { like: '%PREVIDENCIA SOCIAL DO MUNICIPIO%',         contrato: 'PREVI PALMAS — em vigor' },
+      { like: '%SECRETARIA DA EDUCACAO%',                  contrato: 'SEDUC Limpeza/Copeiragem' },
+      { like: '%SECRETARIA DE ESTADO DA SAUDE%',           contrato: 'SESAU 178/2022' },
+      { like: '%SECRETARIA DE ESTADO DE SAUDE%',           contrato: 'SESAU 178/2022' },
+      { like: '%SECRETARIA DE ESTADO DE SAÚDE%',           contrato: 'SESAU 178/2022' },
+      { like: '%TRIBUNAL DE CONTAS DO ESTADO%',            contrato: 'TCE 117/2024' },
+      { like: '%SECRETARIA MUNICIPAL DE SAUDE%',           contrato: 'Sec. Saúde Palmas 192/2025' },
+      { like: '%SEMUS%',                                   contrato: 'Sec. Saúde Palmas 192/2025' },
+      { like: '%CORPO DE BOMBEIROS%',                      contrato: 'CBMTO 011/2023 + 5°TA' },
+      { like: '%CBMTO%',                                   contrato: 'CBMTO 011/2023 + 5°TA' },
+    ];
+
+    let totalVinculadas = 0;
+    const resumo = [];
+
+    const upd = req.db.prepare(`
+      UPDATE notas_fiscais SET contrato_ref = @contrato
+      WHERE id = @id
+    `);
+
+    req.db.transaction(() => {
+      for (const regra of REGRAS) {
+        let where = `tomador LIKE @like`;
+        const params = { like: regra.like };
+
+        if (somente_sem_contrato) where += ` AND (contrato_ref IS NULL OR contrato_ref = '')`;
+        if (competencia) { where += ` AND (competencia = @comp OR data_emissao LIKE @compLike)`; params.comp = competencia; params.compLike = `${competencia}%`; }
+        if (regra.data_ate) { where += ` AND data_emissao <= @data_ate`; params.data_ate = regra.data_ate; }
+        if (regra.data_de)  { where += ` AND data_emissao >= @data_de`;  params.data_de  = regra.data_de; }
+        if (regra.discriminacao_not) where += ` AND (discriminacao IS NULL OR (${regra.discriminacao_not}))`;
+        if (regra.discriminacao_req) where += ` AND ${regra.discriminacao_req}`;
+
+        const nfs = req.db.prepare(`SELECT id FROM notas_fiscais WHERE ${where}`).all(params);
+        if (nfs.length > 0) {
+          nfs.forEach(n => upd.run({ id: n.id, contrato: regra.contrato }));
+          totalVinculadas += nfs.length;
+          resumo.push({ contrato: regra.contrato, vinculadas: nfs.length });
+        }
+      }
+    })();
+
+    audit(req, 'AUTO_VINCULAR', 'notas_fiscais', '', `Auto-vinculação: ${totalVinculadas} NFs`);
+    dashCacheInvalidate(req.companyKey);
+
+    // NFs ainda sem vinculação
+    const semContrato = req.db.prepare(`
+      SELECT COUNT(*) as cnt FROM notas_fiscais
+      WHERE (contrato_ref IS NULL OR contrato_ref = '')
+        AND status_conciliacao != 'CANCELADA'
+    `).get();
+
+    res.json({ ok: true, total_vinculadas: totalVinculadas, resumo, ainda_sem_contrato: semContrato.cnt });
   } catch(e) { errRes(res, e); }
 });
 
@@ -2003,20 +2388,25 @@ function calcRetencoes(categoria, valor_bruto) {
 }
 
 router.get('/despesas', (req, res) => {
-  const { categoria, fornecedor, status, from, to, contrato_ref, page = 1, limit = 100 } = req.query;
+  const { categoria, fornecedor, status, from, to, contrato_ref, centro_custo, page = 1, limit = 100 } = req.query;
   let where = '1=1';
   const params = {};
-  if (categoria) { where += ' AND categoria = @categoria'; params.categoria = categoria; }
-  if (fornecedor) { where += ' AND fornecedor = @fornecedor'; params.fornecedor = fornecedor; }
-  if (status) { where += ' AND status = @status'; params.status = status; }
-  if (from) { where += ' AND data_iso >= @from'; params.from = from; }
-  if (to) { where += ' AND data_iso <= @to'; params.to = to; }
+  if (categoria)    { where += ' AND categoria = @categoria';       params.categoria    = categoria; }
+  if (fornecedor)   { where += ' AND fornecedor = @fornecedor';     params.fornecedor   = fornecedor; }
+  if (status)       { where += ' AND status = @status';             params.status       = status; }
+  if (from)         { where += ' AND data_iso >= @from';            params.from         = from; }
+  if (to)           { where += ' AND data_iso <= @to';              params.to           = to; }
   if (contrato_ref) { where += ' AND contrato_ref = @contrato_ref'; params.contrato_ref = contrato_ref; }
+  if (centro_custo !== undefined) {
+    // '' = contrato específico (ou não classificado), 'ESCRITORIO'|'OPERACIONAL'|'DIVIDENDOS' = overhead
+    where += ' AND COALESCE(centro_custo,\'\') = @centro_custo';
+    params.centro_custo = centro_custo;
+  }
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit); params.offset = offset;
 
   const total = req.db.prepare(`SELECT COUNT(*) as cnt FROM despesas WHERE ${where}`).get(params).cnt;
-  const rows = req.db.prepare(`SELECT * FROM despesas WHERE ${where} ORDER BY data_iso DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
+  const rows  = req.db.prepare(`SELECT * FROM despesas WHERE ${where} ORDER BY data_iso DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
   res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
 });
 
@@ -2049,7 +2439,85 @@ router.get('/despesas/resumo', (req, res) => {
     GROUP BY categoria ORDER BY total DESC
   `).all(params);
 
-  res.json({ totais, porCategoria });
+  // Overhead (despesas não vinculadas a contrato — ESCRITORIO, OPERACIONAL, DIVIDENDOS)
+  const overhead = req.db.prepare(`
+    SELECT
+      COALESCE(centro_custo,'') as tipo,
+      COUNT(*) as qtd,
+      COALESCE(SUM(valor_bruto), 0) as total
+    FROM despesas
+    WHERE COALESCE(centro_custo,'') IN ('ESCRITORIO','OPERACIONAL','DIVIDENDOS') ${dateFilter}
+    GROUP BY COALESCE(centro_custo,'')
+    ORDER BY total DESC
+  `).all(params);
+
+  const totalOverhead = overhead
+    .filter(r => r.tipo !== 'DIVIDENDOS')
+    .reduce((s, r) => s + r.total, 0);
+
+  res.json({ totais, porCategoria, overhead, totalOverhead });
+});
+
+// ─── RATEIO DE OVERHEAD POR CONTRATO ─────────────────────────────────────────
+router.get('/despesas/rateio', (req, res) => {
+  const { from, to } = req.query;
+  let dateFilter = '';
+  const params = {};
+  if (from) { dateFilter += ' AND data_iso >= @from'; params.from = from; }
+  if (to)   { dateFilter += ' AND data_iso <= @to';   params.to   = to; }
+
+  // Total de overhead rateável (ESCRITORIO + OPERACIONAL, excluindo DIVIDENDOS)
+  const overheadRows = req.db.prepare(`
+    SELECT COALESCE(centro_custo,'') as tipo,
+           COUNT(*) as qtd,
+           COALESCE(SUM(valor_bruto), 0) as total
+    FROM despesas
+    WHERE COALESCE(centro_custo,'') IN ('ESCRITORIO','OPERACIONAL') ${dateFilter}
+    GROUP BY COALESCE(centro_custo,'')
+  `).all(params);
+
+  const totalOverhead = overheadRows.reduce((s, r) => s + r.total, 0);
+
+  // Dividendos (separado — não entra no custo operacional)
+  const dividendos = req.db.prepare(`
+    SELECT COALESCE(SUM(valor_bruto),0) as total, COUNT(*) as qtd
+    FROM despesas WHERE COALESCE(centro_custo,'')='DIVIDENDOS' ${dateFilter}
+  `).get(params);
+
+  // Contratos ativos para base de rateio — usa valor_mensal_bruto como peso
+  const contratos = req.db.prepare(`
+    SELECT numContrato, contrato, orgao,
+           COALESCE(valor_mensal_bruto, 0) as valor_mensal_bruto,
+           COALESCE(total_pago, 0) as total_pago
+    FROM contratos
+    WHERE status = 'ATIVO' AND COALESCE(valor_mensal_bruto, 0) > 0
+    ORDER BY valor_mensal_bruto DESC
+  `).all();
+
+  const somaBase = contratos.reduce((s, c) => s + c.valor_mensal_bruto, 0);
+
+  const rateio = contratos.map(c => {
+    const proporcao = somaBase > 0 ? c.valor_mensal_bruto / somaBase : 0;
+    return {
+      numContrato:       c.numContrato,
+      contrato:          c.contrato,
+      orgao:             c.orgao,
+      valor_mensal:      +c.valor_mensal_bruto.toFixed(2),
+      proporcao_pct:     +(proporcao * 100).toFixed(2),
+      overhead_rateado:  +(proporcao * totalOverhead).toFixed(2),
+    };
+  });
+
+  res.json({
+    ok: true,
+    totalOverhead:     +totalOverhead.toFixed(2),
+    overheadPorTipo:   overheadRows,
+    dividendos:        { total: +dividendos.total.toFixed(2), qtd: dividendos.qtd },
+    somaBase:          +somaBase.toFixed(2),
+    contratos_na_base: contratos.length,
+    rateio,
+    periodo:           { from: from || null, to: to || null },
+  });
 });
 
 router.get('/despesas/compensacao', (req, res) => {
@@ -2227,7 +2695,8 @@ router.get('/apuracao-caixa', (req, res) => {
 });
 
 router.post('/despesas', (req, res) => {
-  const { categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, competencia, valor_bruto, obs, contrato_ref } = req.body;
+  const { categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa,
+          competencia, valor_bruto, obs, contrato_ref, centro_custo } = req.body;
   if (!valor_bruto) return res.status(400).json({ error: 'valor_bruto obrigatório' });
 
   const auto = calcRetencoes(categoria || 'FORNECEDOR', valor_bruto);
@@ -2242,20 +2711,31 @@ router.post('/despesas', (req, res) => {
   ret.total_retencao = +(ret.irrf + ret.csll + ret.pis_retido + ret.cofins_retido + ret.inss_retido + ret.iss_retido).toFixed(2);
   ret.valor_liquido = +(valor_bruto - ret.total_retencao).toFixed(2);
 
+  const data_iso_val = parseDateBR(data_despesa || '');
+  const dedup_hash_val = dedupHash(req.companyKey, data_iso_val, valor_bruto, fornecedor || '', descricao || '');
+
   const r = req.db.prepare(`
-    INSERT INTO despesas (categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, data_iso, competencia,
-      valor_bruto, irrf, csll, pis_retido, cofins_retido, inss_retido, iss_retido, total_retencao, valor_liquido, status, obs, contrato_ref)
+    INSERT OR IGNORE INTO despesas (categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, data_iso, competencia,
+      valor_bruto, irrf, csll, pis_retido, cofins_retido, inss_retido, iss_retido, total_retencao, valor_liquido,
+      status, obs, contrato_ref, centro_custo, dedup_hash)
     VALUES (@categoria, @descricao, @fornecedor, @cnpj, @nf, @data, @data_iso, @comp,
-      @vbruto, @irrf, @csll, @pis, @cofins, @inss, @iss, @total_ret, @vliq, @status, @obs, @contrato_ref)
+      @vbruto, @irrf, @csll, @pis, @cofins, @inss, @iss, @total_ret, @vliq,
+      @status, @obs, @contrato_ref, @centro_custo, @dedup_hash)
   `).run({
     categoria: categoria || 'FORNECEDOR', descricao: descricao || '', fornecedor: fornecedor || '',
     cnpj: cnpj_fornecedor || '', nf: nf_numero || '', data: data_despesa || '',
-    data_iso: parseDateBR(data_despesa || ''), comp: competencia || '',
+    data_iso: data_iso_val, comp: competencia || '',
     vbruto: valor_bruto, ...ret, irrf: ret.irrf, csll: ret.csll, pis: ret.pis_retido,
     cofins: ret.cofins_retido, inss: ret.inss_retido, iss: ret.iss_retido,
     total_ret: ret.total_retencao, vliq: ret.valor_liquido,
-    status: req.body.status || 'PENDENTE', obs: obs || '', contrato_ref: contrato_ref || ''
+    status: req.body.status || 'PENDENTE', obs: obs || '',
+    contrato_ref: contrato_ref || '', centro_custo: centro_custo || '',
+    dedup_hash: dedup_hash_val,
   });
+
+  if (r.changes === 0) {
+    return res.status(409).json({ ok: false, error: 'Despesa duplicada detectada (mesma data, valor, fornecedor e descrição)' });
+  }
 
   res.json({ ok: true, id: r.lastInsertRowid, retencoes: ret });
 });
@@ -2266,7 +2746,7 @@ router.patch('/despesas/:id', (req, res) => {
   if (!desp) return res.status(404).json({ error: 'Despesa não encontrada' });
 
   const fields = ['categoria','descricao','fornecedor','cnpj_fornecedor','nf_numero','data_despesa','competencia',
-    'valor_bruto','irrf','csll','pis_retido','cofins_retido','inss_retido','iss_retido','status','obs','contrato_ref'];
+    'valor_bruto','irrf','csll','pis_retido','cofins_retido','inss_retido','iss_retido','status','obs','contrato_ref','centro_custo'];
   const updates = [];
   const params = { id: parseInt(id) };
   for (const f of fields) {
@@ -2308,10 +2788,10 @@ router.post('/import/despesas', (req, res, next) => getUpload(req).single('file'
 
     const header = lines[0].split(';').map(h => h.trim().replace(/"/g, ''));
     const insert = req.db.prepare(`
-      INSERT INTO despesas (categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, data_iso, competencia,
-        valor_bruto, irrf, csll, pis_retido, cofins_retido, inss_retido, iss_retido, total_retencao, valor_liquido, status, obs, contrato_ref)
+      INSERT OR IGNORE INTO despesas (categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, data_iso, competencia,
+        valor_bruto, irrf, csll, pis_retido, cofins_retido, inss_retido, iss_retido, total_retencao, valor_liquido, status, obs, contrato_ref, dedup_hash)
       VALUES (@categoria, @descricao, @fornecedor, @cnpj, @nf, @data, @data_iso, @comp,
-        @vbruto, @irrf, @csll, @pis, @cofins, @inss, @iss, @total_ret, @vliq, @status, @obs, @contrato_ref)
+        @vbruto, @irrf, @csll, @pis, @cofins, @inss, @iss, @total_ret, @vliq, @status, @obs, @contrato_ref, @dedup_hash)
     `);
 
     let imported = 0;
@@ -2325,15 +2805,19 @@ router.post('/import/despesas', (req, res, next) => getUpload(req).single('file'
         const cat = (row.categoria || row.tipo || 'FORNECEDOR').toUpperCase();
         const vbruto = parseDecimalBR(row['valor bruto'] || row.valor_bruto || row.valor || '0');
         const auto = calcRetencoes(cat, vbruto);
+        const data_iso_row = parseDateBR(row.data || row.data_despesa || '');
+        const fornecedor_row = row.fornecedor || '';
+        const descricao_row = row.descricao || row['descrição'] || '';
+        const dedup_hash_row = dedupHash(req.companyKey, data_iso_row, vbruto, fornecedor_row, descricao_row);
 
-        insert.run({
+        const r = insert.run({
           categoria: cat,
-          descricao: row.descricao || row['descrição'] || '',
-          fornecedor: row.fornecedor || '',
+          descricao: descricao_row,
+          fornecedor: fornecedor_row,
           cnpj: row.cnpj || row.cnpj_fornecedor || '',
           nf: row.nf || row.nf_numero || row['nota fiscal'] || '',
           data: row.data || row.data_despesa || '',
-          data_iso: parseDateBR(row.data || row.data_despesa || ''),
+          data_iso: data_iso_row,
           comp: row.competencia || row.comp || '',
           vbruto, ...auto,
           irrf: parseDecimalBR(row.irrf) || auto.irrf,
@@ -2346,9 +2830,10 @@ router.post('/import/despesas', (req, res, next) => getUpload(req).single('file'
           vliq: auto.valor_liquido,
           status: row.status || 'PENDENTE',
           obs: row.obs || '',
-          contrato_ref: row.contrato || row.contrato_ref || ''
+          contrato_ref: row.contrato || row.contrato_ref || '',
+          dedup_hash: dedup_hash_row,
         });
-        imported++;
+        if (r.changes > 0) imported++;
       }
     });
     batch();
@@ -3107,58 +3592,6 @@ router.get('/conta-vinculada/estimativa', (req, res) => {
   }
 });
 
-// ─── CONTA VINCULADA — Extratos reais ───────────────────────────────
-router.get('/conta-vinculada/extratos', (req, res) => {
-  try {
-    const { conta, from, to } = req.query;
-    let where = '1=1';
-    const params = {};
-    if (conta) { where += ' AND conta = @conta'; params.conta = conta; }
-    if (from) { where += ' AND data_iso >= @from'; params.from = from; }
-    if (to) { where += ' AND data_iso <= @to'; params.to = to; }
-
-    const rows = req.db.prepare(`SELECT * FROM conta_vinculada WHERE ${where} ORDER BY data_iso, id`).all(params);
-
-    // Resumo por conta
-    const resumo = req.db.prepare(`
-      SELECT conta, orgao, count(*) as qtd,
-        sum(credito) as total_creditos, sum(debito) as total_debitos
-      FROM conta_vinculada GROUP BY conta, orgao
-    `).all();
-
-    res.json({ data: rows, resumo, total: rows.length });
-  } catch (e) { errRes(res, e); }
-});
-
-router.post('/conta-vinculada/batch', (req, res) => {
-  try {
-    const { lancamentos } = req.body;
-    if (!Array.isArray(lancamentos)) return res.status(400).json({ error: 'Array de lancamentos esperado' });
-
-    const insert = req.db.prepare(`INSERT OR IGNORE INTO conta_vinculada
-      (conta, orgao, cnpj_orgao, data, data_iso, historico, debito, credito, saldo, contrato_ref, competencia, origem)
-      VALUES (@conta, @orgao, @cnpj_orgao, @data, @data_iso, @historico, @debito, @credito, @saldo, @contrato_ref, @competencia, @origem)`);
-
-    const batch = req.db.transaction((items) => {
-      let count = 0;
-      for (const l of items) {
-        insert.run({
-          conta: l.conta || '', orgao: l.orgao || '', cnpj_orgao: l.cnpj_orgao || '',
-          data: l.data || '', data_iso: l.data_iso || '', historico: l.historico || '',
-          debito: l.debito || 0, credito: l.credito || 0, saldo: l.saldo || 0,
-          contrato_ref: l.contrato_ref || '', competencia: l.competencia || '',
-          origem: l.origem || 'pipeline'
-        });
-        count++;
-      }
-      return count;
-    });
-
-    const count = batch(lancamentos);
-    res.json({ ok: true, message: `${count} lancamentos de conta vinculada importados` });
-  } catch (e) { errRes(res, e); }
-});
-
 function parseDataBR(str) {
   if (!str) return null;
   const p = str.split('/');
@@ -3596,18 +4029,44 @@ router.get('/conciliacao/tres-vias', (req, res) => {
       `SELECT ob, gestao, favorecido, data_pagamento, valor_pago FROM pagamentos WHERE ${pgWhere} ORDER BY data_pagamento_iso DESC LIMIT 500`
     ).all(pgP);
 
-    // 4. Resumo por contrato: agrupa pelas chaves usadas nas próprias NFs/extratos
-    // (NFs e extratos usam identificadores históricos que podem diferir do numContrato atual)
+    // 4. Resumo por contrato: agrupa pelas chaves usadas nas próprias NFs/extratos.
+    // Normaliza labels históricos para numContrato canônico e descarta:
+    //   - marcador "⚠️ CONTAMINADA" (NFs pertencentes a outra empresa)
+    //   - labels técnicos não-contrato (JUROS, SALDO, TRANSFERÊNCIA, PIX REJEITADO, Montana Segurança/Assessoria)
+    const contratosCanon = new Set(
+      req.db.prepare('SELECT numContrato FROM contratos').all().map(r => r.numContrato)
+    );
+    // Mapeamento de labels históricos → numContrato atual (mesma empresa).
+    // Preenchido manualmente conforme contaminação identificada nos bancos.
+    const ALIAS = {
+      'DETRAN 02/2024 + 2°TA': 'DETRAN 41/2023 + 2°TA',
+      'UFT 29/2022 + 9°TA': 'UFNT 30/2022',
+      'UFT 29/2022 + 9°TA (Conta Vinculada)': 'UFNT 30/2022',
+    };
+    const LABELS_DESCARTAVEIS = new Set([
+      'JUROS', 'SALDO', 'TRANSFERÊNCIA', 'TRANSFERENCIA', 'PIX REJEITADO',
+      'Montana Segurança', 'Montana Assessoria', '(sem contrato)',
+    ]);
+    const isContaminada = (s) => typeof s === 'string' && s.indexOf('⚠️') !== -1;
+    const isDescartavel = (s) => LABELS_DESCARTAVEIS.has(s) || isContaminada(s);
+    const normalizar = (s) => {
+      if (!s) return '(sem contrato)';
+      if (ALIAS[s]) return ALIAS[s];
+      return s;
+    };
+
     const mapaChaves = {};
     nfs.forEach(n => {
-      const k = n.contrato_ref || '(sem contrato)';
-      if (!mapaChaves[k]) mapaChaves[k] = { contrato: k, numContrato: k, qtdNFs: 0, totalNFs: 0, qtdExtratos: 0, totalExtrato: 0 };
+      const k = normalizar(n.contrato_ref);
+      if (isDescartavel(k) || isContaminada(n.contrato_ref)) return;
+      if (!mapaChaves[k]) mapaChaves[k] = { contrato: k, numContrato: k, qtdNFs: 0, totalNFs: 0, qtdExtratos: 0, totalExtrato: 0, canonico: contratosCanon.has(k) };
       mapaChaves[k].qtdNFs++;
       mapaChaves[k].totalNFs += n.valor_bruto || 0;
     });
     extratos.forEach(e => {
-      const k = e.contrato_vinculado || '(sem contrato)';
-      if (!mapaChaves[k]) mapaChaves[k] = { contrato: k, numContrato: k, qtdNFs: 0, totalNFs: 0, qtdExtratos: 0, totalExtrato: 0 };
+      const k = normalizar(e.contrato_vinculado);
+      if (isDescartavel(k) || isContaminada(e.contrato_vinculado)) return;
+      if (!mapaChaves[k]) mapaChaves[k] = { contrato: k, numContrato: k, qtdNFs: 0, totalNFs: 0, qtdExtratos: 0, totalExtrato: 0, canonico: contratosCanon.has(k) };
       mapaChaves[k].qtdExtratos++;
       mapaChaves[k].totalExtrato += e.credito || 0;
     });
@@ -4308,757 +4767,449 @@ router.get('/configuracoes/keywords', (req, res) => {
   } catch(e) { errRes(res, e); }
 });
 
-router.put('/configuracoes/keywords', (req, res) => {
+// ─── GET /api/relatorios/apuracao-mensal — histórico do cron ─────
+router.get('/relatorios/apuracao-mensal', (req, res) => {
   try {
-    const { keywords } = req.body;
-    if (!Array.isArray(keywords)) return res.status(400).json({ error: 'keywords deve ser um array' });
-    req.db.prepare(`INSERT OR REPLACE INTO configuracoes (chave, valor, updated_at) VALUES ('autovinc_keywords', @valor, datetime('now'))`)
-      .run({ valor: JSON.stringify(keywords) });
-    res.json({ ok: true });
-  } catch(e) { errRes(res, e); }
-});
+    const meses = Math.min(parseInt(req.query.meses) || 12, 24);
+    let rows = [];
+    let fonte = 'cron';
 
-// ── Audit log: listagem ───────────────────────────────────────
-router.get('/audit', (req, res) => {
-  try {
-    const { limit = 100, offset = 0, tabela, usuario, from, to } = req.query;
-    let where = '1=1';
-    const params = {};
-    if (tabela)  { where += ' AND tabela = @tabela';           params.tabela  = tabela; }
-    if (usuario) { where += ' AND usuario = @usuario';         params.usuario = usuario; }
-    if (from)    { where += ' AND created_at >= @from';        params.from    = from; }
-    if (to)      { where += ' AND created_at <= @to';          params.to      = to + ' 23:59:59'; }
-    params.limit  = parseInt(limit);
-    params.offset = parseInt(offset);
-    const rows = req.db.prepare(
-      `SELECT * FROM audit_log WHERE ${where} ORDER BY created_at DESC LIMIT @limit OFFSET @offset`
-    ).all(params);
-    const total = req.db.prepare(`SELECT COUNT(*) as cnt FROM audit_log WHERE ${where}`).get(params).cnt;
-    res.json({ ok: true, total, data: rows });
-  } catch(e) { errRes(res, e); }
-});
+    try {
+      rows = req.db.prepare(`
+        SELECT * FROM apuracao_mensal
+        ORDER BY competencia DESC LIMIT ?
+      `).all(meses);
+    } catch(_) {}
 
-// ── Config SMTP: GET (lê do banco) e POST (salva + testa) ─────
-router.get('/config/smtp', (req, res) => {
-  try {
-    const rows = req.db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'smtp_%'`).all();
-    const smtp = {};
-    rows.forEach(r => { smtp[r.chave.replace('smtp_', '')] = r.valor; });
-    // nunca retorna a senha
-    delete smtp.pass;
-    res.json({ ok: true, smtp });
-  } catch(e) { errRes(res, e); }
-});
-
-router.post('/config/smtp', (req, res) => {
-  try {
-    const fields = ['host','port','user','pass','from','to'];
-    const stmt = req.db.prepare(`INSERT OR REPLACE INTO configuracoes (chave, valor, updated_at) VALUES (?, ?, datetime('now'))`);
-    const save = req.db.transaction(() => {
-      fields.forEach(f => {
-        if (req.body[f] !== undefined && req.body[f] !== '')
-          stmt.run('smtp_' + f, String(req.body[f]));
-      });
-    });
-    save();
-    res.json({ ok: true });
-  } catch(e) { errRes(res, e); }
-});
-
-router.post('/config/smtp-test', async (req, res) => {
-  try {
-    const nodemailer = require('nodemailer');
-    const { host, port, user, pass, dest } = req.body;
-    if (!host || !user || !pass) return res.json({ ok: false, error: 'Preencha host, usuário e senha' });
-    const transporter = nodemailer.createTransport({
-      host, port: parseInt(port) || 587,
-      secure: parseInt(port) === 465,
-      auth: { user, pass }
-    });
-    await transporter.verify();
-    if (dest) {
-      await transporter.sendMail({
-        from: user, to: dest,
-        subject: '✅ Montana Sistema — Teste SMTP',
-        html: '<p>Conexão SMTP configurada com sucesso!</p>'
-      });
-    }
-    res.json({ ok: true });
-  } catch(e) { res.json({ ok: false, error: e.message }); }
-});
-
-// ═══════════════════════════════════════════════════════════════
-// CONCILIAÇÃO AUTOMÁTICA POR VALOR + DATA (±3 dias)
-// ═══════════════════════════════════════════════════════════════
-router.post('/conciliar-auto-valor', (req, res) => {
-  try {
-    const { dias_tolerancia = 3, contrato_num } = req.body;
-    const tol = Math.min(parseInt(dias_tolerancia) || 3, 10); // máximo 10 dias
-
-    // Busca extratos PENDENTES com crédito > 0
-    let sqlExt = `SELECT * FROM extratos WHERE status_conciliacao='PENDENTE' AND credito > 0`;
-    const extParams = [];
-    if (contrato_num) { /* sem filtro por contrato no extrato — o contrato está na NF */ }
-    const extratos = req.db.prepare(sqlExt).all(...extParams);
-
-    // Busca NFs ativas com valor_liquido > 0 e não já vinculadas
-    const nfsSql = `
-      SELECT n.*, c.numContrato
-      FROM notas_fiscais n
-      LEFT JOIN contratos c ON c.contrato = n.tomador OR c.numContrato = n.contrato_ref
-      WHERE n.valor_liquido > 0
-        AND n.status_conciliacao != 'CONCILIADO'
-    `;
-    const nfs = req.db.prepare(nfsSql).all();
-
-    const insVinc = req.db.prepare(`
-      INSERT OR IGNORE INTO vinculacoes (extrato_id, contrato_num, tipo, valor, usuario)
-      VALUES (@extrato_id, @contrato_num, 'AUTO-VALOR', @valor, @usuario)
-    `);
-    const updExt = req.db.prepare(`
-      UPDATE extratos SET contrato_vinculado=@cv, status_conciliacao='CONCILIADO', updated_at=datetime('now') WHERE id=@id
-    `);
-    const updNf = req.db.prepare(`
-      UPDATE notas_fiscais SET status_conciliacao='CONCILIADO' WHERE id=@id
-    `);
-
-    let vinculados = 0;
-    const usuario = req.user?.login || 'auto';
-
-    const processar = req.db.transaction(() => {
-      for (const ext of extratos) {
-        if (!ext.data_iso) continue;
-        const extDate = new Date(ext.data_iso).getTime();
-
-        for (const nf of nfs) {
-          if (!nf.data_emissao) continue;
-          // Tolerância de valor: ±0.05 (diferença de centavos)
-          const diff = Math.abs(ext.credito - nf.valor_liquido);
-          if (diff > 0.05) continue;
-
-          // Tolerância de data
-          const nfDate = new Date(nf.data_emissao).getTime();
-          const diffDias = Math.abs(extDate - nfDate) / 86400000;
-          if (diffDias > tol) continue;
-
-          // Match encontrado — vincula
-          const cNum = nf.contrato_ref || nf.numContrato || '';
-          if (!cNum) continue;
-
+    // Se não há dados do cron, gera em tempo real para os últimos N meses
+    if (!rows.length) {
+      fonte = 'tempo_real';
+      const now = new Date();
+      const { buscarDRE } = (() => {
+        try { return require('./routes/dre'); }
+        catch(_) { return {}; }
+      })();
+      if (buscarDRE) {
+        for (let i = 0; i < Math.min(meses, 6); i++) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const ano = d.getFullYear();
+          const mes = String(d.getMonth() + 1).padStart(2, '0');
+          const from = `${ano}-${mes}-01`;
+          const to   = `${ano}-${mes}-31`;
+          const comp = `${ano}-${mes}`;
           try {
-            insVinc.run({ extrato_id: ext.id, contrato_num: cNum, valor: ext.credito, usuario });
-            updExt.run({ cv: cNum, id: ext.id });
-            updNf.run({ id: nf.id });
-            vinculados++;
-          } catch(_) { /* duplicado — ignora */ }
-          break; // cada extrato vincula com apenas uma NF
+            const { dre } = buscarDRE(req.db, from, to);
+            rows.push({
+              competencia: comp,
+              receita_bruta: dre.receita_bruta,
+              retencoes: dre.deducoes.total,
+              receita_liquida: dre.receita_liquida,
+              despesas_total: (dre.custos.total || 0) + (dre.despesas_operacionais || 0),
+              resultado: dre.resultado_liquido,
+              qtd_nfs: dre.qtd_nfs || 0,
+              pis_a_pagar: dre.tributos_proprios ? dre.tributos_proprios.pis_a_pagar : 0,
+              cofins_a_pagar: dre.tributos_proprios ? dre.tributos_proprios.cofins_a_pagar : 0,
+              irpj_estimado: dre.irpj ? dre.irpj.total : 0,
+              csll_estimado: dre.csll ? dre.csll.total : 0,
+            });
+          } catch(_) {}
         }
       }
-    });
-    processar();
-    dashCacheInvalidate(req.companyKey);
-    audit(req, 'AUTO-CONCILIAR-VALOR', 'vinculacoes', '', `${vinculados} vinculações criadas (tol. ${tol} dias)`);
-    res.json({ ok: true, vinculados, message: `${vinculados} extrato(s) vinculado(s) automaticamente por valor+data` });
+    }
+
+    res.json({ data: rows, total: rows.length, fonte });
   } catch(e) { errRes(res, e); }
 });
 
 // ═══════════════════════════════════════════════════════════════
-// RELATÓRIO DE DIFERENÇA DE RETENÇÃO (NF vs extrato)
+// MÓDULO SETOR DE COMPRAS
 // ═══════════════════════════════════════════════════════════════
-router.get('/relatorio/retencao', (req, res) => {
+
+// Dashboard de compras
+router.get('/compras/dashboard', (req, res) => {
   try {
-    const { from, to } = req.query;
-    const p = {};
-    let whereNf = '1=1', whereExt = '1=1';
-    if (from) { whereNf += ' AND n.data_emissao >= @from'; whereExt += ' AND e.data_iso >= @from'; p.from = from; }
-    if (to)   { whereNf += ' AND n.data_emissao <= @to';   whereExt += ' AND e.data_iso <= @to';   p.to   = to;   }
+    const db = req.db;
+    const porStatus = db.prepare(`
+      SELECT status, COUNT(*) as total,
+             COALESCE(SUM(valor_aprovado), SUM(valor_estimado), 0) as valor
+      FROM compras_requisicoes
+      GROUP BY status
+    `).all();
 
-    // Retenções das NFs emitidas
-    const nfs = req.db.prepare(`
-      SELECT n.numero, n.data_emissao, n.tomador, n.valor_bruto, n.valor_liquido,
-             n.inss, n.ir as irrf, n.iss, n.csll, n.pis, n.cofins, n.retencao as total_ret,
-             n.contrato_ref
-      FROM notas_fiscais n WHERE ${whereNf}
-      ORDER BY n.data_emissao DESC
-    `).all(p);
+    const urgentes = db.prepare(`
+      SELECT COUNT(*) as total FROM compras_requisicoes
+      WHERE prioridade = 'URGENTE' AND status NOT IN ('COMPRADA','CANCELADA')
+    `).get();
 
-    // Total retido nos extratos (débitos com histórico contendo retenção) — por contrato_vinculado
-    const extRetencoes = req.db.prepare(`
-      SELECT e.contrato_vinculado, SUM(COALESCE(e.retencao,0)) as ret_extrato,
-             COUNT(*) as qtd_pagamentos
-      FROM extratos e
-      WHERE ${whereExt} AND e.status_conciliacao='CONCILIADO' AND e.contrato_vinculado != ''
-      GROUP BY e.contrato_vinculado
-    `).all(p);
+    const mesAtual = new Date().toISOString().substring(0, 7);
+    const valorMes = db.prepare(`
+      SELECT COALESCE(SUM(valor_aprovado), SUM(valor_estimado), 0) as total
+      FROM compras_requisicoes
+      WHERE substr(created_at, 1, 7) = ?
+        AND status NOT IN ('CANCELADA')
+    `).get(mesAtual);
 
-    const retMap = {};
-    extRetencoes.forEach(r => { retMap[r.contrato_vinculado] = r; });
+    const recentes = db.prepare(`
+      SELECT r.id, r.titulo, r.prioridade, r.status, r.solicitante,
+             r.valor_estimado, r.valor_aprovado, r.created_at, r.data_necessidade,
+             (SELECT COUNT(*) FROM compras_cotacoes c WHERE c.requisicao_id = r.id) as qtd_cotacoes
+      FROM compras_requisicoes r
+      ORDER BY r.created_at DESC LIMIT 10
+    `).all();
 
-    // Calcula diferença por NF
-    const linhas = nfs.map(nf => {
-      const extRet = retMap[nf.contrato_ref || ''];
-      const ret_nf      = nf.total_ret || 0;
-      const ret_extrato = extRet ? (extRet.ret_extrato / (extRet.qtd_pagamentos || 1)) : null;
-      const diferenca   = ret_extrato !== null ? ret_nf - ret_extrato : null;
-      return { ...nf, ret_extrato, diferenca };
-    });
+    res.json({ porStatus, urgentes: urgentes.total, valorMes: valorMes.total, recentes });
+  } catch(e) { errRes(res, e, 'compras/dashboard'); }
+});
 
-    const totalNf  = linhas.reduce((s,l) => s + (l.total_ret||0), 0);
-    const totalExt = extRetencoes.reduce((s,r) => s + (r.ret_extrato||0), 0);
+// Listar requisições
+router.get('/compras/requisicoes', (req, res) => {
+  try {
+    const db = req.db;
+    const { status, prioridade, contrato_ref, q } = req.query;
+    let where = [];
+    let params = [];
+
+    if (status)       { where.push('r.status = ?');       params.push(status); }
+    if (prioridade)   { where.push('r.prioridade = ?');   params.push(prioridade); }
+    if (contrato_ref) { where.push('r.contrato_ref = ?'); params.push(contrato_ref); }
+    if (q)            { where.push('(r.titulo LIKE ? OR r.solicitante LIKE ? OR r.fornecedor_escolhido LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
+
+    const clause = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const rows = db.prepare(`
+      SELECT r.*,
+             (SELECT COUNT(*) FROM compras_itens    i WHERE i.requisicao_id = r.id) as qtd_itens,
+             (SELECT COUNT(*) FROM compras_cotacoes c WHERE c.requisicao_id = r.id) as qtd_cotacoes
+      FROM compras_requisicoes r
+      ${clause}
+      ORDER BY
+        CASE r.prioridade WHEN 'URGENTE' THEN 1 WHEN 'NORMAL' THEN 2 ELSE 3 END,
+        r.created_at DESC
+    `).all(...params);
+    res.json({ data: rows, total: rows.length });
+  } catch(e) { errRes(res, e, 'compras/requisicoes GET'); }
+});
+
+// Detalhe de uma requisição (com itens e cotações)
+router.get('/compras/requisicoes/:id', (req, res) => {
+  try {
+    const db = req.db;
+    const id = Number(req.params.id);
+    const req_ = db.prepare('SELECT * FROM compras_requisicoes WHERE id = ?').get(id);
+    if (!req_) return res.status(404).json({ error: 'Requisição não encontrada' });
+    const itens = db.prepare('SELECT * FROM compras_itens WHERE requisicao_id = ? ORDER BY id').all(id);
+    const cotacoes = db.prepare('SELECT * FROM compras_cotacoes WHERE requisicao_id = ? ORDER BY created_at').all(id);
+    res.json({ ...req_, itens, cotacoes });
+  } catch(e) { errRes(res, e, 'compras/requisicoes/:id'); }
+});
+
+// Criar requisição (com itens opcionais)
+router.post('/compras/requisicoes', (req, res) => {
+  try {
+    const db = req.db;
+    const { titulo, solicitante, contrato_ref, prioridade, status, descricao,
+            valor_estimado, data_necessidade, itens } = req.body;
+    if (!titulo) return res.status(400).json({ error: 'titulo é obrigatório' });
+
+    const info = db.prepare(`
+      INSERT INTO compras_requisicoes
+        (titulo, solicitante, contrato_ref, prioridade, status, descricao,
+         valor_estimado, data_necessidade, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,datetime('now'))
+    `).run(
+      titulo, solicitante || '', contrato_ref || '',
+      prioridade || 'NORMAL', status || 'PENDENTE',
+      descricao || '', valor_estimado || null, data_necessidade || ''
+    );
+
+    const reqId = info.lastInsertRowid;
+
+    if (Array.isArray(itens) && itens.length) {
+      const stmtItem = db.prepare(`
+        INSERT INTO compras_itens (requisicao_id, descricao, unidade, quantidade, valor_unitario_est)
+        VALUES (?,?,?,?,?)
+      `);
+      for (const it of itens) {
+        if (!it.descricao) continue;
+        stmtItem.run(reqId, it.descricao, it.unidade || 'un', it.quantidade || 1, it.valor_unitario_est || null);
+      }
+    }
+
+    audit(req, 'INSERT', 'compras_requisicoes', reqId, titulo);
+    res.json({ id: reqId, ok: true });
+  } catch(e) { errRes(res, e, 'compras/requisicoes POST'); }
+});
+
+// Atualizar requisição
+router.put('/compras/requisicoes/:id', (req, res) => {
+  try {
+    const db = req.db;
+    const id = Number(req.params.id);
+    const { titulo, solicitante, contrato_ref, prioridade, status, descricao,
+            valor_estimado, valor_aprovado, fornecedor_escolhido, data_necessidade } = req.body;
+
+    const fields = [];
+    const params = [];
+    if (titulo !== undefined)              { fields.push('titulo = ?');              params.push(titulo); }
+    if (solicitante !== undefined)         { fields.push('solicitante = ?');         params.push(solicitante); }
+    if (contrato_ref !== undefined)        { fields.push('contrato_ref = ?');        params.push(contrato_ref); }
+    if (prioridade !== undefined)          { fields.push('prioridade = ?');          params.push(prioridade); }
+    if (status !== undefined)              { fields.push('status = ?');              params.push(status); }
+    if (descricao !== undefined)           { fields.push('descricao = ?');           params.push(descricao); }
+    if (valor_estimado !== undefined)      { fields.push('valor_estimado = ?');      params.push(valor_estimado); }
+    if (valor_aprovado !== undefined)      { fields.push('valor_aprovado = ?');      params.push(valor_aprovado); }
+    if (fornecedor_escolhido !== undefined){ fields.push('fornecedor_escolhido = ?');params.push(fornecedor_escolhido); }
+    if (data_necessidade !== undefined)    { fields.push('data_necessidade = ?');    params.push(data_necessidade); }
+
+    if (!fields.length) return res.status(400).json({ error: 'Nenhum campo para atualizar' });
+    fields.push("updated_at = datetime('now')");
+    params.push(id);
+
+    db.prepare(`UPDATE compras_requisicoes SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+    audit(req, 'UPDATE', 'compras_requisicoes', id, status || '');
+    res.json({ ok: true });
+  } catch(e) { errRes(res, e, 'compras/requisicoes PUT'); }
+});
+
+// Adicionar cotação
+router.post('/compras/cotacoes', (req, res) => {
+  try {
+    const db = req.db;
+    const { requisicao_id, fornecedor, cnpj_cpf, valor_total, prazo_entrega, observacoes } = req.body;
+    if (!requisicao_id || !fornecedor) return res.status(400).json({ error: 'requisicao_id e fornecedor são obrigatórios' });
+
+    const info = db.prepare(`
+      INSERT INTO compras_cotacoes (requisicao_id, fornecedor, cnpj_cpf, valor_total, prazo_entrega, observacoes)
+      VALUES (?,?,?,?,?,?)
+    `).run(requisicao_id, fornecedor, cnpj_cpf || '', valor_total || null, prazo_entrega || '', observacoes || '');
+
+    audit(req, 'INSERT', 'compras_cotacoes', info.lastInsertRowid, `req=${requisicao_id} forn=${fornecedor}`);
+    res.json({ id: info.lastInsertRowid, ok: true });
+  } catch(e) { errRes(res, e, 'compras/cotacoes POST'); }
+});
+
+// Escolher cotação vencedora
+router.put('/compras/cotacoes/:id/escolher', (req, res) => {
+  try {
+    const db = req.db;
+    const cotId = Number(req.params.id);
+    const cot = db.prepare('SELECT * FROM compras_cotacoes WHERE id = ?').get(cotId);
+    if (!cot) return res.status(404).json({ error: 'Cotação não encontrada' });
+
+    // Desmarcar todas da mesma requisição
+    db.prepare('UPDATE compras_cotacoes SET escolhida = 0 WHERE requisicao_id = ?').run(cot.requisicao_id);
+    // Marcar a escolhida
+    db.prepare('UPDATE compras_cotacoes SET escolhida = 1 WHERE id = ?').run(cotId);
+    // Atualizar requisição
+    db.prepare(`
+      UPDATE compras_requisicoes
+      SET fornecedor_escolhido = ?, valor_aprovado = ?, status = 'APROVADA', updated_at = datetime('now')
+      WHERE id = ?
+    `).run(cot.fornecedor, cot.valor_total, cot.requisicao_id);
+
+    audit(req, 'UPDATE', 'compras_cotacoes', cotId, `escolhida req=${cot.requisicao_id}`);
+    res.json({ ok: true });
+  } catch(e) { errRes(res, e, 'compras/cotacoes escolher'); }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// MÓDULO SUPERVISOR OPERACIONAL
+// ═══════════════════════════════════════════════════════════════
+
+// Dashboard supervisor
+router.get('/supervisor/dashboard', (req, res) => {
+  try {
+    const db = req.db;
+    const hoje = new Date().toISOString().substring(0, 10);
+
+    const abertas = db.prepare(`
+      SELECT contrato_ref, COUNT(*) as total
+      FROM sup_ocorrencias WHERE status = 'ABERTA'
+      GROUP BY contrato_ref ORDER BY total DESC
+    `).all();
+
+    const hoje_count = db.prepare(`
+      SELECT COUNT(*) as total FROM sup_ocorrencias
+      WHERE data_ocorrencia_iso = ?
+    `).get(hoje);
+
+    const checklists_hoje = db.prepare(`
+      SELECT COUNT(*) as total FROM sup_checklist WHERE data_iso = ?
+    `).get(hoje);
+
+    const por_tipo = db.prepare(`
+      SELECT tipo, COUNT(*) as total
+      FROM sup_ocorrencias WHERE status = 'ABERTA'
+      GROUP BY tipo ORDER BY total DESC
+    `).all();
+
+    const recentes = db.prepare(`
+      SELECT * FROM sup_ocorrencias
+      ORDER BY created_at DESC LIMIT 10
+    `).all();
 
     res.json({
-      ok: true,
-      linhas,
-      totais: {
-        total_retencao_nf:      +totalNf.toFixed(2),
-        total_retencao_extrato: +totalExt.toFixed(2),
-        diferenca:              +(totalNf - totalExt).toFixed(2)
-      }
+      abertas_por_contrato: abertas,
+      total_abertas: abertas.reduce((s, r) => s + r.total, 0),
+      ocorrencias_hoje: hoje_count.total,
+      checklists_hoje: checklists_hoje.total,
+      por_tipo,
+      recentes
     });
-  } catch(e) { errRes(res, e); }
+  } catch(e) { errRes(res, e, 'supervisor/dashboard'); }
 });
 
-// GET /relatorios/fluxo-projetado?meses=6
-router.get('/relatorios/fluxo-projetado', (req, res) => {
-  const db = req.db;
-  const meses = parseInt(req.query.meses) || 6;
-
-  // Contratos ativos com valor
-  const contratos = db.prepare(`
-    SELECT id, numContrato, orgao, contrato, valor_mensal_liquido, valor_mensal_bruto,
-           vigencia_fim, status
-    FROM contratos
-    WHERE (status IS NULL OR status != 'encerrado')
-      AND (valor_mensal_liquido > 0 OR valor_mensal_bruto > 0)
-    ORDER BY valor_mensal_liquido DESC
-  `).all();
-
-  // Calcular atraso médio por contrato (últimos 6 meses)
-  const hoje = new Date();
-  const ha180 = new Date(hoje - 180 * 86400000).toISOString().split('T')[0];
-
-  const contratosComAtraso = contratos.map(c => {
-    let atraso_medio = 15; // padrão
-    try {
-      const pagamentos = db.prepare(`
-        SELECT data_iso, competencia FROM extratos
-        WHERE contrato_vinculado = ? AND data_iso >= ? AND credito > 0
-        ORDER BY data_iso DESC LIMIT 12
-      `).all(c.numContrato, ha180);
-
-      if (pagamentos.length >= 2) {
-        const atrasos = pagamentos.map(p => {
-          if (!p.competencia) return 15;
-          const [ano, mes] = p.competencia.split('-');
-          const esperado = new Date(parseInt(ano), parseInt(mes) - 1, 10);
-          const real = new Date(p.data_iso);
-          return Math.max(0, Math.round((real - esperado) / 86400000));
-        });
-        atraso_medio = Math.round(atrasos.reduce((a,b) => a+b, 0) / atrasos.length);
-      }
-    } catch(e) {}
-
-    return {
-      ...c,
-      valor: c.valor_mensal_liquido || c.valor_mensal_bruto,
-      atraso_medio_dias: atraso_medio
-    };
-  });
-
-  // Projetar próximos N meses
-  const projecao = [];
-  for (let i = 1; i <= meses; i++) {
-    const d = new Date(hoje.getFullYear(), hoje.getMonth() + i, 1);
-    const mesAno = d.toISOString().slice(0, 7);
-    const receitaPrevista = contratosComAtraso.reduce((s, c) => s + (c.valor || 0), 0);
-    const atrasoMedio = contratosComAtraso.length
-      ? Math.round(contratosComAtraso.reduce((s,c) => s + c.atraso_medio_dias, 0) / contratosComAtraso.length)
-      : 15;
-    const dataRecebimento = new Date(d.getTime() + atrasoMedio * 86400000).toISOString().split('T')[0];
-
-    projecao.push({
-      mes: mesAno,
-      receita_prevista: receitaPrevista,
-      data_recebimento_prevista: dataRecebimento,
-      atraso_medio_dias: atrasoMedio,
-      contratos: contratosComAtraso.map(c => ({
-        numContrato: c.numContrato,
-        orgao: c.orgao,
-        valor: c.valor,
-        atraso_medio_dias: c.atraso_medio_dias
-      }))
-    });
-  }
-
-  const total_mensal = contratosComAtraso.reduce((s,c) => s + (c.valor||0), 0);
-  const media_atraso = contratosComAtraso.length
-    ? Math.round(contratosComAtraso.reduce((s,c) => s + c.atraso_medio_dias, 0) / contratosComAtraso.length)
-    : 15;
-
-  res.json({ projecao, total_mensal_previsto: total_mensal, media_atraso_geral: media_atraso, contratos_ativos: contratosComAtraso.length });
-});
-
-// GET /contratos/:id/timeline
-router.get('/contratos/:id/timeline', (req, res) => {
-  const db = req.db;
-  const id = req.params.id;
-
-  const contrato = db.prepare('SELECT * FROM contratos WHERE id=?').get(id);
-  if (!contrato) return res.status(404).json({ error: 'Contrato não encontrado' });
-
-  // Pagamentos recebidos (últimos 12)
-  const pagamentos = db.prepare(`
-    SELECT data_iso, credito, historico, competencia FROM extratos
-    WHERE contrato_vinculado = ? AND credito > 0
-    ORDER BY data_iso DESC LIMIT 12
-  `).all(contrato.numContrato);
-
-  // NFs emitidas
-  const nfs = db.prepare(`
-    SELECT numero, data_emissao, valor_bruto, valor_liquido, status_conciliacao FROM notas_fiscais
-    WHERE contrato_ref = ? ORDER BY data_emissao DESC LIMIT 12
-  `).all(contrato.numContrato);
-
-  // Boletins
-  let boletins = [];
+// Listar ocorrências
+router.get('/supervisor/ocorrencias', (req, res) => {
   try {
-    boletins = db.prepare(`
-      SELECT b.competencia, b.valor_total, b.status FROM bol_boletins b
-      JOIN bol_contratos bc ON b.contrato_id = bc.id
-      WHERE bc.contrato_ref = ? ORDER BY b.competencia DESC LIMIT 6
-    `).all(contrato.numContrato);
-  } catch(e) {}
+    const db = req.db;
+    const { status, tipo, contrato_ref, de, ate, q } = req.query;
+    let where = [];
+    let params = [];
 
-  // Calcular % executado
-  const hoje = new Date();
-  const inicio = contrato.vigencia_inicio ? new Date(contrato.vigencia_inicio) : null;
-  const fim = contrato.vigencia_fim ? new Date(contrato.vigencia_fim) : null;
-  const meses_vigencia = inicio && fim ? Math.max(1, Math.round((fim - inicio) / (30 * 86400000))) : 12;
-  const valor_total_estimado = (contrato.valor_mensal_bruto || 0) * meses_vigencia;
-  const pct_executado = valor_total_estimado > 0 ? Math.min(100, Math.round((contrato.total_pago || 0) / valor_total_estimado * 100)) : 0;
-  const dias_para_vencer = fim ? Math.round((fim - hoje) / 86400000) : null;
+    if (status)       { where.push('status = ?');       params.push(status); }
+    if (tipo)         { where.push('tipo = ?');         params.push(tipo); }
+    if (contrato_ref) { where.push('contrato_ref = ?'); params.push(contrato_ref); }
+    if (de)           { where.push('data_ocorrencia_iso >= ?'); params.push(de); }
+    if (ate)          { where.push('data_ocorrencia_iso <= ?'); params.push(ate); }
+    if (q)            { where.push('(descricao LIKE ? OR funcionario_nome LIKE ? OR posto LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
 
-  // Aditivos (do campo obs_reajuste ou obs)
-  const aditivos = [];
-  if (contrato.obs_reajuste) aditivos.push({ tipo: 'Reajuste', descricao: contrato.obs_reajuste, data: contrato.data_ultimo_reajuste });
-  if (contrato.obs) {
-    const matches = contrato.obs.match(/\d+[°ºo]\s*[Tt][Aa]/g);
-    if (matches) matches.forEach((m, i) => aditivos.push({ tipo: 'Aditivo', descricao: m, data: null }));
-  }
-
-  res.json({
-    contrato,
-    pagamentos,
-    nfs,
-    boletins,
-    aditivos,
-    total_pago: contrato.total_pago || 0,
-    total_nfs: nfs.reduce((s, n) => s + (n.valor_bruto || 0), 0),
-    percentual_executado: pct_executado,
-    valor_total_estimado,
-    dias_para_vencer,
-    meses_vigencia
-  });
+    const clause = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const rows = db.prepare(`
+      SELECT * FROM sup_ocorrencias ${clause}
+      ORDER BY created_at DESC
+    `).all(...params);
+    res.json({ data: rows, total: rows.length });
+  } catch(e) { errRes(res, e, 'supervisor/ocorrencias GET'); }
 });
 
-// GET /relatorios/margem-por-posto
-router.get('/relatorios/margem-por-posto', (req, res) => {
-  const db = req.db;
-  const { from, to, contrato } = req.query;
-  const dateFrom = from || new Date().getFullYear() + '-01-01';
-  const dateTo   = to   || new Date().getFullYear() + '-12-31';
-
-  // Verificar se tabelas de boletins existem
-  const tblExiste = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bol_postos'").get();
-  if (!tblExiste) return res.json({ postos: [], total_receita: 0, message: 'Tabela bol_postos não encontrada' });
-
+// Registrar ocorrência
+router.post('/supervisor/ocorrencias', (req, res) => {
   try {
-    let query = `
-      SELECT
-        p.id, p.descricao, p.tipo_posto, p.qtd_funcionarios,
-        bc.contrato_ref, bc.orgao,
-        COALESCE(SUM(bb.valor_total), 0) as receita_total,
-        COUNT(DISTINCT bb.id) as qtd_boletins
-      FROM bol_postos p
-      JOIN bol_contratos bc ON p.contrato_id = bc.id
-      LEFT JOIN bol_boletins bb ON bb.contrato_id = bc.id
-        AND substr(bb.competencia,1,7) BETWEEN substr(@from,1,7) AND substr(@to,1,7)
-      WHERE 1=1
-    `;
-    const params = { from: dateFrom, to: dateTo };
-    if (contrato) { query += ' AND bc.contrato_ref = @contrato'; params.contrato = contrato; }
-    query += ' GROUP BY p.id ORDER BY receita_total DESC';
+    const db = req.db;
+    const { contrato_ref, posto, tipo, descricao, funcionario_nome,
+            data_ocorrencia, data_ocorrencia_iso, registrado_por } = req.body;
+    if (!descricao) return res.status(400).json({ error: 'descricao é obrigatória' });
 
-    const postos = db.prepare(query).all(params);
+    const info = db.prepare(`
+      INSERT INTO sup_ocorrencias
+        (contrato_ref, posto, tipo, descricao, funcionario_nome,
+         data_ocorrencia, data_ocorrencia_iso, registrado_por)
+      VALUES (?,?,?,?,?,?,?,?)
+    `).run(
+      contrato_ref || '', posto || '', tipo || 'OUTRO', descricao,
+      funcionario_nome || '', data_ocorrencia || '',
+      data_ocorrencia_iso || new Date().toISOString().substring(0, 10),
+      registrado_por || req.user?.login || ''
+    );
 
-    // Calcular custo estimado por posto (proporcional à receita do contrato)
-    // Buscar folha do contrato no período
-    const folhaPorContrato = {};
-    const folhas = db.prepare(`
-      SELECT contrato_ref, SUM(valor_bruto) total
-      FROM despesas
-      WHERE UPPER(TRIM(categoria)) LIKE 'FOLHA%'
-        AND data_iso BETWEEN @from AND @to
-        AND contrato_ref IS NOT NULL AND contrato_ref != ''
-      GROUP BY contrato_ref
-    `).all({ from: dateFrom, to: dateTo });
-    folhas.forEach(f => { folhaPorContrato[f.contrato_ref] = f.total; });
-
-    // Postos por contrato para dividir proporcionalmente
-    const postosPorContrato = {};
-    postos.forEach(p => {
-      if (!postosPorContrato[p.contrato_ref]) postosPorContrato[p.contrato_ref] = 0;
-      postosPorContrato[p.contrato_ref]++;
-    });
-
-    const resultado = postos.map(p => {
-      const folhaContrato = folhaPorContrato[p.contrato_ref] || 0;
-      const nPostos = postosPorContrato[p.contrato_ref] || 1;
-      const custo_estimado = folhaContrato / nPostos;
-      const margem_valor = p.receita_total - custo_estimado;
-      const margem_pct = p.receita_total > 0 ? (margem_valor / p.receita_total * 100) : 0;
-      return { ...p, custo_estimado, margem_valor, margem_pct: Math.round(margem_pct * 10) / 10 };
-    }).sort((a, b) => a.margem_pct - b.margem_pct);
-
-    const total_receita = resultado.reduce((s, p) => s + p.receita_total, 0);
-    const melhor = resultado.reduce((m, p) => p.margem_pct > (m?.margem_pct||0) ? p : m, null);
-    const pior   = resultado.find(p => p.receita_total > 0) || null;
-
-    res.json({ postos: resultado, total_receita, melhor_posto: melhor, pior_posto: pior });
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
+    audit(req, 'INSERT', 'sup_ocorrencias', info.lastInsertRowid, tipo || 'OUTRO');
+    res.json({ id: info.lastInsertRowid, ok: true });
+  } catch(e) { errRes(res, e, 'supervisor/ocorrencias POST'); }
 });
 
-// ─── APURAÇÃO MENSAL ─────────────────────────────────────────────
-router.get('/relatorios/apuracao-mensal', (req, res) => {
-  const db = req.db;
+// Atualizar ocorrência (status / resolução)
+router.put('/supervisor/ocorrencias/:id', (req, res) => {
   try {
-    db.prepare(`CREATE TABLE IF NOT EXISTS apuracao_mensal (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      competencia TEXT UNIQUE,
-      receita_bruta REAL DEFAULT 0,
-      retencoes REAL DEFAULT 0,
-      receita_liquida REAL DEFAULT 0,
-      despesas_total REAL DEFAULT 0,
-      resultado REAL DEFAULT 0,
-      qtd_nfs INTEGER DEFAULT 0,
-      gerado_em TEXT DEFAULT (datetime('now','localtime')),
-      obs TEXT
-    )`).run();
-  } catch(e) {}
+    const db = req.db;
+    const id = Number(req.params.id);
+    const { status, resolucao, tipo, descricao, funcionario_nome,
+            contrato_ref, posto, data_ocorrencia, data_ocorrencia_iso } = req.body;
 
-  const meses = parseInt(req.query.meses) || 12;
-  const rows = db.prepare(`SELECT * FROM apuracao_mensal ORDER BY competencia DESC LIMIT ?`).all(meses);
+    const fields = [];
+    const params = [];
+    if (status !== undefined)              { fields.push('status = ?');              params.push(status); }
+    if (resolucao !== undefined)           { fields.push('resolucao = ?');           params.push(resolucao); }
+    if (tipo !== undefined)                { fields.push('tipo = ?');                params.push(tipo); }
+    if (descricao !== undefined)           { fields.push('descricao = ?');           params.push(descricao); }
+    if (funcionario_nome !== undefined)    { fields.push('funcionario_nome = ?');    params.push(funcionario_nome); }
+    if (contrato_ref !== undefined)        { fields.push('contrato_ref = ?');        params.push(contrato_ref); }
+    if (posto !== undefined)               { fields.push('posto = ?');               params.push(posto); }
+    if (data_ocorrencia !== undefined)     { fields.push('data_ocorrencia = ?');     params.push(data_ocorrencia); }
+    if (data_ocorrencia_iso !== undefined) { fields.push('data_ocorrencia_iso = ?'); params.push(data_ocorrencia_iso); }
 
-  if (rows.length === 0) {
-    const resultado = [];
-    for (let i = 1; i <= 3; i++) {
-      const d = new Date();
-      d.setDate(1);
-      d.setMonth(d.getMonth() - i);
-      const ano = d.getFullYear();
-      const mes = String(d.getMonth() + 1).padStart(2, '0');
-      const from = `${ano}-${mes}-01`;
-      const to   = `${ano}-${mes}-31`;
-      const comp = `${ano}-${mes}`;
-      try {
-        const receita  = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) total, COUNT(*) qtd FROM notas_fiscais WHERE data_emissao BETWEEN ? AND ?`).get(from, to);
-        const despesas = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) total FROM despesas WHERE data_iso BETWEEN ? AND ?`).get(from, to);
-        const ret      = db.prepare(`SELECT COALESCE(SUM(retencao),0) total FROM notas_fiscais WHERE data_emissao BETWEEN ? AND ?`).get(from, to);
-        resultado.push({
-          competencia: comp,
-          receita_bruta: receita.total || 0,
-          retencoes: ret.total || 0,
-          receita_liquida: (receita.total||0) - (ret.total||0),
-          despesas_total: despesas.total || 0,
-          resultado: ((receita.total||0) - (ret.total||0)) - (despesas.total||0),
-          qtd_nfs: receita.qtd || 0,
-          gerado_em: new Date().toISOString()
-        });
-      } catch(e) {}
+    if (!fields.length) return res.status(400).json({ error: 'Nenhum campo para atualizar' });
+    fields.push("updated_at = datetime('now')");
+    params.push(id);
+
+    db.prepare(`UPDATE sup_ocorrencias SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+    audit(req, 'UPDATE', 'sup_ocorrencias', id, status || '');
+    res.json({ ok: true });
+  } catch(e) { errRes(res, e, 'supervisor/ocorrencias PUT'); }
+});
+
+// Listar checklists
+router.get('/supervisor/checklist', (req, res) => {
+  try {
+    const db = req.db;
+    const { data_iso, contrato_ref, turno } = req.query;
+    let where = [];
+    let params = [];
+
+    if (data_iso)     { where.push('data_iso = ?');     params.push(data_iso); }
+    if (contrato_ref) { where.push('contrato_ref = ?'); params.push(contrato_ref); }
+    if (turno)        { where.push('turno = ?');        params.push(turno); }
+
+    const clause = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const rows = db.prepare(`
+      SELECT * FROM sup_checklist ${clause}
+      ORDER BY data_iso DESC, id DESC
+    `).all(...params);
+    res.json({ data: rows, total: rows.length });
+  } catch(e) { errRes(res, e, 'supervisor/checklist GET'); }
+});
+
+// Registrar checklist
+router.post('/supervisor/checklist', (req, res) => {
+  try {
+    const db = req.db;
+    const { contrato_ref, posto, data_iso, turno, supervisor,
+            itens_json, observacoes, assinatura } = req.body;
+    if (!contrato_ref || !data_iso) {
+      return res.status(400).json({ error: 'contrato_ref e data_iso são obrigatórios' });
     }
-    return res.json({ data: resultado, fonte: 'calculado', total: resultado.length });
-  }
-
-  res.json({ data: rows, fonte: 'cron', total: rows.length });
+    const info = db.prepare(`
+      INSERT INTO sup_checklist
+        (contrato_ref, posto, data_iso, turno, supervisor, itens_json, observacoes, assinatura)
+      VALUES (?,?,?,?,?,?,?,?)
+    `).run(
+      contrato_ref, posto || '', data_iso,
+      turno || 'DIURNO', supervisor || req.user?.login || '',
+      itens_json || '[]', observacoes || '', assinatura || ''
+    );
+    audit(req, 'INSERT', 'sup_checklist', info.lastInsertRowid, contrato_ref);
+    res.json({ id: info.lastInsertRowid, ok: true });
+  } catch(e) { errRes(res, e, 'supervisor/checklist POST'); }
 });
 
-// ─── SUBCONTRATADOS / FORNECEDORES ───────────────────────────────
-router.get('/relatorios/subcontratados', (req, res) => {
-  const db = req.db;
-  const { from, to } = req.query;
-  const ano = new Date().getFullYear();
-  const dateFrom = from || `${ano}-01-01`;
-  const dateTo   = to   || `${ano}-12-31`;
-
-  const subcontratados = db.prepare(`
-    SELECT
-      fornecedor,
-      cnpj_fornecedor,
-      COUNT(*) qtd_pagamentos,
-      COALESCE(SUM(valor_bruto),0) total_pago,
-      MIN(data_iso) primeiro_pgto,
-      MAX(data_iso) ultimo_pgto,
-      COUNT(DISTINCT substr(data_iso,1,7)) meses_ativos
-    FROM despesas
-    WHERE data_iso BETWEEN ? AND ?
-      AND UPPER(TRIM(categoria)) IN ('FORNECEDOR','SERVIÇO','SERVICO','SUBCONTRATADO','TERCEIROS')
-      AND fornecedor IS NOT NULL AND fornecedor != ''
-    GROUP BY fornecedor, cnpj_fornecedor
-    ORDER BY total_pago DESC
-    LIMIT 50
-  `).all(dateFrom, dateTo);
-
-  const resultado = subcontratados.map(s => {
-    let nfs_recebidas = 0;
-    let total_nfs = 0;
-    try {
-      const tbl = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='nfe_entrada'").get();
-      if (tbl) {
-        const nfs = db.prepare(`SELECT COUNT(*) c, COALESCE(SUM(valor_total),0) t FROM nfe_entrada WHERE cnpj_emitente=? AND data_emissao BETWEEN ? AND ?`).get(s.cnpj_fornecedor||'', dateFrom, dateTo);
-        nfs_recebidas = nfs.c || 0;
-        total_nfs = nfs.t || 0;
-      }
-    } catch(e) {}
-    return {
-      ...s,
-      nfs_recebidas,
-      total_nfs,
-      cobertura_nf: total_nfs > 0 ? Math.min(100, Math.round(total_nfs / s.total_pago * 100)) : 0
-    };
-  });
-
-  const total_geral = resultado.reduce((s,r) => s + r.total_pago, 0);
-  res.json({ data: resultado, total_geral, periodo: { from: dateFrom, to: dateTo } });
-});
-
-// ─── CONSOLIDADO MULTI-EMPRESA ────────────────────────────────────
-router.get('/consolidado/resumo', (req, res) => {
-  const { from, to } = req.query;
-  const ano = new Date().getFullYear();
-  const dateFrom = from || `${ano}-01-01`;
-  const dateTo   = to   || `${ano}-12-31`;
-
-  const resultado = [];
-
-  for (const [key, company] of Object.entries(COMPANIES)) {
-    try {
-      const db = getDb(key);
-      const receita   = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) t, COUNT(*) q FROM notas_fiscais WHERE data_emissao BETWEEN ? AND ?`).get(dateFrom, dateTo);
-      const despesas  = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) t FROM despesas WHERE data_iso BETWEEN ? AND ?`).get(dateFrom, dateTo);
-      const retencoes = db.prepare(`SELECT COALESCE(SUM(retencao),0) t FROM notas_fiscais WHERE data_emissao BETWEEN ? AND ?`).get(dateFrom, dateTo);
-      const extratos  = db.prepare(`SELECT COALESCE(SUM(credito),0) entradas, COALESCE(SUM(debito),0) saidas FROM extratos WHERE data_iso BETWEEN ? AND ?`).get(dateFrom, dateTo);
-      const contratos = db.prepare(`SELECT COUNT(*) c FROM contratos WHERE status IS NULL OR status != 'encerrado'`).get();
-      const nfsPend   = db.prepare(`SELECT COUNT(*) c FROM notas_fiscais WHERE status_conciliacao='PENDENTE'`).get();
-
-      const receita_bruta = receita.t || 0;
-      const ret  = retencoes.t || 0;
-      const desp = despesas.t || 0;
-      const receita_liq = receita_bruta - ret;
-
-      resultado.push({
-        empresa: key,
-        nome: company.nome || key,
-        cnpj: company.cnpj || '',
-        receita_bruta,
-        retencoes: ret,
-        receita_liquida: receita_liq,
-        despesas: desp,
-        resultado: receita_liq - desp,
-        margem_pct: receita_liq > 0 ? Math.round((receita_liq - desp) / receita_liq * 100 * 10) / 10 : 0,
-        entradas_banco: extratos.entradas || 0,
-        saidas_banco: extratos.saidas || 0,
-        qtd_nfs: receita.q || 0,
-        contratos_ativos: contratos.c || 0,
-        nfs_pendentes: nfsPend.c || 0
-      });
-    } catch(e) {
-      resultado.push({ empresa: key, nome: company.nome || key, erro: e.message });
-    }
-  }
-
-  const totais = resultado.reduce((acc, r) => ({
-    receita_bruta:    (acc.receita_bruta||0)    + (r.receita_bruta||0),
-    receita_liquida:  (acc.receita_liquida||0)  + (r.receita_liquida||0),
-    despesas:         (acc.despesas||0)         + (r.despesas||0),
-    resultado:        (acc.resultado||0)        + (r.resultado||0),
-    qtd_nfs:          (acc.qtd_nfs||0)          + (r.qtd_nfs||0),
-    contratos_ativos: (acc.contratos_ativos||0) + (r.contratos_ativos||0),
-  }), {});
-
-  res.json({ empresas: resultado, totais, periodo: { from: dateFrom, to: dateTo } });
-});
-
-// ─── Cobertura de Postos ──────────────────────────────────────────────────────
-router.get('/relatorios/cobertura-postos', (req, res) => {
-  const db = req.db;
-  const { from, to } = req.query;
-  const ano = new Date().getFullYear();
-  const mes = String(new Date().getMonth() + 1).padStart(2,'0');
-  const dateFrom = from || `${ano}-${mes}-01`;
-  const dateTo   = to   || `${ano}-${mes}-31`;
-  const comp     = dateFrom.substring(0,7);
-
-  // Verificar se tabelas de boletins e ponto existem
-  const tblBol = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bol_postos'").get();
-  if (!tblBol) return res.json({ postos: [], message: 'Sem dados de postos' });
-
+// Atualizar checklist
+router.put('/supervisor/checklist/:id', (req, res) => {
   try {
-    // Postos contratados
-    const postos = db.prepare(`
-      SELECT p.id, p.descricao, p.tipo_posto, p.qtd_funcionarios,
-             bc.contrato_ref, bc.orgao,
-             COALESCE(bb.valor_total, 0) valor_boletim,
-             bb.status as status_boletim,
-             bb.id as boletim_id
-      FROM bol_postos p
-      JOIN bol_contratos bc ON p.contrato_id = bc.id
-      LEFT JOIN bol_boletins bb ON bb.contrato_id = bc.id
-        AND substr(bb.competencia,1,7) = ?
-      ORDER BY bc.orgao, p.descricao
-    `).all(comp);
-
-    // Para cada posto, verificar registros de ponto (se existirem)
-    const tblPonto = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='ponto_registros'").get();
-
-    const resultado = postos.map(p => {
-      let dias_cobertos = 0;
-      let funcionarios_escalados = 0;
-
-      if (tblPonto) {
-        try {
-          // Funcionários com lotação no posto
-          const funcs = db.prepare(`
-            SELECT COUNT(DISTINCT func_id) c FROM ponto_registros
-            WHERE data_iso BETWEEN ? AND ? AND lotacao LIKE ?
-          `).get(dateFrom, dateTo, `%${p.descricao?.substring(0,10)||''}%`);
-          funcionarios_escalados = funcs?.c || 0;
-        } catch(e) {}
-      }
-
-      const qtd_esperada = p.qtd_funcionarios || 1;
-      const cobertura_pct = qtd_esperada > 0
-        ? Math.min(100, Math.round(funcionarios_escalados / qtd_esperada * 100))
-        : 0;
-
-      return {
-        ...p,
-        funcionarios_escalados,
-        qtd_esperada,
-        cobertura_pct,
-        status_cobertura: cobertura_pct >= 90 ? 'OK' : cobertura_pct >= 60 ? 'PARCIAL' : 'CRÍTICO'
-      };
-    });
-
-    const total_postos = resultado.length;
-    const postos_ok = resultado.filter(p => p.status_cobertura === 'OK').length;
-    const postos_criticos = resultado.filter(p => p.status_cobertura === 'CRÍTICO').length;
-
-    res.json({
-      postos: resultado,
-      competencia: comp,
-      resumo: { total_postos, postos_ok, postos_criticos, postos_parciais: total_postos - postos_ok - postos_criticos }
-    });
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
+    const db = req.db;
+    const id = Number(req.params.id);
+    const { itens_json, observacoes, assinatura, turno, supervisor } = req.body;
+    const fields = [], params = [];
+    if (itens_json  !== undefined) { fields.push('itens_json = ?');  params.push(itens_json); }
+    if (observacoes !== undefined) { fields.push('observacoes = ?'); params.push(observacoes); }
+    if (assinatura  !== undefined) { fields.push('assinatura = ?');  params.push(assinatura); }
+    if (turno       !== undefined) { fields.push('turno = ?');       params.push(turno); }
+    if (supervisor  !== undefined) { fields.push('supervisor = ?');  params.push(supervisor); }
+    if (!fields.length) return res.status(400).json({ error: 'Nenhum campo para atualizar' });
+    params.push(id);
+    db.prepare(`UPDATE sup_checklist SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+    audit(req, 'UPDATE', 'sup_checklist', id, '');
+    res.json({ ok: true });
+  } catch(e) { errRes(res, e, 'supervisor/checklist PUT'); }
 });
 
-// ─── EPI / Uniformes ─────────────────────────────────────────────────────────
-
-// Middleware: garante que tabelas EPI existem
-router.use('/epi', (req, res, next) => {
+// Excluir checklist
+router.delete('/supervisor/checklist/:id', (req, res) => {
   try {
-    req.db.prepare(`CREATE TABLE IF NOT EXISTS epi_itens (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      funcionario_id INTEGER,
-      nome_item TEXT NOT NULL,
-      tipo TEXT DEFAULT 'EPI',
-      data_entrega TEXT,
-      data_devolucao TEXT,
-      valor REAL DEFAULT 0,
-      tamanho TEXT,
-      quantidade INTEGER DEFAULT 1,
-      status TEXT DEFAULT 'ATIVO',
-      obs TEXT,
-      created_at TEXT DEFAULT (datetime('now','localtime')),
-      updated_at TEXT DEFAULT (datetime('now','localtime'))
-    )`).run();
-    req.db.prepare(`CREATE TABLE IF NOT EXISTS epi_estoque (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nome_item TEXT NOT NULL,
-      tipo TEXT DEFAULT 'EPI',
-      quantidade_total INTEGER DEFAULT 0,
-      quantidade_disponivel INTEGER DEFAULT 0,
-      valor_unitario REAL DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now','localtime'))
-    )`).run();
-  } catch(e) {}
-  next();
-});
-
-// GET /epi/funcionario/:id — EPIs entregues ao funcionário
-router.get('/epi/funcionario/:id', (req, res) => {
-  const itens = req.db.prepare(`
-    SELECT e.*, f.nome as func_nome FROM epi_itens e
-    LEFT JOIN rh_funcionarios f ON e.funcionario_id = f.id
-    WHERE e.funcionario_id=? ORDER BY e.data_entrega DESC
-  `).all(req.params.id);
-  const total_valor = itens.reduce((s,i) => s + (i.valor||0) * (i.quantidade||1), 0);
-  res.json({ data: itens, total_valor });
-});
-
-// GET /epi/estoque — estoque atual
-router.get('/epi/estoque', (req, res) => {
-  const itens = req.db.prepare('SELECT * FROM epi_estoque ORDER BY tipo, nome_item').all();
-  res.json({ data: itens });
-});
-
-// POST /epi/entregar — registrar entrega de EPI
-router.post('/epi/entregar', (req, res) => {
-  const { funcionario_id, nome_item, tipo, valor, quantidade, tamanho, obs } = req.body;
-  if (!funcionario_id || !nome_item) return res.status(400).json({ error: 'funcionario_id e nome_item obrigatórios' });
-  const info = req.db.prepare(`INSERT INTO epi_itens
-    (funcionario_id, nome_item, tipo, data_entrega, valor, quantidade, tamanho, status, obs)
-    VALUES (?, ?, ?, date('now','localtime'), ?, ?, ?, 'ATIVO', ?)`)
-    .run(funcionario_id, nome_item, tipo||'EPI', valor||0, quantidade||1, tamanho||'', obs||'');
-  res.json({ ok: true, id: info.lastInsertRowid });
-});
-
-// PATCH /epi/:id/devolver
-router.patch('/epi/:id/devolver', (req, res) => {
-  req.db.prepare(`UPDATE epi_itens SET status='DEVOLVIDO', data_devolucao=date('now','localtime'), updated_at=datetime('now') WHERE id=?`).run(req.params.id);
-  res.json({ ok: true });
-});
-
-// GET /epi/relatorio — relatório geral de EPIs
-router.get('/epi/relatorio', (req, res) => {
-  const db = req.db;
-  try {
-    db.prepare(`CREATE TABLE IF NOT EXISTS epi_itens (id INTEGER PRIMARY KEY AUTOINCREMENT, funcionario_id INTEGER, nome_item TEXT NOT NULL, tipo TEXT DEFAULT 'EPI', data_entrega TEXT, data_devolucao TEXT, valor REAL DEFAULT 0, tamanho TEXT, quantidade INTEGER DEFAULT 1, status TEXT DEFAULT 'ATIVO', obs TEXT, created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`).run();
-  } catch(e) {}
-
-  const por_item = db.prepare(`
-    SELECT nome_item, tipo,
-           COUNT(*) total_entregas,
-           SUM(CASE WHEN status='ATIVO' THEN 1 ELSE 0 END) em_uso,
-           SUM(CASE WHEN status='DEVOLVIDO' THEN 1 ELSE 0 END) devolvidos,
-           COALESCE(SUM(valor * quantidade),0) custo_total
-    FROM epi_itens GROUP BY nome_item, tipo ORDER BY custo_total DESC
-  `).all();
-
-  const por_funcionario = db.prepare(`
-    SELECT f.nome, f.lotacao, COUNT(e.id) qtd_itens,
-           COALESCE(SUM(e.valor * e.quantidade),0) custo_total
-    FROM epi_itens e
-    JOIN rh_funcionarios f ON e.funcionario_id = f.id
-    WHERE e.status='ATIVO'
-    GROUP BY e.funcionario_id ORDER BY custo_total DESC LIMIT 20
-  `).all();
-
-  const total_custo = por_item.reduce((s,i) => s + i.custo_total, 0);
-  res.json({ por_item, por_funcionario, total_custo });
+    const db = req.db;
+    const id = Number(req.params.id);
+    db.prepare('DELETE FROM sup_checklist WHERE id = ?').run(id);
+    audit(req, 'DELETE', 'sup_checklist', id, '');
+    res.json({ ok: true });
+  } catch(e) { errRes(res, e, 'supervisor/checklist DELETE'); }
 });
 
 module.exports = router;

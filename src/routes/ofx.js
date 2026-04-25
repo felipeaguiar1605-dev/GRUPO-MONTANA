@@ -107,8 +107,8 @@ function parsearOFX(texto) {
 }
 
 // ── POST /api/ofx/importar ────────────────────────────────────────
-router.post('/importar', async (req, res) => {
-  upload.single('arquivo')(req, res, async (err) => {
+router.post('/importar', (req, res) => {
+  upload.single('arquivo')(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado. Use o campo "arquivo".' });
 
@@ -143,14 +143,14 @@ router.post('/importar', async (req, res) => {
       }
 
       const stmtInsert = db.prepare(`
-        INSERT INTO extratos
+        INSERT OR IGNORE INTO extratos
           (mes, data, data_iso, tipo, historico, debito, credito,
            status_conciliacao, banco, conta, ofx_fitid,
            created_at, updated_at)
         VALUES
           (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito,
            'PENDENTE', @banco, @conta, @ofx_fitid,
-           NOW(), NOW())
+           datetime('now'), datetime('now'))
       `);
 
       // Verifica quantas já existem (para contar duplicatas)
@@ -159,10 +159,10 @@ router.post('/importar', async (req, res) => {
       let importados = 0;
       let duplicatas = 0;
 
-      const importarTudo = db.transaction(async () => {
+      const importarTudo = db.transaction(() => {
         for (const t of transacoes) {
           // Verifica duplicata via fitid
-          const existe = await checkFitid.get(t.fitid);
+          const existe = checkFitid.get(t.fitid);
           if (existe) { duplicatas++; continue; }
 
           const mes  = derivarMes(t.dataIso);
@@ -171,7 +171,7 @@ router.post('/importar', async (req, res) => {
           const data   = partes.length === 3 ? `${partes[2]}/${partes[1]}/${partes[0]}` : t.dataIso;
           const tipo   = t.credito ? 'C' : 'D';
 
-          const r = await stmtInsert.run({
+          const r = stmtInsert.run({
             mes,
             data,
             data_iso: t.dataIso,
@@ -189,11 +189,11 @@ router.post('/importar', async (req, res) => {
         }
       });
 
-      await importarTudo();
+      importarTudo();
 
       // Registra importação
       try {
-        await db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros, status) VALUES ('OFX', @arquivo, @registros, 'OK')`).run({
+        db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros, status) VALUES ('OFX', @arquivo, @registros, 'OK')`).run({
           arquivo: req.file.originalname,
           registros: importados
         });
@@ -215,7 +215,7 @@ router.post('/importar', async (req, res) => {
 });
 
 // ── GET /api/ofx/info — retorna informações do arquivo sem importar ─
-router.get('/info', async (req, res) => {
+router.get('/info', (req, res) => {
   res.json({
     endpoint: 'POST /api/ofx/importar',
     campo: 'arquivo',

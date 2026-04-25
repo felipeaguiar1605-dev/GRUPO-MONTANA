@@ -5,7 +5,7 @@ router.use(companyMw);
 
 // ─── MIGRATIONS ──────────────────────────────────────────────────────────────
 
-async function ensureTables(db) {
+function ensureTables(db) {
   db.prepare(`CREATE TABLE IF NOT EXISTS jur_oficios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     numero TEXT,
@@ -68,7 +68,7 @@ async function ensureTables(db) {
     updated_at TEXT DEFAULT (datetime('now','localtime'))
   )`).run();
 
-  await db.prepare(`CREATE TABLE IF NOT EXISTS jur_andamentos (
+  db.prepare(`CREATE TABLE IF NOT EXISTS jur_andamentos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     processo_id INTEGER,
     oficio_id INTEGER,
@@ -81,41 +81,41 @@ async function ensureTables(db) {
 
 // ─── PAINEL / RESUMO ─────────────────────────────────────────────────────────
 
-router.get('/resumo', async (req, res) => {
+router.get('/resumo', (req, res) => {
   try {
     const db = req.db;
-    await ensureTables(db);
+    ensureTables(db);
     const hoje = new Date().toISOString().split('T')[0];
     const em7  = new Date(Date.now() +  7*86400000).toISOString().split('T')[0];
     const em30 = new Date(Date.now() + 30*86400000).toISOString().split('T')[0];
 
-    const oficiosPendentes   = (await db.prepare(`SELECT COUNT(*) as n FROM jur_oficios WHERE status='PENDENTE'`).get()).n;
-    const oficiosVencidos    = (await db.prepare(`SELECT COUNT(*) as n FROM jur_oficios WHERE status='PENDENTE' AND data_prazo < ?`).get(hoje)).n;
-    const oficiosVencendo    = (await db.prepare(`SELECT COUNT(*) as n FROM jur_oficios WHERE status='PENDENTE' AND data_prazo BETWEEN ? AND ?`).get(hoje, em7)).n;
+    const oficiosPendentes   = db.prepare(`SELECT COUNT(*) as n FROM jur_oficios WHERE status='PENDENTE'`).get().n;
+    const oficiosVencidos    = db.prepare(`SELECT COUNT(*) as n FROM jur_oficios WHERE status='PENDENTE' AND data_prazo < ?`).get(hoje).n;
+    const oficiosVencendo    = db.prepare(`SELECT COUNT(*) as n FROM jur_oficios WHERE status='PENDENTE' AND data_prazo BETWEEN ? AND ?`).get(hoje, em7).n;
 
-    const processosAtivos    = (await db.prepare(`SELECT COUNT(*) as n FROM jur_processos WHERE status='ATIVO'`).get()).n;
-    const audienciasEm30     = (await db.prepare(`SELECT COUNT(*) as n FROM jur_processos WHERE proxima_audiencia BETWEEN ? AND ?`).get(hoje, em30)).n;
-    const valorRiscoTotal    = (await db.prepare(`SELECT COALESCE(SUM(valor_risco),0) as v FROM jur_processos WHERE status='ATIVO'`).get()).v;
+    const processosAtivos    = db.prepare(`SELECT COUNT(*) as n FROM jur_processos WHERE status='ATIVO'`).get().n;
+    const audienciasEm30     = db.prepare(`SELECT COUNT(*) as n FROM jur_processos WHERE proxima_audiencia BETWEEN ? AND ?`).get(hoje, em30).n;
+    const valorRiscoTotal    = db.prepare(`SELECT COALESCE(SUM(valor_risco),0) as v FROM jur_processos WHERE status='ATIVO'`).get().v;
 
-    const riscosAltos        = (await db.prepare(`SELECT COUNT(*) as n FROM jur_riscos WHERE status NOT IN ('MITIGADO','ENCERRADO') AND (probabilidade='ALTA' OR impacto='ALTO')`).get()).n;
-    const riscosTotal        = (await db.prepare(`SELECT COUNT(*) as n FROM jur_riscos WHERE status NOT IN ('MITIGADO','ENCERRADO')`).get()).n;
+    const riscosAltos        = db.prepare(`SELECT COUNT(*) as n FROM jur_riscos WHERE status NOT IN ('MITIGADO','ENCERRADO') AND (probabilidade='ALTA' OR impacto='ALTO')`).get().n;
+    const riscosTotal        = db.prepare(`SELECT COUNT(*) as n FROM jur_riscos WHERE status NOT IN ('MITIGADO','ENCERRADO')`).get().n;
 
     // Ofícios com prazo vencido ou urgente
-    const alertasOficios = await db.prepare(`
+    const alertasOficios = db.prepare(`
       SELECT * FROM jur_oficios
       WHERE status='PENDENTE' AND data_prazo <= ?
       ORDER BY data_prazo ASC LIMIT 10
     `).all(em7);
 
     // Audiências próximas
-    const audiencias = await db.prepare(`
+    const audiencias = db.prepare(`
       SELECT * FROM jur_processos
       WHERE proxima_audiencia BETWEEN ? AND ?
       ORDER BY proxima_audiencia ASC LIMIT 10
     `).all(hoje, em30);
 
     // Riscos altos abertos
-    const riscos = await db.prepare(`
+    const riscos = db.prepare(`
       SELECT * FROM jur_riscos
       WHERE status NOT IN ('MITIGADO','ENCERRADO') AND (probabilidade='ALTA' OR impacto='ALTO')
       ORDER BY created_at DESC LIMIT 10
@@ -132,10 +132,10 @@ router.get('/resumo', async (req, res) => {
 
 // ─── OFÍCIOS ─────────────────────────────────────────────────────────────────
 
-router.get('/oficios', async (req, res) => {
+router.get('/oficios', (req, res) => {
   try {
     const db = req.db;
-    await ensureTables(db);
+    ensureTables(db);
     const { status, tipo, contrato_ref, busca, vencendo } = req.query;
     const hoje = new Date().toISOString().split('T')[0];
     const em7  = new Date(Date.now() + 7*86400000).toISOString().split('T')[0];
@@ -148,17 +148,17 @@ router.get('/oficios', async (req, res) => {
     if (busca)        { sql += ` AND (numero LIKE ? OR orgao LIKE ? OR assunto LIKE ?)`; p.push(`%${busca}%`,`%${busca}%`,`%${busca}%`); }
     if (vencendo === '1') { sql += ` AND status='PENDENTE' AND data_prazo <= ?`; p.push(em7); }
     sql += ` ORDER BY CASE WHEN status='PENDENTE' THEN 0 ELSE 1 END, data_prazo ASC, id DESC`;
-    res.json(await db.prepare(sql).all(...p));
+    res.json(db.prepare(sql).all(...p));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/oficios', async (req, res) => {
+router.post('/oficios', (req, res) => {
   try {
     const db = req.db;
-    await ensureTables(db);
+    ensureTables(db);
     const { numero, tipo, orgao, assunto, contrato_ref, data_recebimento, data_prazo, responsavel, prioridade, valor_risco, obs } = req.body;
     if (!orgao || !assunto) return res.status(400).json({ error: 'orgao e assunto obrigatórios' });
-    const r = await db.prepare(`
+    const r = db.prepare(`
       INSERT INTO jur_oficios (numero,tipo,orgao,assunto,contrato_ref,data_recebimento,data_prazo,responsavel,prioridade,valor_risco,obs)
       VALUES (?,?,?,?,?,?,?,?,?,?,?)
     `).run(numero||null, tipo||'RECEBIDO', orgao, assunto, contrato_ref||null,
@@ -168,11 +168,11 @@ router.post('/oficios', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/oficios/:id', async (req, res) => {
+router.put('/oficios/:id', (req, res) => {
   try {
     const db = req.db;
     const { numero, tipo, orgao, assunto, contrato_ref, data_recebimento, data_prazo, data_resposta, responsavel, status, prioridade, valor_risco, obs } = req.body;
-    await db.prepare(`
+    db.prepare(`
       UPDATE jur_oficios SET numero=?,tipo=?,orgao=?,assunto=?,contrato_ref=?,
         data_recebimento=?,data_prazo=?,data_resposta=?,responsavel=?,
         status=?,prioridade=?,valor_risco=?,obs=?,updated_at=datetime('now','localtime')
@@ -184,7 +184,7 @@ router.put('/oficios/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.patch('/oficios/:id/status', async (req, res) => {
+router.patch('/oficios/:id/status', (req, res) => {
   try {
     const db = req.db;
     const { status, data_resposta, obs } = req.body;
@@ -196,10 +196,10 @@ router.patch('/oficios/:id/status', async (req, res) => {
 
 // ─── PROCESSOS ───────────────────────────────────────────────────────────────
 
-router.get('/processos', async (req, res) => {
+router.get('/processos', (req, res) => {
   try {
     const db = req.db;
-    await ensureTables(db);
+    ensureTables(db);
     const { status, tipo, contrato_ref, busca } = req.query;
     let sql = `SELECT * FROM jur_processos WHERE 1=1`;
     const p = [];
@@ -208,19 +208,19 @@ router.get('/processos', async (req, res) => {
     if (contrato_ref) { sql += ` AND contrato_ref = ?`; p.push(contrato_ref); }
     if (busca)        { sql += ` AND (numero LIKE ? OR orgao LIKE ? OR assunto LIKE ? OR autor LIKE ? OR reu LIKE ?)`; p.push(`%${busca}%`,`%${busca}%`,`%${busca}%`,`%${busca}%`,`%${busca}%`); }
     sql += ` ORDER BY CASE WHEN status='ATIVO' THEN 0 ELSE 1 END, proxima_audiencia ASC NULLS LAST, id DESC`;
-    res.json(await db.prepare(sql).all(...p));
+    res.json(db.prepare(sql).all(...p));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/processos', async (req, res) => {
+router.post('/processos', (req, res) => {
   try {
     const db = req.db;
-    await ensureTables(db);
+    ensureTables(db);
     const { numero, tipo, subtipo, orgao, vara, assunto, contrato_ref, autor, reu,
             data_abertura, data_prazo, proxima_audiencia, advogado, fase,
             valor_causa, valor_risco, probabilidade, obs } = req.body;
     if (!tipo || !orgao || !assunto) return res.status(400).json({ error: 'tipo, orgao e assunto obrigatórios' });
-    const r = await db.prepare(`
+    const r = db.prepare(`
       INSERT INTO jur_processos
         (numero,tipo,subtipo,orgao,vara,assunto,contrato_ref,autor,reu,
          data_abertura,data_prazo,proxima_audiencia,advogado,fase,
@@ -235,13 +235,13 @@ router.post('/processos', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/processos/:id', async (req, res) => {
+router.put('/processos/:id', (req, res) => {
   try {
     const db = req.db;
     const { numero, tipo, subtipo, orgao, vara, assunto, contrato_ref, autor, reu,
             data_abertura, data_prazo, proxima_audiencia, advogado, status, fase,
             valor_causa, valor_risco, probabilidade, obs } = req.body;
-    await db.prepare(`
+    db.prepare(`
       UPDATE jur_processos SET
         numero=?,tipo=?,subtipo=?,orgao=?,vara=?,assunto=?,contrato_ref=?,autor=?,reu=?,
         data_abertura=?,data_prazo=?,proxima_audiencia=?,advogado=?,status=?,fase=?,
@@ -259,18 +259,18 @@ router.put('/processos/:id', async (req, res) => {
 
 // ─── ANDAMENTOS ──────────────────────────────────────────────────────────────
 
-router.get('/processos/:id/andamentos', async (req, res) => {
+router.get('/processos/:id/andamentos', (req, res) => {
   try {
     const db = req.db;
-    await ensureTables(db);
-    res.json(await db.prepare(`SELECT * FROM jur_andamentos WHERE processo_id=? ORDER BY data DESC, id DESC`).all(req.params.id));
+    ensureTables(db);
+    res.json(db.prepare(`SELECT * FROM jur_andamentos WHERE processo_id=? ORDER BY data DESC, id DESC`).all(req.params.id));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/processos/:id/andamentos', async (req, res) => {
+router.post('/processos/:id/andamentos', (req, res) => {
   try {
     const db = req.db;
-    await ensureTables(db);
+    ensureTables(db);
     const { data, descricao, responsavel } = req.body;
     if (!data || !descricao) return res.status(400).json({ error: 'data e descricao obrigatórios' });
     const r = db.prepare(`INSERT INTO jur_andamentos (processo_id,data,descricao,responsavel) VALUES (?,?,?,?)`)
@@ -287,10 +287,10 @@ router.post('/processos/:id/andamentos', async (req, res) => {
 
 // ─── RISCOS CONTRATUAIS ───────────────────────────────────────────────────────
 
-router.get('/riscos', async (req, res) => {
+router.get('/riscos', (req, res) => {
   try {
     const db = req.db;
-    await ensureTables(db);
+    ensureTables(db);
     const { contrato_ref, probabilidade, status } = req.query;
     let sql = `SELECT * FROM jur_riscos WHERE 1=1`;
     const p = [];
@@ -299,17 +299,17 @@ router.get('/riscos', async (req, res) => {
     if (status)        { sql += ` AND status = ?`; p.push(status); }
     sql += ` ORDER BY CASE probabilidade WHEN 'ALTA' THEN 0 WHEN 'MEDIA' THEN 1 ELSE 2 END,
                       CASE impacto WHEN 'ALTO' THEN 0 WHEN 'MEDIO' THEN 1 ELSE 2 END, id DESC`;
-    res.json(await db.prepare(sql).all(...p));
+    res.json(db.prepare(sql).all(...p));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/riscos', async (req, res) => {
+router.post('/riscos', (req, res) => {
   try {
     const db = req.db;
-    await ensureTables(db);
+    ensureTables(db);
     const { contrato_ref, tipo, descricao, probabilidade, impacto, valor_estimado, mitigacao, responsavel, data_identificacao, obs } = req.body;
     if (!contrato_ref || !tipo || !descricao) return res.status(400).json({ error: 'contrato_ref, tipo e descricao obrigatórios' });
-    const r = await db.prepare(`
+    const r = db.prepare(`
       INSERT INTO jur_riscos (contrato_ref,tipo,descricao,probabilidade,impacto,valor_estimado,mitigacao,responsavel,data_identificacao,obs)
       VALUES (?,?,?,?,?,?,?,?,?,?)
     `).run(contrato_ref, tipo, descricao, probabilidade||'MEDIA', impacto||'MEDIO',
@@ -319,11 +319,11 @@ router.post('/riscos', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/riscos/:id', async (req, res) => {
+router.put('/riscos/:id', (req, res) => {
   try {
     const db = req.db;
     const { contrato_ref, tipo, descricao, probabilidade, impacto, valor_estimado, status, mitigacao, responsavel, data_revisao, obs } = req.body;
-    await db.prepare(`
+    db.prepare(`
       UPDATE jur_riscos SET contrato_ref=?,tipo=?,descricao=?,probabilidade=?,impacto=?,
         valor_estimado=?,status=?,mitigacao=?,responsavel=?,data_revisao=?,obs=?,
         updated_at=datetime('now','localtime')

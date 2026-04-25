@@ -3,7 +3,7 @@
  * Registra todas as operações de escrita (POST, PUT, PATCH, DELETE) na tabela audit_log.
  * A tabela é criada em cada banco de empresa no startup.
  */
-const { getDb, COMPANIES } = require('../db_pg');
+const { getDb, COMPANIES } = require('../db');
 
 // ── Cria tabela audit_log em todos os bancos no require() ─────────
 const AUDIT_TABLE_SQL = `

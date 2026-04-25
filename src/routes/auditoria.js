@@ -50,18 +50,18 @@ router.get('/resumo', async (req, res) => {
     catch { return fallback; }
   };
 
-  resumo.escritas_24h = safe("SELECT COUNT(*) as total FROM audit_log_routes WHERE created_at >= datetime('now','-1 day','localtime')");
-  resumo.escritas_7d  = safe("SELECT COUNT(*) as total FROM audit_log_routes WHERE created_at >= datetime('now','-7 days','localtime')");
-  resumo.escritas_30d = safe("SELECT COUNT(*) as total FROM audit_log_routes WHERE created_at >= datetime('now','-30 days','localtime')");
-  resumo.negacoes_24h = safe("SELECT COUNT(*) as total FROM audit_authz_negado WHERE created_at >= datetime('now','-1 day','localtime')");
-  resumo.negacoes_7d  = safe("SELECT COUNT(*) as total FROM audit_authz_negado WHERE created_at >= datetime('now','-7 days','localtime')");
+  resumo.escritas_24h = safe("SELECT COUNT(*) as total FROM audit_log_routes WHERE created_at >= NOW() - INTERVAL '1 days'");
+  resumo.escritas_7d  = safe("SELECT COUNT(*) as total FROM audit_log_routes WHERE created_at >= NOW() - INTERVAL '7 days'");
+  resumo.escritas_30d = safe("SELECT COUNT(*) as total FROM audit_log_routes WHERE created_at >= NOW() - INTERVAL '30 days'");
+  resumo.negacoes_24h = safe("SELECT COUNT(*) as total FROM audit_authz_negado WHERE created_at >= NOW() - INTERVAL '1 days'");
+  resumo.negacoes_7d  = safe("SELECT COUNT(*) as total FROM audit_authz_negado WHERE created_at >= NOW() - INTERVAL '7 days'");
 
   try {
     resumo.top_usuarios_7d = db.prepare(
-      "SELECT usuario, COUNT(*) as total FROM audit_log_routes WHERE created_at >= datetime('now','-7 days','localtime') GROUP BY usuario ORDER BY total DESC LIMIT 10"
+      "SELECT usuario, COUNT(*) as total FROM audit_log_routes WHERE created_at >= NOW() - INTERVAL '7 days' GROUP BY usuario ORDER BY total DESC LIMIT 10"
     ).all();
     resumo.top_rotas_7d = db.prepare(
-      "SELECT metodo, rota, COUNT(*) as total FROM audit_log_routes WHERE created_at >= datetime('now','-7 days','localtime') GROUP BY metodo, rota ORDER BY total DESC LIMIT 15"
+      "SELECT metodo, rota, COUNT(*) as total FROM audit_log_routes WHERE created_at >= NOW() - INTERVAL '7 days' GROUP BY metodo, rota ORDER BY total DESC LIMIT 15"
     ).all();
   } catch (e) { resumo.erro = e.message; }
 

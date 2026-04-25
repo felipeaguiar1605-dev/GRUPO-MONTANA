@@ -6,7 +6,7 @@ router.use(companyMw);
 const CATS = ['EQUIPAMENTO','MAQUINARIO','EPI','UNIFORME','CONSUMIVEL','MATERIAL'];
 
 // Garante tabela ficha_epi existe
-async function ensureFichaTable(db) {
+function ensureFichaTable(db) {
   db.prepare(`CREATE TABLE IF NOT EXISTS estoque_ficha_epi (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     funcionario_id INTEGER,
@@ -26,21 +26,21 @@ async function ensureFichaTable(db) {
     created_at TEXT DEFAULT (datetime('now','localtime'))
   )`).run();
   // Migração: adicionar colunas se não existirem
-  const cols = await db.prepare(`PRAGMA table_info(estoque_ficha_epi)`).all().map(c => c.name);
-  if (!cols.includes('data_validade')) await db.prepare(`ALTER TABLE estoque_ficha_epi ADD COLUMN data_validade TEXT`).run();
-  if (!cols.includes('contrato_ref'))  await db.prepare(`ALTER TABLE estoque_ficha_epi ADD COLUMN contrato_ref TEXT`).run();
-  if (!cols.includes('posto'))         await db.prepare(`ALTER TABLE estoque_ficha_epi ADD COLUMN posto TEXT`).run();
-  if (!cols.includes('assinatura'))    await db.prepare(`ALTER TABLE estoque_ficha_epi ADD COLUMN assinatura TEXT`).run();
+  const cols = db.prepare(`PRAGMA table_info(estoque_ficha_epi)`).all().map(c => c.name);
+  if (!cols.includes('data_validade')) db.prepare(`ALTER TABLE estoque_ficha_epi ADD COLUMN data_validade TEXT`).run();
+  if (!cols.includes('contrato_ref'))  db.prepare(`ALTER TABLE estoque_ficha_epi ADD COLUMN contrato_ref TEXT`).run();
+  if (!cols.includes('posto'))         db.prepare(`ALTER TABLE estoque_ficha_epi ADD COLUMN posto TEXT`).run();
+  if (!cols.includes('assinatura'))    db.prepare(`ALTER TABLE estoque_ficha_epi ADD COLUMN assinatura TEXT`).run();
 }
 
-async function ensureItemCols(db) {
-  const cols = await db.prepare(`PRAGMA table_info(estoque_itens)`).all().map(c => c.name);
-  if (!cols.includes('ca_numero'))         await db.prepare(`ALTER TABLE estoque_itens ADD COLUMN ca_numero TEXT`).run();
-  if (!cols.includes('ca_validade'))       await db.prepare(`ALTER TABLE estoque_itens ADD COLUMN ca_validade TEXT`).run();
-  if (!cols.includes('vida_util_meses'))   await db.prepare(`ALTER TABLE estoque_itens ADD COLUMN vida_util_meses INTEGER`).run();
-  if (!cols.includes('fabricante'))        await db.prepare(`ALTER TABLE estoque_itens ADD COLUMN fabricante TEXT`).run();
-  if (!cols.includes('contrato_ref'))      await db.prepare(`ALTER TABLE estoque_itens ADD COLUMN contrato_ref TEXT`).run();
-  if (!cols.includes('empresa_restrita'))  await db.prepare(`ALTER TABLE estoque_itens ADD COLUMN empresa_restrita TEXT`).run();
+function ensureItemCols(db) {
+  const cols = db.prepare(`PRAGMA table_info(estoque_itens)`).all().map(c => c.name);
+  if (!cols.includes('ca_numero'))         db.prepare(`ALTER TABLE estoque_itens ADD COLUMN ca_numero TEXT`).run();
+  if (!cols.includes('ca_validade'))       db.prepare(`ALTER TABLE estoque_itens ADD COLUMN ca_validade TEXT`).run();
+  if (!cols.includes('vida_util_meses'))   db.prepare(`ALTER TABLE estoque_itens ADD COLUMN vida_util_meses INTEGER`).run();
+  if (!cols.includes('fabricante'))        db.prepare(`ALTER TABLE estoque_itens ADD COLUMN fabricante TEXT`).run();
+  if (!cols.includes('contrato_ref'))      db.prepare(`ALTER TABLE estoque_itens ADD COLUMN contrato_ref TEXT`).run();
+  if (!cols.includes('empresa_restrita'))  db.prepare(`ALTER TABLE estoque_itens ADD COLUMN empresa_restrita TEXT`).run();
 }
 
 // Regras de compatibilidade empresa ↔ item
@@ -72,14 +72,14 @@ function detectarEmpresaItem(nome, categoria) {
   return null;
 }
 
-async function ensureMovCols(db) {
-  const cols = await db.prepare(`PRAGMA table_info(estoque_movimentos)`).all().map(c => c.name);
-  if (!cols.includes('contrato_ref')) await db.prepare(`ALTER TABLE estoque_movimentos ADD COLUMN contrato_ref TEXT`).run();
-  if (!cols.includes('posto'))        await db.prepare(`ALTER TABLE estoque_movimentos ADD COLUMN posto TEXT`).run();
+function ensureMovCols(db) {
+  const cols = db.prepare(`PRAGMA table_info(estoque_movimentos)`).all().map(c => c.name);
+  if (!cols.includes('contrato_ref')) db.prepare(`ALTER TABLE estoque_movimentos ADD COLUMN contrato_ref TEXT`).run();
+  if (!cols.includes('posto'))        db.prepare(`ALTER TABLE estoque_movimentos ADD COLUMN posto TEXT`).run();
 }
 
 // GET /api/estoque/itens — listar itens com estoque atual
-router.get('/itens', async (req, res) => {
+router.get('/itens', (req, res) => {
   try {
     const db = req.db;
     ensureItemCols(db);
@@ -91,7 +91,7 @@ router.get('/itens', async (req, res) => {
     if (baixo_estoque === '1') sql += ` AND estoque_atual <= estoque_minimo AND estoque_minimo > 0`;
     if (contrato_ref) { sql += ` AND contrato_ref = ?`; params.push(contrato_ref); }
     sql += ` ORDER BY categoria, nome`;
-    const itens = await db.prepare(sql).all(...params);
+    const itens = db.prepare(sql).all(...params);
     // Marcar itens incompatíveis com a empresa atual
     const empresaAtual = req.companyKey;
     const result = itens.map(it => ({
@@ -103,12 +103,12 @@ router.get('/itens', async (req, res) => {
 });
 
 // GET /api/estoque/itens/:id — detalhe + histórico de movimentos
-router.get('/itens/:id', async (req, res) => {
+router.get('/itens/:id', (req, res) => {
   try {
     const db = req.db;
-    const item = await db.prepare(`SELECT * FROM estoque_itens WHERE id = ?`).get(req.params.id);
+    const item = db.prepare(`SELECT * FROM estoque_itens WHERE id = ?`).get(req.params.id);
     if (!item) return res.status(404).json({ error: 'Item não encontrado' });
-    const movimentos = await db.prepare(`
+    const movimentos = db.prepare(`
       SELECT * FROM estoque_movimentos WHERE item_id = ?
       ORDER BY data_movimento DESC, id DESC LIMIT 100
     `).all(req.params.id);
@@ -117,7 +117,7 @@ router.get('/itens/:id', async (req, res) => {
 });
 
 // POST /api/estoque/itens — cadastrar item
-router.post('/itens', async (req, res) => {
+router.post('/itens', (req, res) => {
   try {
     const db = req.db;
     ensureItemCols(db);
@@ -127,7 +127,7 @@ router.post('/itens', async (req, res) => {
     if (!CATS.includes(categoria)) return res.status(400).json({ error: 'Categoria inválida' });
     // Auto-detectar empresa se não informada
     const empRestrita = empresa_restrita !== undefined ? (empresa_restrita || null) : detectarEmpresaItem(nome, categoria);
-    const r = await db.prepare(`
+    const r = db.prepare(`
       INSERT INTO estoque_itens
         (codigo,nome,categoria,descricao,unidade,estoque_minimo,valor_unitario,localizacao,estoque_atual,
          ca_numero,ca_validade,vida_util_meses,fabricante,contrato_ref,empresa_restrita)
@@ -144,14 +144,14 @@ router.post('/itens', async (req, res) => {
 });
 
 // PUT /api/estoque/itens/:id — editar item
-router.put('/itens/:id', async (req, res) => {
+router.put('/itens/:id', (req, res) => {
   try {
     const db = req.db;
     ensureItemCols(db);
     const { codigo, nome, categoria, descricao, unidade, estoque_minimo, valor_unitario, localizacao, ativo,
             ca_numero, ca_validade, vida_util_meses, fabricante, contrato_ref, empresa_restrita } = req.body;
     const empRestrita = empresa_restrita !== undefined ? (empresa_restrita || null) : detectarEmpresaItem(nome, categoria);
-    await db.prepare(`
+    db.prepare(`
       UPDATE estoque_itens SET
         codigo=?,nome=?,categoria=?,descricao=?,unidade=?,
         estoque_minimo=?,valor_unitario=?,localizacao=?,ativo=?,
@@ -168,7 +168,7 @@ router.put('/itens/:id', async (req, res) => {
 });
 
 // POST /api/estoque/movimentos — registrar entrada ou saída
-router.post('/movimentos', async (req, res) => {
+router.post('/movimentos', (req, res) => {
   try {
     const db = req.db;
     ensureMovCols(db);
@@ -179,7 +179,7 @@ router.post('/movimentos', async (req, res) => {
     const TIPOS = ['ENTRADA','SAIDA','AJUSTE','TRANSFERENCIA'];
     if (!TIPOS.includes(tipo)) return res.status(400).json({ error: 'Tipo inválido' });
 
-    const item = await db.prepare(`SELECT * FROM estoque_itens WHERE id = ?`).get(item_id);
+    const item = db.prepare(`SELECT * FROM estoque_itens WHERE id = ?`).get(item_id);
     if (!item) return res.status(404).json({ error: 'Item não encontrado' });
 
     const qtd = parseFloat(quantidade);
@@ -195,8 +195,8 @@ router.post('/movimentos', async (req, res) => {
     if (novoEstoque < 0 && tipo !== 'AJUSTE')
       return res.status(400).json({ error: `Estoque insuficiente. Atual: ${item.estoque_atual}, solicitado: ${qtd}` });
 
-    const registrar = db.transaction(async () => {
-      await db.prepare(`
+    const registrar = db.transaction(() => {
+      db.prepare(`
         INSERT INTO estoque_movimentos
           (item_id,tipo,quantidade,valor_unitario,total,data_movimento,motivo,fornecedor,nota_fiscal,responsavel,destino,obs,contrato_ref,posto)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -207,18 +207,18 @@ router.post('/movimentos', async (req, res) => {
       db.prepare(`UPDATE estoque_itens SET estoque_atual=?, valor_unitario=CASE WHEN ?>0 THEN ? ELSE valor_unitario END, updated_at=datetime('now','localtime') WHERE id=?`)
         .run(novoEstoque, vunit, vunit, item_id);
     });
-    await registrar();
+    registrar();
 
     res.json({ message: 'Movimento registrado', estoque_atual: novoEstoque });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // GET /api/estoque/resumo — dashboard: totais por categoria + alertas
-router.get('/resumo', async (req, res) => {
+router.get('/resumo', (req, res) => {
   try {
     const db = req.db;
     ensureItemCols(db);
-    const cats = await db.prepare(`
+    const cats = db.prepare(`
       SELECT categoria,
         COUNT(*) as total_itens,
         SUM(CASE WHEN estoque_atual <= estoque_minimo AND estoque_minimo > 0 THEN 1 ELSE 0 END) as alertas,
@@ -227,14 +227,14 @@ router.get('/resumo', async (req, res) => {
       GROUP BY categoria
     `).all();
 
-    const alertas = await db.prepare(`
+    const alertas = db.prepare(`
       SELECT id, nome, categoria, estoque_atual, estoque_minimo, unidade
       FROM estoque_itens
       WHERE ativo=1 AND estoque_atual <= estoque_minimo AND estoque_minimo > 0
       ORDER BY categoria, nome
     `).all();
 
-    const ultimos = await db.prepare(`
+    const ultimos = db.prepare(`
       SELECT m.*, i.nome as item_nome, i.categoria, i.unidade
       FROM estoque_movimentos m JOIN estoque_itens i ON m.item_id=i.id
       ORDER BY m.created_at DESC LIMIT 10
@@ -245,7 +245,7 @@ router.get('/resumo', async (req, res) => {
 });
 
 // GET /api/estoque/alertas — CA vencido/vencendo, EPI p/ substituir, estoque baixo
-router.get('/alertas', async (req, res) => {
+router.get('/alertas', (req, res) => {
   try {
     const db = req.db;
     ensureItemCols(db);
@@ -253,7 +253,7 @@ router.get('/alertas', async (req, res) => {
     const em30 = new Date(Date.now() + 30*86400000).toISOString().split('T')[0];
 
     // CA vencido ou vencendo em 30 dias (EPI/UNIFORME)
-    const ca_alertas = await db.prepare(`
+    const ca_alertas = db.prepare(`
       SELECT id, nome, categoria, ca_numero, ca_validade, estoque_atual, unidade
       FROM estoque_itens
       WHERE ativo=1 AND ca_validade IS NOT NULL AND ca_validade != ''
@@ -263,8 +263,8 @@ router.get('/alertas', async (req, res) => {
     `).all(em30);
 
     // EPIs com vida_util_meses — verificar fichas com data_validade vencida/vencendo
-    await ensureFichaTable(db);
-    const epi_vencidos = await db.prepare(`
+    ensureFichaTable(db);
+    const epi_vencidos = db.prepare(`
       SELECT f.id, f.funcionario_nome, f.funcionario_matricula, f.data_entrega,
              f.data_validade, f.contrato_ref, f.posto,
              i.nome as item_nome, i.categoria, i.ca_numero
@@ -277,7 +277,7 @@ router.get('/alertas', async (req, res) => {
     `).all(em30);
 
     // Estoque baixo
-    const estoque_baixo = await db.prepare(`
+    const estoque_baixo = db.prepare(`
       SELECT id, nome, categoria, estoque_atual, estoque_minimo, unidade, contrato_ref
       FROM estoque_itens
       WHERE ativo=1 AND estoque_atual <= estoque_minimo AND estoque_minimo > 0
@@ -306,7 +306,7 @@ router.get('/alertas', async (req, res) => {
 });
 
 // GET /api/estoque/custo-contrato — custo de materiais por contrato/mês
-router.get('/custo-contrato', async (req, res) => {
+router.get('/custo-contrato', (req, res) => {
   try {
     const db = req.db;
     ensureMovCols(db);
@@ -329,7 +329,7 @@ router.get('/custo-contrato', async (req, res) => {
     if (contrato_ref) { sql += ` AND (m.contrato_ref = ? OR i.contrato_ref = ?)`; params.push(contrato_ref, contrato_ref); }
     sql += ` GROUP BY contrato, i.categoria, strftime('%Y-%m', m.data_movimento)
              ORDER BY mes DESC, contrato, i.categoria`;
-    const rows = await db.prepare(sql).all(...params);
+    const rows = db.prepare(sql).all(...params);
 
     // Agregar por contrato
     const porContrato = {};
@@ -346,7 +346,7 @@ router.get('/custo-contrato', async (req, res) => {
 });
 
 // GET /api/estoque/relatorio — movimentos filtrados
-router.get('/relatorio', async (req, res) => {
+router.get('/relatorio', (req, res) => {
   try {
     const db = req.db;
     const { data_ini, data_fim, tipo, categoria, contrato_ref } = req.query;
@@ -362,16 +362,16 @@ router.get('/relatorio', async (req, res) => {
     if (categoria)   { sql += ` AND i.categoria = ?`; params.push(categoria); }
     if (contrato_ref){ sql += ` AND (m.contrato_ref = ? OR i.contrato_ref = ?)`; params.push(contrato_ref, contrato_ref); }
     sql += ` ORDER BY m.data_movimento DESC, m.id DESC`;
-    res.json(await db.prepare(sql).all(...params));
+    res.json(db.prepare(sql).all(...params));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // PATCH /api/estoque/itens/:id/ativo — ativar/inativar item
-router.patch('/itens/:id/ativo', async (req, res) => {
+router.patch('/itens/:id/ativo', (req, res) => {
   try {
     const db = req.db;
     const { ativo } = req.body;
-    await db.prepare(`UPDATE estoque_itens SET ativo=?, updated_at=datetime('now','localtime') WHERE id=?`).run(ativo ? 1 : 0, req.params.id);
+    db.prepare(`UPDATE estoque_itens SET ativo=?, updated_at=datetime('now','localtime') WHERE id=?`).run(ativo ? 1 : 0, req.params.id);
     res.json({ message: ativo ? 'Item ativado' : 'Item inativado' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -379,10 +379,10 @@ router.patch('/itens/:id/ativo', async (req, res) => {
 // ─── FICHA DE EPI / UNIFORME ─────────────────────────────────────
 
 // GET /api/estoque/ficha-epi — listar entregas
-router.get('/ficha-epi', async (req, res) => {
+router.get('/ficha-epi', (req, res) => {
   try {
     const db = req.db;
-    await ensureFichaTable(db);
+    ensureFichaTable(db);
     const { funcionario_id, item_id, pendente, busca, contrato_ref, vencendo } = req.query;
     const hoje = new Date().toISOString().split('T')[0];
     const em30 = new Date(Date.now() + 30*86400000).toISOString().split('T')[0];
@@ -403,16 +403,16 @@ router.get('/ficha-epi', async (req, res) => {
       params.push(em30);
     }
     sql += ` ORDER BY f.data_entrega DESC, f.id DESC`;
-    res.json(await db.prepare(sql).all(...params));
+    res.json(db.prepare(sql).all(...params));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // GET /api/estoque/ficha-epi/funcionario/:id — histórico completo por funcionário (NR-6)
-router.get('/ficha-epi/funcionario/:id', async (req, res) => {
+router.get('/ficha-epi/funcionario/:id', (req, res) => {
   try {
     const db = req.db;
-    await ensureFichaTable(db);
-    const fichas = await db.prepare(`
+    ensureFichaTable(db);
+    const fichas = db.prepare(`
       SELECT f.*, i.nome as item_nome, i.categoria, i.unidade, i.codigo, i.ca_numero, i.ca_validade,
              i.fabricante, i.vida_util_meses
       FROM estoque_ficha_epi f
@@ -424,7 +424,7 @@ router.get('/ficha-epi/funcionario/:id', async (req, res) => {
     // Busca dados do funcionário se tabela existir
     let funcionario = null;
     try {
-      funcionario = await db.prepare(`SELECT id, nome, matricula, cargo, lotacao FROM rh_funcionarios WHERE id = ?`).get(req.params.id);
+      funcionario = db.prepare(`SELECT id, nome, matricula, cargo, lotacao FROM rh_funcionarios WHERE id = ?`).get(req.params.id);
     } catch (_) {}
 
     const pendentes = fichas.filter(f => !f.data_devolucao);
@@ -435,7 +435,7 @@ router.get('/ficha-epi/funcionario/:id', async (req, res) => {
 });
 
 // GET /api/estoque/ficha-epi/funcionarios — lista funcionários p/ autocomplete
-router.get('/ficha-epi/funcionarios', async (req, res) => {
+router.get('/ficha-epi/funcionarios', (req, res) => {
   try {
     const db = req.db;
     const { busca } = req.query;
@@ -443,22 +443,22 @@ router.get('/ficha-epi/funcionarios', async (req, res) => {
     const params = [];
     if (busca) { sql += ` AND nome LIKE ?`; params.push(`%${busca}%`); }
     sql += ` ORDER BY nome LIMIT 50`;
-    const funcs = await db.prepare(sql).all(...params);
+    const funcs = db.prepare(sql).all(...params);
     res.json(funcs);
   } catch (e) { res.json([]); } // tabela pode não existir em alguma empresa
 });
 
 // POST /api/estoque/ficha-epi — registrar entrega de EPI/Uniforme
-router.post('/ficha-epi', async (req, res) => {
+router.post('/ficha-epi', (req, res) => {
   try {
     const db = req.db;
-    await ensureFichaTable(db);
+    ensureFichaTable(db);
     const { funcionario_id, funcionario_nome, funcionario_matricula, item_id, quantidade,
             tamanho, data_entrega, responsavel, obs, contrato_ref, posto, assinatura } = req.body;
     if (!funcionario_nome || !item_id || !data_entrega)
       return res.status(400).json({ error: 'funcionario_nome, item_id e data_entrega são obrigatórios' });
 
-    const item = await db.prepare(`SELECT * FROM estoque_itens WHERE id=?`).get(item_id);
+    const item = db.prepare(`SELECT * FROM estoque_itens WHERE id=?`).get(item_id);
     if (!item) return res.status(404).json({ error: 'Item não encontrado' });
 
     // Aviso de empresa incompatível
@@ -478,8 +478,8 @@ router.post('/ficha-epi', async (req, res) => {
 
     const cref = contrato_ref || item.contrato_ref || null;
 
-    const registrar = db.transaction(async () => {
-      const r = await db.prepare(`
+    const registrar = db.transaction(() => {
+      const r = db.prepare(`
         INSERT INTO estoque_ficha_epi
           (funcionario_id,funcionario_nome,funcionario_matricula,item_id,quantidade,tamanho,
            data_entrega,data_validade,contrato_ref,posto,assinatura,responsavel,obs)
@@ -492,39 +492,39 @@ router.post('/ficha-epi', async (req, res) => {
       if (novoEstoque < 0) throw new Error(`Estoque insuficiente: ${item.estoque_atual} ${item.unidade} disponíveis`);
 
       ensureMovCols(db);
-      await db.prepare(`
+      db.prepare(`
         INSERT INTO estoque_movimentos
           (item_id,tipo,quantidade,valor_unitario,total,data_movimento,motivo,responsavel,destino,contrato_ref,posto)
         VALUES (?,?,?,?,?,?,?,?,?,?,?)
       `).run(item_id,'SAIDA',qtd,item.valor_unitario,qtd*item.valor_unitario,data_entrega,
              `Entrega EPI/Uniforme — ${funcionario_nome}`,responsavel||null,funcionario_nome,
              cref, posto||null);
-      await db.prepare(`UPDATE estoque_itens SET estoque_atual=?, updated_at=datetime('now','localtime') WHERE id=?`).run(novoEstoque, item_id);
+      db.prepare(`UPDATE estoque_itens SET estoque_atual=?, updated_at=datetime('now','localtime') WHERE id=?`).run(novoEstoque, item_id);
       return r.lastInsertRowid;
     });
 
-    const id = await registrar();
+    const id = registrar();
     res.json({ id, message: 'Entrega registrada com sucesso', data_validade, aviso_empresa: avisoEmpresa });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // PATCH /api/estoque/ficha-epi/:id/devolucao — registrar devolução
-router.patch('/ficha-epi/:id/devolucao', async (req, res) => {
+router.patch('/ficha-epi/:id/devolucao', (req, res) => {
   try {
     const db = req.db;
-    await ensureFichaTable(db);
+    ensureFichaTable(db);
     const { data_devolucao, obs } = req.body;
     if (!data_devolucao) return res.status(400).json({ error: 'data_devolucao obrigatória' });
 
-    const ficha = await db.prepare(`SELECT f.*, i.valor_unitario, i.estoque_atual FROM estoque_ficha_epi f JOIN estoque_itens i ON f.item_id=i.id WHERE f.id=?`).get(req.params.id);
+    const ficha = db.prepare(`SELECT f.*, i.valor_unitario, i.estoque_atual FROM estoque_ficha_epi f JOIN estoque_itens i ON f.item_id=i.id WHERE f.id=?`).get(req.params.id);
     if (!ficha) return res.status(404).json({ error: 'Ficha não encontrada' });
     if (ficha.data_devolucao) return res.status(400).json({ error: 'Item já devolvido' });
 
-    const registrar = db.transaction(async () => {
+    const registrar = db.transaction(() => {
       db.prepare(`UPDATE estoque_ficha_epi SET data_devolucao=?, obs=COALESCE(obs||' | ','')|| ? WHERE id=?`)
         .run(data_devolucao, obs ? `Devolução: ${obs}` : 'Devolvido', req.params.id);
       ensureMovCols(db);
-      await db.prepare(`
+      db.prepare(`
         INSERT INTO estoque_movimentos
           (item_id,tipo,quantidade,valor_unitario,total,data_movimento,motivo,destino,contrato_ref,posto)
         VALUES (?,?,?,?,?,?,?,?,?,?)
@@ -532,9 +532,9 @@ router.patch('/ficha-epi/:id/devolucao', async (req, res) => {
              ficha.quantidade*ficha.valor_unitario,data_devolucao,
              `Devolução EPI/Uniforme — ${ficha.funcionario_nome}`,null,
              ficha.contrato_ref||null, ficha.posto||null);
-      await db.prepare(`UPDATE estoque_itens SET estoque_atual=estoque_atual+?, updated_at=datetime('now','localtime') WHERE id=?`).run(ficha.quantidade, ficha.item_id);
+      db.prepare(`UPDATE estoque_itens SET estoque_atual=estoque_atual+?, updated_at=datetime('now','localtime') WHERE id=?`).run(ficha.quantidade, ficha.item_id);
     });
-    await registrar();
+    registrar();
     res.json({ message: 'Devolução registrada' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

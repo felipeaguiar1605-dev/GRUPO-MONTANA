@@ -83,13 +83,13 @@ function calcVencimento(ano, mes) {
   return d.toLocaleDateString('pt-BR');
 }
 
-async function apurar(db, anoMes, companyKey) {
+function apurar(db, anoMes, companyKey) {
   const cfg = regimeFor(companyKey);
   const [ano, mes] = anoMes.split('-').map(Number);
   const dateFrom   = `${ano}-${String(mes).padStart(2,'0')}-01`;
   const dateTo     = `${ano}-${String(mes).padStart(2,'0')}-31`;
 
-  const rows = await db.prepare(`
+  const rows = db.prepare(`
     SELECT
       e.id, e.data_iso, e.historico, e.credito,
       e.pagador_identificado, e.pagador_cnpj,
@@ -157,7 +157,7 @@ async function apurar(db, anoMes, companyKey) {
 }
 
 // ── GET /api/piscofins-seguranca/:anomes ─────────────────────────
-router.get('/:anomes', async (req, res) => {
+router.get('/:anomes', (req, res) => {
   try {
     const { anomes } = req.params;
     if (!/^\d{4}-\d{2}$/.test(anomes)) {

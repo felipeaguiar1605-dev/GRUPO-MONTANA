@@ -13,7 +13,7 @@
  */
 const express = require('express');
 const router  = express.Router();
-const { getDb } = require('../db_pg');
+const { getDb } = require('../db');
 
 // ─── Jornada padrão CLT (44h semanais, 8h/dia) ──────────────────────────────
 const JORNADA_PADRAO = {
@@ -186,7 +186,7 @@ function _calcDia(porDia, ocorrencias, diaStr, jornadaMin, jornadaConf, hoje) {
 }
 
 // ─── POST /api/ponto/registrar ───────────────────────────────────────────────
-router.post('/registrar', async (req, res) => {
+router.post('/registrar', (req, res) => {
   try {
     const { funcionario_id, tipo, data_hora, observacao } = req.body;
     if (!funcionario_id || !tipo || !data_hora)
@@ -242,7 +242,7 @@ function getUserFromReq(req) {
 }
 
 // ─── GET /api/ponto ──────────────────────────────────────────────────────────
-router.get('/', async (req, res) => {
+router.get('/', (req, res) => {
   try {
     const { funcionario_id, from, to, data } = req.query;
     const d = db(req);
@@ -270,7 +270,7 @@ router.get('/', async (req, res) => {
 });
 
 // ─── GET /api/ponto/espelho ──────────────────────────────────────────────────
-router.get('/espelho', async (req, res) => {
+router.get('/espelho', (req, res) => {
   try {
     const { funcionario_id, mes } = req.query;
     if (!funcionario_id || !mes)
@@ -499,7 +499,7 @@ router.get('/espelho-pdf', async (req, res) => {
 });
 
 // ─── GET /api/ponto/ocorrencias ──────────────────────────────────────────────
-router.get('/ocorrencias', async (req, res) => {
+router.get('/ocorrencias', (req, res) => {
   try {
     const { funcionario_id, from, to } = req.query;
     const d = db(req);
@@ -518,7 +518,7 @@ router.get('/ocorrencias', async (req, res) => {
 });
 
 // ─── POST /api/ponto/ocorrencias ─────────────────────────────────────────────
-router.post('/ocorrencias', async (req, res) => {
+router.post('/ocorrencias', (req, res) => {
   try {
     const { funcionario_id, tipo, date_inicio, date_fim, observacao } = req.body;
     if (!funcionario_id || !tipo || !date_inicio)
@@ -533,7 +533,7 @@ router.post('/ocorrencias', async (req, res) => {
 });
 
 // ─── PATCH /api/ponto/ocorrencias/:id/aprovar — Aprova/reprova ocorrência ────
-router.patch('/ocorrencias/:id/aprovar', async (req, res) => {
+router.patch('/ocorrencias/:id/aprovar', (req, res) => {
   try {
     const d = db(req);
     const oc = d.prepare('SELECT id, aprovado FROM ponto_ocorrencias WHERE id = ?').get(Number(req.params.id));
@@ -545,7 +545,7 @@ router.patch('/ocorrencias/:id/aprovar', async (req, res) => {
 });
 
 // ─── DELETE /api/ponto/ocorrencias/:id ───────────────────────────────────────
-router.delete('/ocorrencias/:id', async (req, res) => {
+router.delete('/ocorrencias/:id', (req, res) => {
   try {
     db(req).prepare('DELETE FROM ponto_ocorrencias WHERE id = ?').run(Number(req.params.id));
     res.json({ ok: true });
@@ -553,7 +553,7 @@ router.delete('/ocorrencias/:id', async (req, res) => {
 });
 
 // ─── GET /api/ponto/relatorio-frequencia ─────────────────────────────────────
-router.get('/relatorio-frequencia', async (req, res) => {
+router.get('/relatorio-frequencia', (req, res) => {
   try {
     const { mes } = req.query;
     const d = db(req);
@@ -676,8 +676,8 @@ router.post('/importar', async (req, res) => {
       return res.status(400).json({ error: 'Planilha deve ter colunas: Funcionário, Data, Entrada. Saída é opcional.' });
 
     let inseridos = 0, duplicados = 0, erros = [];
-    const inserir = d.prepare(`INSERT INTO ponto_registros (funcionario_id, tipo, data_hora, observacao) VALUES (?,?,?,?)`);
-    const insert = d.transaction(async rows => {
+    const inserir = d.prepare(`INSERT OR IGNORE INTO ponto_registros (funcionario_id, tipo, data_hora, observacao) VALUES (?,?,?,?)`);
+    const insert = d.transaction(rows => {
       rows.forEach(r => {
         const result = inserir.run(r.fid, r.tipo, r.dh, r.obs);
         if (result.changes > 0) inseridos++;
@@ -835,7 +835,7 @@ router.get('/export', async (req, res) => {
 });
 
 // ─── GET /api/ponto/jornadas ─────────────────────────────────────────────────
-router.get('/jornadas', async (req, res) => {
+router.get('/jornadas', (req, res) => {
   try {
     const rows = db(req).prepare(`
       SELECT j.*, f.nome AS funcionario_nome, c.nome AS cargo_nome
@@ -848,7 +848,7 @@ router.get('/jornadas', async (req, res) => {
 });
 
 // ─── POST /api/ponto/jornadas ────────────────────────────────────────────────
-router.post('/jornadas', async (req, res) => {
+router.post('/jornadas', (req, res) => {
   try {
     const { funcionario_id, cargo_id, entrada, saida, intervalo_minutos, dias_semana, horas_dia, horas_semana } = req.body;
     const result = db(req).prepare(`
@@ -860,7 +860,7 @@ router.post('/jornadas', async (req, res) => {
 });
 
 // ─── PATCH /api/ponto/jornadas/:id ───────────────────────────────────────────
-router.patch('/jornadas/:id', async (req, res) => {
+router.patch('/jornadas/:id', (req, res) => {
   try {
     const { entrada, saida, intervalo_minutos, dias_semana, horas_dia, horas_semana } = req.body;
     db(req).prepare(`
@@ -871,7 +871,7 @@ router.patch('/jornadas/:id', async (req, res) => {
 });
 
 // ─── DELETE /api/ponto/jornadas/:id ──────────────────────────────────────────
-router.delete('/jornadas/:id', async (req, res) => {
+router.delete('/jornadas/:id', (req, res) => {
   try {
     db(req).prepare('DELETE FROM ponto_jornadas WHERE id = ?').run(Number(req.params.id));
     res.json({ ok: true });
@@ -1045,7 +1045,7 @@ router.get('/export-folha', async (req, res) => {
 
 // ─── POST /api/ponto/integrar-folha — Cria itens de folha a partir do ponto ──
 // Body: { mes: 'YYYY-MM' }
-router.post('/integrar-folha', async (req, res) => {
+router.post('/integrar-folha', (req, res) => {
   try {
     const { mes } = req.body;
     if (!mes) return res.status(400).json({ error: 'Parâmetro obrigatório: mes (YYYY-MM)' });
@@ -1075,7 +1075,7 @@ router.post('/integrar-folha', async (req, res) => {
     let totalBruto = 0, totalDesc = 0, totalLiq = 0;
     let atualizados = 0;
 
-    const upsertItem = d.transaction(async () => {
+    const upsertItem = d.transaction(() => {
       for (const func of funcionarios) {
         const jornada    = d.prepare(`SELECT * FROM ponto_jornadas WHERE funcionario_id = ? LIMIT 1`).get(func.id) || JORNADA_PADRAO;
         const jornadaMin = (jornada.horas_dia || 8) * 60;
@@ -1147,7 +1147,7 @@ router.post('/integrar-folha', async (req, res) => {
       d.prepare(`UPDATE rh_folha SET total_bruto=?,total_descontos=?,total_liquido=?,status='RASCUNHO' WHERE id=?`)
        .run(totalBruto, totalDesc, totalLiq, folha.id);
     });
-    await upsertItem();
+    upsertItem();
     res.json({ ok: true, folha_id: folha.id, competencia: mes, funcionarios: atualizados,
                total_bruto: totalBruto, total_liquido: totalLiq });
   } catch (e) { res.status(500).json({ error: e.message }); }

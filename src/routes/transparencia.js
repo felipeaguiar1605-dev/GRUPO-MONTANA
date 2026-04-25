@@ -20,7 +20,7 @@
  */
 
 const express  = require('express');
-const { getDb } = require('../db_pg');
+const { getDb } = require('../db');
 const companyMw = require('../companyMiddleware');
 
 const router = express.Router();
@@ -105,7 +105,7 @@ function ensureTable(db) {
       extrato_id       INTEGER REFERENCES extratos(id),
       status_conciliacao TEXT DEFAULT 'PENDENTE',
       raw              TEXT,
-      created_at       TEXT DEFAULT (NOW())
+      created_at       TEXT DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_transp_data ON transparencia_palmas(data_pagamento);
     CREATE INDEX IF NOT EXISTS idx_transp_valor ON transparencia_palmas(valor_pago);
@@ -165,7 +165,7 @@ router.post('/importar', async (req, res) => {
 
   try {
     const insert = db.prepare(`
-      INSERT INTO transparencia_palmas
+      INSERT OR IGNORE INTO transparencia_palmas
         (fonte, numero_empenho, data_empenho, data_liquidacao, data_pagamento,
          valor_pago, fornecedor, cnpj_fornecedor, elemento_despesa, subnatureza,
          processo, gestao, fonte_recurso, pronto_pagamento, raw)
@@ -181,7 +181,7 @@ router.post('/importar', async (req, res) => {
       if (!results.length) break;
 
       const pagamentos = normalizarPagamentos(results, 'portal_palmas');
-      db.transaction(async (lista) => {
+      db.transaction((lista) => {
         for (const p of lista) {
           const existe = check.get(p.numero_empenho, p.data_pagamento, p.valor_pago);
           if (existe && !sobrescrever) { duplicados++; continue; }
@@ -205,7 +205,7 @@ router.post('/importar', async (req, res) => {
 
 // ─── GET /conciliar — cruza transparência com extratos ───────────────────────
 
-router.get('/conciliar', async (req, res) => {
+router.get('/conciliar', (req, res) => {
   const db = req.db;
   if (!db) return res.status(400).json({ error: 'Empresa não informada' });
 
@@ -216,7 +216,7 @@ router.get('/conciliar', async (req, res) => {
 
   try {
     // Busca pagamentos pendentes de conciliação
-    const pendentes = await db.prepare(`
+    const pendentes = db.prepare(`
       SELECT * FROM transparencia_palmas
       WHERE status_conciliacao = 'PENDENTE'
       ${mes ? "AND strftime('%Y-%m', data_pagamento) = ?" : ''}
@@ -228,12 +228,12 @@ router.get('/conciliar', async (req, res) => {
       UPDATE transparencia_palmas SET status_conciliacao=?, extrato_id=? WHERE id=?
     `);
 
-    const conciliarTodos = db.transaction(async () => {
+    const conciliarTodos = db.transaction(() => {
       for (const p of pendentes) {
         if (!p.data_pagamento || !p.valor_pago) continue;
 
         // Busca extrato com valor próximo e data próxima (+/- tolerancia dias)
-        const match = await db.prepare(`
+        const match = db.prepare(`
           SELECT id, data_iso, credito FROM extratos
           WHERE ABS(credito - ?) < 0.02
             AND date(data_iso) BETWEEN date(?, '-${tol} days') AND date(?, '+${tol} days')
@@ -244,7 +244,7 @@ router.get('/conciliar', async (req, res) => {
 
         if (match) {
           updateStatus.run('CONCILIADO', match.id, p.id);
-          await db.prepare(`UPDATE extratos SET status_conciliacao='CONCILIADO' WHERE id=?`).run(match.id);
+          db.prepare(`UPDATE extratos SET status_conciliacao='CONCILIADO' WHERE id=?`).run(match.id);
           conciliados++;
         }
       }
@@ -252,7 +252,7 @@ router.get('/conciliar', async (req, res) => {
     conciliarTodos();
 
     // Resumo final
-    const resumo = await db.prepare(`
+    const resumo = db.prepare(`
       SELECT status_conciliacao, COUNT(*) qtd, SUM(valor_pago) total
       FROM transparencia_palmas GROUP BY status_conciliacao
     `).all();
@@ -265,7 +265,7 @@ router.get('/conciliar', async (req, res) => {
 
 // ─── GET /pendentes — lista pagamentos não conciliados ───────────────────────
 
-router.get('/pendentes', async (req, res) => {
+router.get('/pendentes', (req, res) => {
   const db = req.db;
   if (!db) return res.status(400).json({ error: 'Empresa não informada' });
 
@@ -273,7 +273,7 @@ router.get('/pendentes', async (req, res) => {
 
   const { mes, status = 'PENDENTE', limit = 200 } = req.query;
   try {
-    const rows = await db.prepare(`
+    const rows = db.prepare(`
       SELECT t.*, e.data_iso as extrato_data, e.credito as extrato_valor, e.historico as extrato_hist
       FROM transparencia_palmas t
       LEFT JOIN extratos e ON e.id = t.extrato_id
@@ -283,7 +283,7 @@ router.get('/pendentes', async (req, res) => {
       LIMIT ?
     `).all(...([status, ...(mes ? [mes] : []), parseInt(limit)]));
 
-    const totais = await db.prepare(`
+    const totais = db.prepare(`
       SELECT COUNT(*) qtd, SUM(valor_pago) total FROM transparencia_palmas WHERE status_conciliacao=?
     `).get(status);
 
@@ -295,19 +295,19 @@ router.get('/pendentes', async (req, res) => {
 
 // ─── GET /resumo ─────────────────────────────────────────────────────────────
 
-router.get('/resumo', async (req, res) => {
+router.get('/resumo', (req, res) => {
   const db = req.db;
   if (!db) return res.status(400).json({ error: 'Empresa não informada' });
 
   ensureTable(db);
 
   try {
-    const porStatus = await db.prepare(`
+    const porStatus = db.prepare(`
       SELECT status_conciliacao, COUNT(*) qtd, COALESCE(SUM(valor_pago),0) total
       FROM transparencia_palmas GROUP BY status_conciliacao
     `).all();
 
-    const porMes = await db.prepare(`
+    const porMes = db.prepare(`
       SELECT strftime('%Y-%m', data_pagamento) mes, COUNT(*) qtd, SUM(valor_pago) total
       FROM transparencia_palmas
       WHERE data_pagamento IS NOT NULL AND data_pagamento != ''

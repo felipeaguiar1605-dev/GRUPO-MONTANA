@@ -30,11 +30,11 @@ function ensureLogTable() {
       const db = getDb(key);
       db.exec(`
         CREATE TABLE IF NOT EXISTS audit_authz_negado (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          id BIGSERIAL PRIMARY KEY,
           usuario TEXT, role TEXT, empresa_req TEXT, lotacao TEXT,
           metodo TEXT, rota TEXT, modulo TEXT, acao TEXT,
           motivo TEXT, dry_run INTEGER DEFAULT 0,
-          ip TEXT, created_at TEXT DEFAULT (datetime('now','localtime'))
+          ip TEXT, created_at TIMESTAMP DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS idx_authz_neg_user ON audit_authz_negado(usuario);
         CREATE INDEX IF NOT EXISTS idx_authz_neg_created ON audit_authz_negado(created_at);

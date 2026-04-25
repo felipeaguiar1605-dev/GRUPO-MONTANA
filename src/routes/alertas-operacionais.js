@@ -17,7 +17,7 @@ router.use(companyMw);
 
 // ─── Consolidado ──────────────────────────────────────────────────────────────
 
-router.get('/', async (req, res) => {
+router.get('/', (req, res) => {
   try {
     const opcoes = {};
     if (req.query.competencia) {
@@ -33,7 +33,7 @@ router.get('/', async (req, res) => {
 
 // ─── Endpoints individuais ────────────────────────────────────────────────────
 
-router.get('/faturamento', async (req, res) => {
+router.get('/faturamento', (req, res) => {
   try {
     const r = alertas.faturamentoNaoEmitido(req.db, req.company, {
       competencia: req.query.competencia,
@@ -43,7 +43,7 @@ router.get('/faturamento', async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, erro: e.message }); }
 });
 
-router.get('/cobrancas', async (req, res) => {
+router.get('/cobrancas', (req, res) => {
   try {
     const r = alertas.cobrancasAtrasadas(req.db, req.company, {
       min_amostras: req.query.min_amostras ? Number(req.query.min_amostras) : undefined,
@@ -54,7 +54,7 @@ router.get('/cobrancas', async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, erro: e.message }); }
 });
 
-router.get('/folha', async (req, res) => {
+router.get('/folha', (req, res) => {
   try {
     const opts = {};
     if (req.query.competencias) opts.competencias = String(req.query.competencias).split(',');
@@ -73,7 +73,7 @@ router.post('/enviar-email', async (req, res) => {
     }
 
     // Busca SMTP da empresa
-    const smtpRows = await req.db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'smtp_%'`).all();
+    const smtpRows = req.db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'smtp_%'`).all();
     const smtp = {};
     smtpRows.forEach(r => { smtp[r.chave.replace('smtp_', '')] = r.valor; });
 
@@ -103,7 +103,7 @@ router.post('/enviar-email', async (req, res) => {
     });
 
     try {
-      await req.db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status)
+      req.db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status)
                       VALUES ('email',?,?,?,'enviado')`).run(smtp.to, assunto, html);
     } catch (_) {}
 

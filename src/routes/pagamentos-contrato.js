@@ -50,10 +50,10 @@ function diasDesde(dataIso) {
 }
 
 // Busca créditos por keyword e tenta match individual + agregado
-async function matchCreditos(db, nfsSemLink, keyword, dataFrom, dataToExt) {
+function matchCreditos(db, nfsSemLink, keyword, dataFrom, dataToExt) {
   if (!nfsSemLink.length || !keyword) return 0;
 
-  const credits = await db.prepare(`
+  const credits = db.prepare(`
     SELECT id, credito, data_iso FROM extratos
     WHERE data_iso >= ? AND data_iso <= ?
       AND credito > 0
@@ -88,7 +88,7 @@ async function matchCreditos(db, nfsSemLink, keyword, dataFrom, dataToExt) {
 }
 
 // ─── 1. Resumo por tomador no mês ────────────────────────────────
-router.get('/resumo', async (req, res) => {
+router.get('/resumo', (req, res) => {
   try {
     const db = req.db;
     const mes = (req.query.mes || new Date().toISOString().slice(0, 7));
@@ -100,7 +100,7 @@ router.get('/resumo', async (req, res) => {
     extTo.setDate(extTo.getDate() + 60);
     const dataToExt = extTo.toISOString().split('T')[0];
 
-    const nfs = await db.prepare(`
+    const nfs = db.prepare(`
       SELECT id, numero, tomador, valor_bruto, valor_liquido,
              data_emissao, competencia, status_conciliacao, extrato_id
       FROM notas_fiscais
@@ -127,7 +127,7 @@ router.get('/resumo', async (req, res) => {
 
       // Método 1: links diretos (extrato_id definido)
       for (const nf of grupo.nfs.filter(n => n.extrato_id)) {
-        const ext = await db.prepare(`SELECT COALESCE(credito,0) credito FROM extratos WHERE id=?`).get(nf.extrato_id);
+        const ext = db.prepare(`SELECT COALESCE(credito,0) credito FROM extratos WHERE id=?`).get(nf.extrato_id);
         if (ext) recebido += ext.credito;
       }
 
@@ -173,7 +173,7 @@ router.get('/resumo', async (req, res) => {
 });
 
 // ─── 2. Histórico mês a mês para um tomador ──────────────────────
-router.get('/historico', async (req, res) => {
+router.get('/historico', (req, res) => {
   try {
     const db = req.db;
     const { tomador, meses = 6 } = req.query;
@@ -194,7 +194,7 @@ router.get('/historico', async (req, res) => {
       const extTo    = new Date(d.getFullYear(), d.getMonth() + 2, 28);
       const dataToExt = extTo.toISOString().split('T')[0];
 
-      const nfs = await db.prepare(`
+      const nfs = db.prepare(`
         SELECT id, valor_bruto, valor_liquido, data_emissao, extrato_id
         FROM notas_fiscais
         WHERE data_emissao >= ? AND data_emissao <= ?
@@ -207,7 +207,7 @@ router.get('/historico', async (req, res) => {
       let recebido = 0;
 
       for (const nf of nfs.filter(n => n.extrato_id)) {
-        const ext = await db.prepare(`SELECT COALESCE(credito,0) c FROM extratos WHERE id=?`).get(nf.extrato_id);
+        const ext = db.prepare(`SELECT COALESCE(credito,0) c FROM extratos WHERE id=?`).get(nf.extrato_id);
         if (ext) recebido += ext.c;
       }
 
@@ -231,13 +231,13 @@ router.get('/historico', async (req, res) => {
 });
 
 // ─── 3. Inadimplentes (saldo > 0 há mais de 30 dias) ─────────────
-router.get('/inadimplentes', async (req, res) => {
+router.get('/inadimplentes', (req, res) => {
   try {
     const db = req.db;
     const hoje = new Date().toISOString().split('T')[0];
     const inicio = new Date(Date.now() - 90 * 86400000).toISOString().split('T')[0];
 
-    const nfs = await db.prepare(`
+    const nfs = db.prepare(`
       SELECT id, numero, tomador, valor_bruto, valor_liquido, data_emissao, extrato_id
       FROM notas_fiscais
       WHERE data_emissao >= ?
@@ -260,7 +260,7 @@ router.get('/inadimplentes', async (req, res) => {
       let recebido = 0;
 
       for (const nf of grupo.nfs.filter(n => n.extrato_id)) {
-        const ext = await db.prepare(`SELECT COALESCE(credito,0) credito FROM extratos WHERE id=?`).get(nf.extrato_id);
+        const ext = db.prepare(`SELECT COALESCE(credito,0) credito FROM extratos WHERE id=?`).get(nf.extrato_id);
         if (ext) recebido += ext.credito;
       }
 
@@ -300,7 +300,7 @@ router.get('/inadimplentes', async (req, res) => {
 });
 
 // ─── 4. Detalhe NF×Pagamento para tomador/competência ─────────────
-router.get('/detalhe', async (req, res) => {
+router.get('/detalhe', (req, res) => {
   try {
     const db = req.db;
     const { tomador, competencia } = req.query;
@@ -316,7 +316,7 @@ router.get('/detalhe', async (req, res) => {
     const dataToExt = extTo.toISOString().split('T')[0];
     const keyword = tomadorKeyword(tomador);
 
-    const nfs = await db.prepare(`
+    const nfs = db.prepare(`
       SELECT id, numero, tomador, valor_bruto, valor_liquido,
              data_emissao, competencia, status_conciliacao, extrato_id
       FROM notas_fiscais
@@ -327,7 +327,7 @@ router.get('/detalhe', async (req, res) => {
       ORDER BY data_emissao
     `).all(dataFrom, dataTo, `%${tomador.trim().toUpperCase()}%`);
 
-    const creditos = keyword ? await db.prepare(`
+    const creditos = keyword ? db.prepare(`
       SELECT id, data_iso, historico, credito
       FROM extratos
       WHERE data_iso >= ? AND data_iso <= ?
@@ -338,11 +338,10 @@ router.get('/detalhe', async (req, res) => {
 
     const usadosExt = new Set();
 
-    const nfDetalhe = [];
-    for (const nf of nfs) {
+    const nfDetalhe = nfs.map(nf => {
       let match = null;
       if (nf.extrato_id) {
-        const ext = await db.prepare(`SELECT id, data_iso, historico, credito FROM extratos WHERE id=?`).get(nf.extrato_id);
+        const ext = db.prepare(`SELECT id, data_iso, historico, credito FROM extratos WHERE id=?`).get(nf.extrato_id);
         if (ext) { match = ext; usadosExt.add(ext.id); }
       } else {
         const target = nf.valor_liquido > 0 ? nf.valor_liquido : nf.valor_bruto;
@@ -354,7 +353,7 @@ router.get('/detalhe', async (req, res) => {
       const pago   = match ? match.credito : 0;
       const status = calcStatus(nf.valor_bruto, pago, diasDesde(nf.data_emissao));
 
-      nfDetalhe.push({
+      return {
         id:              nf.id,
         numero:          nf.numero,
         valor_bruto:     nf.valor_bruto,
@@ -365,8 +364,8 @@ router.get('/detalhe', async (req, res) => {
         extrato_id:      match?.id || null,
         data_pagamento:  match?.data_iso || null,
         historico_pgto:  match?.historico || null,
-      });
-    }
+      };
+    });
 
     const creditosNaoAlocados = creditos.filter(c => !usadosExt.has(c.id));
 

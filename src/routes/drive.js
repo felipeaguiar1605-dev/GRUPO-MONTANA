@@ -30,22 +30,22 @@ function isDriveConfigurado() {
   return !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
 }
 
-async function getTokens(db) {
+function getTokens(db) {
   try {
-    const row = await db.prepare(`SELECT valor FROM configuracoes WHERE chave='drive_tokens' LIMIT 1`).get();
+    const row = db.prepare(`SELECT valor FROM configuracoes WHERE chave='drive_tokens' LIMIT 1`).get();
     return row ? JSON.parse(row.valor) : null;
   } catch { return null; }
 }
 
-async function saveTokens(db, tokens) {
-  await db.prepare(`
+function saveTokens(db, tokens) {
+  db.prepare(`
     INSERT INTO configuracoes(chave, valor) VALUES('drive_tokens', ?)
     ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor
   `).run(JSON.stringify(tokens));
 }
 
-async function removeTokens(db) {
-  await db.prepare(`DELETE FROM configuracoes WHERE chave='drive_tokens'`).run();
+function removeTokens(db) {
+  db.prepare(`DELETE FROM configuracoes WHERE chave='drive_tokens'`).run();
 }
 
 async function getDriveClient(db) {
@@ -66,7 +66,7 @@ async function getDriveClient(db) {
 
 // ─── GET /status ──────────────────────────────────────────────────────────────
 
-router.get('/status', companyMw, async (req, res) => {
+router.get('/status', companyMw, (req, res) => {
   const db = req.db;
   const driveConfigurado = isDriveConfigurado();
 
@@ -86,7 +86,7 @@ router.get('/status', companyMw, async (req, res) => {
 // ─── GET /auth ────────────────────────────────────────────────────────────────
 // Aceita token JWT e company via query params (popup não envia headers)
 
-router.get('/auth', async (req, res) => {
+router.get('/auth', (req, res) => {
   if (!isDriveConfigurado()) {
     return res.status(503).json({ error: 'Google Drive não configurado no servidor' });
   }
@@ -139,7 +139,7 @@ router.get('/callback', async (req, res) => {
   // Fallback: usa req.db se company não veio no state
   let db = req.db;
   if (!db && companyKey) {
-    try { db = require('../db_pg').getDb(companyKey); } catch (_) {}
+    try { db = require('../db').getDb(companyKey); } catch (_) {}
   }
   if (!db) return res.status(400).send('Empresa não identificada');
 
@@ -156,7 +156,7 @@ router.get('/callback', async (req, res) => {
 
 // ─── DELETE /desconectar ──────────────────────────────────────────────────────
 
-router.delete('/desconectar', companyMw, async (req, res) => {
+router.delete('/desconectar', companyMw, (req, res) => {
   const db = req.db;
   if (!db) return res.status(400).json({ error: 'Empresa não identificada' });
   removeTokens(db);
@@ -269,9 +269,9 @@ router.get('/sugestoes', companyMw, async (req, res) => {
     const ano = new Date().getFullYear();
     let erpCtx = '';
     try {
-      const ctrs = await db.prepare(`SELECT numContrato, contrato FROM contratos WHERE LOWER(COALESCE(status,'')) NOT LIKE '%encerrad%' AND LOWER(COALESCE(numContrato,'')) NOT LIKE '%encerrad%' LIMIT 10`).all();
+      const ctrs = db.prepare(`SELECT numContrato, contrato FROM contratos WHERE LOWER(COALESCE(status,'')) NOT LIKE '%encerrad%' AND LOWER(COALESCE(numContrato,'')) NOT LIKE '%encerrad%' LIMIT 10`).all();
       erpCtx = `Contratos ativos: ${ctrs.map(c => c.numContrato).join(', ')}\n`;
-      const nfsMes = await db.prepare(`SELECT COUNT(*) n FROM notas_fiscais WHERE strftime('%Y-%m',data_emissao)=?`).get(`${ano}-${mes}`);
+      const nfsMes = db.prepare(`SELECT COUNT(*) n FROM notas_fiscais WHERE strftime('%Y-%m',data_emissao)=?`).get(`${ano}-${mes}`);
       erpCtx += `NFs emitidas em ${mes}/${ano}: ${nfsMes?.n || 0}\n`;
     } catch (_) {}
 

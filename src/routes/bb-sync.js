@@ -33,17 +33,17 @@ router.use(companyMw);
 
 // ─── Helpers de configuração ──────────────────────────────────────────────────
 
-async function getCfg(db, chave) {
+function getCfg(db, chave) {
   try {
-    const row = await db.prepare(`SELECT valor FROM configuracoes WHERE chave=? LIMIT 1`).get(chave);
+    const row = db.prepare(`SELECT valor FROM configuracoes WHERE chave=? LIMIT 1`).get(chave);
     return row ? row.valor : null;
   } catch { return null; }
 }
 
-async function setCfg(db, chave, valor) {
-  await db.prepare(`
+function setCfg(db, chave, valor) {
+  db.prepare(`
     INSERT INTO configuracoes(chave, valor) VALUES(?, ?)
-    ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor, updated_at=NOW()
+    ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor, updated_at=datetime('now')
   `).run(chave, valor || '');
 }
 
@@ -324,14 +324,14 @@ function periodoEmBlocos(dataInicio, dataFim) {
 async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim, companyKey = '') {
   // INSERT com id (numeroDocumento do BB) — usa id + bb_hash como dupla proteção
   const ins = db.prepare(`
-    INSERT INTO extratos
+    INSERT OR IGNORE INTO extratos
       (id, mes, data, data_iso, tipo, historico, debito, credito, bb_hash, status_conciliacao)
     VALUES
       (@id, @mes, @data, @data_iso, @tipo, @historico, @debito, @credito, @bb_hash, 'PENDENTE')
   `);
   // INSERT sem id — usa bb_hash como único critério de dedup
   const insByHash = db.prepare(`
-    INSERT INTO extratos
+    INSERT OR IGNORE INTO extratos
       (mes, data, data_iso, tipo, historico, debito, credito, bb_hash, status_conciliacao)
     VALUES
       (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito, @bb_hash, 'PENDENTE')
@@ -348,7 +348,7 @@ async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim, co
       let lista = data.listaLancamento || data.lancamentos || data.data || [];
       if (!Array.isArray(lista)) lista = Object.values(lista);
 
-      db.transaction(async () => {
+      db.transaction(() => {
         for (const l of lista) {
           if (!isLancamentoReal(l)) { skipped++; continue; }
           const ext = lancamentoToExtrato(l);
@@ -408,7 +408,7 @@ async function syncBB(db, cfg, dataInicio, dataFim, companyKey = '') {
 
 // ─── GET /bb/status ───────────────────────────────────────────────────────────
 
-router.get('/status', async (req, res) => {
+router.get('/status', (req, res) => {
   const cfg    = getBBConfig(req.db);
   const contas = getBBContas(req.db, cfg);
   res.json({
@@ -434,7 +434,7 @@ router.get('/status', async (req, res) => {
 
 // ─── POST /bb/config ──────────────────────────────────────────────────────────
 
-router.post('/config', async (req, res) => {
+router.post('/config', (req, res) => {
   const { client_id, client_secret, app_key, agencia, conta, ambiente, scope,
           cert_path, key_path, pfx_path, pfx_passphrase } = req.body;
 
@@ -460,7 +460,7 @@ router.post('/config', async (req, res) => {
 
 // ─── POST /bb/config/conta — adiciona conta extra ─────────────────────────────
 
-router.post('/config/conta', async (req, res) => {
+router.post('/config/conta', (req, res) => {
   const { agencia, conta, descricao } = req.body;
   if (!agencia || !conta) return res.status(400).json({ error: 'agencia e conta são obrigatórios' });
 
@@ -482,7 +482,7 @@ router.post('/config/conta', async (req, res) => {
 
 // ─── DELETE /bb/config/conta — remove conta extra ────────────────────────────
 
-router.delete('/config/conta', async (req, res) => {
+router.delete('/config/conta', (req, res) => {
   const { conta } = req.body;
   if (!conta) return res.status(400).json({ error: 'conta é obrigatório' });
 
@@ -500,13 +500,12 @@ router.delete('/config/conta', async (req, res) => {
 
 // ─── DELETE /bb/config ────────────────────────────────────────────────────────
 
-router.delete('/config', async (req, res) => {
+router.delete('/config', (req, res) => {
   const db = req.db;
-  for (const k of ['bb_client_id','bb_client_secret','bb_app_key','bb_agencia','bb_conta',
+  ['bb_client_id','bb_client_secret','bb_app_key','bb_agencia','bb_conta',
    'bb_ambiente','bb_scope','bb_ultimo_sync','bb_cert_path','bb_key_path',
-   'bb_pfx_path','bb_pfx_passphrase','bb_contas_extra']) {
-    await db.prepare(`DELETE FROM configuracoes WHERE chave=?`).run(k);
-  }
+   'bb_pfx_path','bb_pfx_passphrase','bb_contas_extra']
+    .forEach(k => db.prepare(`DELETE FROM configuracoes WHERE chave=?`).run(k));
   res.json({ ok: true });
 });
 
@@ -562,8 +561,8 @@ router.post('/sync', async (req, res) => {
 
 // ─── GET /bb/historico ────────────────────────────────────────────────────────
 
-router.get('/historico', async (req, res) => {
-  const rows = await req.db.prepare(`
+router.get('/historico', (req, res) => {
+  const rows = req.db.prepare(`
     SELECT tipo, arquivo, registros, data_importacao as created_at
     FROM importacoes
     WHERE tipo='bb-sync'
