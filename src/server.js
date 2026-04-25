@@ -401,7 +401,7 @@ try {
         const db = getDb(key);
 
         db.prepare(`CREATE TABLE IF NOT EXISTS apuracao_mensal (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          id BIGSERIAL PRIMARY KEY,
           competencia TEXT UNIQUE,
           receita_bruta REAL DEFAULT 0,
           retencoes REAL DEFAULT 0,
@@ -414,7 +414,7 @@ try {
           cofins_a_pagar REAL DEFAULT 0,
           irpj_estimado REAL DEFAULT 0,
           csll_estimado REAL DEFAULT 0,
-          gerado_em TEXT DEFAULT (datetime('now','localtime')),
+          gerado_em TIMESTAMP DEFAULT NOW(),
           obs TEXT
         )`).run();
 

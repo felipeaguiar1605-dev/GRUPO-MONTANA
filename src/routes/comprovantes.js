@@ -19,7 +19,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const companyMw = require('../companyMiddleware');
-const { COMPANIES } = require('../db');
+const { COMPANIES } = require('../db_pg');
 const { recalcularNF } = require('../status-nf');
 
 const router = express.Router();
@@ -76,20 +76,20 @@ function validarCnpjPagador(cnpj, companyKey) {
 }
 
 // Atualiza valor_vinculado e status do comprovante
-function recomputarStatus(db, comprovanteId) {
-  const cp = db.prepare('SELECT valor FROM comprovantes_pagamento WHERE id = ?').get(comprovanteId);
+async function recomputarStatus(db, comprovanteId) {
+  const cp = await db.prepare('SELECT valor FROM comprovantes_pagamento WHERE id = ?').get(comprovanteId);
   if (!cp) return;
-  const { soma } = db.prepare('SELECT COALESCE(SUM(valor_vinculado),0) soma FROM comprovante_vinculos WHERE comprovante_id = ?').get(comprovanteId);
+  const { soma } = await db.prepare('SELECT COALESCE(SUM(valor_vinculado),0) soma FROM comprovante_vinculos WHERE comprovante_id = ?').get(comprovanteId);
   let status = 'PENDENTE';
   if (soma >= cp.valor - 0.01) status = 'TOTAL';
   else if (soma > 0) status = 'PARCIAL';
-  db.prepare(`UPDATE comprovantes_pagamento SET valor_vinculado = ?, status = ?, updated_at = datetime('now') WHERE id = ?`).run(soma, status, comprovanteId);
+  await db.prepare(`UPDATE comprovantes_pagamento SET valor_vinculado = ?, status = ?, updated_at=NOW() WHERE id = ?`).run(soma, status, comprovanteId);
 }
 
 // ── ROUTES ────────────────────────────────────────────────────────
 
 // LIST
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const { status, direcao, q, limit = 100, offset = 0 } = req.query;
   let sql = `SELECT * FROM comprovantes_pagamento WHERE 1=1`;
   const params = [];
@@ -103,8 +103,8 @@ router.get('/', (req, res) => {
   sql += ' ORDER BY data_pagamento DESC, id DESC LIMIT ? OFFSET ?';
   params.push(Number(limit), Number(offset));
   try {
-    const rows = req.db.prepare(sql).all(...params);
-    const total = req.db.prepare('SELECT COUNT(*) c FROM comprovantes_pagamento').get().c;
+    const rows = await req.db.prepare(sql).all(...params);
+    const total = await req.db.prepare('SELECT COUNT(*) c FROM comprovantes_pagamento').get().c;
     res.json({ rows, total });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -112,11 +112,11 @@ router.get('/', (req, res) => {
 });
 
 // DETAIL + vínculos
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
-    const cp = req.db.prepare('SELECT * FROM comprovantes_pagamento WHERE id = ?').get(req.params.id);
+    const cp = await req.db.prepare('SELECT * FROM comprovantes_pagamento WHERE id = ?').get(req.params.id);
     if (!cp) return res.status(404).json({ error: 'Comprovante não encontrado' });
-    const vinculos = req.db.prepare('SELECT * FROM comprovante_vinculos WHERE comprovante_id = ? ORDER BY id').all(req.params.id);
+    const vinculos = await req.db.prepare('SELECT * FROM comprovante_vinculos WHERE comprovante_id = ? ORDER BY id').all(req.params.id);
     res.json({ ...cp, vinculos });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -153,11 +153,11 @@ router.post('/upload', upload.single('arquivo'), (req, res) => {
       arquivo_mimetype = req.file.mimetype;
       arquivo_tamanho = req.file.size;
       // Dedup — se já existir hash igual, avisa (não bloqueia)
-      const dup = req.db.prepare('SELECT id FROM comprovantes_pagamento WHERE arquivo_hash = ?').get(arquivo_hash);
+      const dup = await req.db.prepare('SELECT id FROM comprovantes_pagamento WHERE arquivo_hash = ?').get(arquivo_hash);
       if (dup) return res.status(409).json({ error: 'Comprovante duplicado (mesmo arquivo já cadastrado)', duplicado_id: dup.id });
     }
 
-    const info = req.db.prepare(`
+    const info = await req.db.prepare(`
       INSERT INTO comprovantes_pagamento
         (tipo, direcao, data_pagamento, valor, banco_pagador, conta_pagador,
          cnpj_pagador, cnpj_destinatario, nome_destinatario, numero_documento,
@@ -177,9 +177,9 @@ router.post('/upload', upload.single('arquivo'), (req, res) => {
 });
 
 // DOWNLOAD arquivo
-router.get('/:id/arquivo', (req, res) => {
+router.get('/:id/arquivo', async (req, res) => {
   try {
-    const cp = req.db.prepare('SELECT arquivo_path, arquivo_mimetype FROM comprovantes_pagamento WHERE id = ?').get(req.params.id);
+    const cp = await req.db.prepare('SELECT arquivo_path, arquivo_mimetype FROM comprovantes_pagamento WHERE id = ?').get(req.params.id);
     if (!cp || !cp.arquivo_path) return res.status(404).json({ error: 'Arquivo não encontrado' });
     const abs = path.join(__dirname, '..', '..', cp.arquivo_path);
     if (!fs.existsSync(abs)) return res.status(404).json({ error: 'Arquivo físico ausente' });
@@ -191,7 +191,7 @@ router.get('/:id/arquivo', (req, res) => {
 });
 
 // VINCULAR — cria novo vínculo a NF/DESPESA/CONTRATO_CREDITO
-router.post('/:id/vincular', (req, res) => {
+router.post('/:id/vincular', async (req, res) => {
   const db = req.db;
   try {
     const { tipo_destino, destino_id, valor_vinculado, observacao = '' } = req.body || {};
@@ -201,11 +201,11 @@ router.post('/:id/vincular', (req, res) => {
     const v = parseFloat(valor_vinculado);
     if (!Number.isFinite(v) || v <= 0) return res.status(400).json({ error: 'valor_vinculado obrigatório e > 0' });
 
-    const cp = db.prepare('SELECT * FROM comprovantes_pagamento WHERE id = ?').get(req.params.id);
+    const cp = await db.prepare('SELECT * FROM comprovantes_pagamento WHERE id = ?').get(req.params.id);
     if (!cp) return res.status(404).json({ error: 'Comprovante não encontrado' });
 
     // Valida saldo livre
-    const { soma } = db.prepare('SELECT COALESCE(SUM(valor_vinculado),0) soma FROM comprovante_vinculos WHERE comprovante_id = ?').get(cp.id);
+    const { soma } = await db.prepare('SELECT COALESCE(SUM(valor_vinculado),0) soma FROM comprovante_vinculos WHERE comprovante_id = ?').get(cp.id);
     if (soma + v > cp.valor + 0.01) {
       return res.status(400).json({ error: `Excede saldo livre do comprovante: livre=${(cp.valor - soma).toFixed(2)}, tentando=${v}` });
     }
@@ -213,27 +213,27 @@ router.post('/:id/vincular', (req, res) => {
     // Busca destino + validação de CNPJ (se aplicável)
     let label = null;
     if (tipo_destino === 'NF') {
-      const nf = db.prepare('SELECT numero, valor_bruto, tomador, cnpj_tomador FROM notas_fiscais WHERE id = ?').get(destino_id);
+      const nf = await db.prepare('SELECT numero, valor_bruto, tomador, cnpj_tomador FROM notas_fiscais WHERE id = ?').get(destino_id);
       if (!nf) return res.status(404).json({ error: 'NF não encontrada nesta empresa' });
       if (cp.direcao === 'ENTRADA' && cp.cnpj_destinatario && digitsOnly(nf.cnpj_tomador) && digitsOnly(nf.cnpj_tomador) !== cp.cnpj_destinatario) {
         // Aviso (não bloqueia pois às vezes agrupam pagamentos)
       }
       label = `NF ${nf.numero} — ${nf.tomador} — R$ ${Number(nf.valor_bruto).toFixed(2)}`;
     } else if (tipo_destino === 'DESPESA') {
-      const dp = db.prepare('SELECT id, descricao, valor_bruto, cnpj_fornecedor, fornecedor FROM despesas WHERE id = ?').get(destino_id);
+      const dp = await db.prepare('SELECT id, descricao, valor_bruto, cnpj_fornecedor, fornecedor FROM despesas WHERE id = ?').get(destino_id);
       if (!dp) return res.status(404).json({ error: 'Despesa não encontrada nesta empresa' });
       label = `Despesa #${dp.id} — ${dp.fornecedor || dp.descricao} — R$ ${Number(dp.valor_bruto).toFixed(2)}`;
     } else if (tipo_destino === 'CONTRATO_CREDITO') {
-      const ct = db.prepare('SELECT numContrato, orgao, valor_mensal_bruto FROM contratos WHERE numContrato = ?').get(destino_id);
+      const ct = await db.prepare('SELECT numContrato, orgao, valor_mensal_bruto FROM contratos WHERE numContrato = ?').get(destino_id);
       if (!ct) return res.status(404).json({ error: 'Contrato não encontrado nesta empresa' });
       label = `Crédito em contrato ${ct.numContrato} — ${ct.orgao}`;
     } else if (tipo_destino === 'EXTRATO') {
-      const ex = db.prepare('SELECT id, data_iso, credito, debito, descricao FROM extratos WHERE id = ?').get(destino_id);
+      const ex = await db.prepare('SELECT id, data_iso, credito, debito, descricao FROM extratos WHERE id = ?').get(destino_id);
       if (!ex) return res.status(404).json({ error: 'Extrato não encontrado nesta empresa' });
       label = `Extrato ${ex.data_iso} — ${ex.credito > 0 ? '+' : '-'}R$ ${Math.max(ex.credito, ex.debito).toFixed(2)}`;
     }
 
-    const info = db.prepare(`
+    const info = await db.prepare(`
       INSERT INTO comprovante_vinculos (comprovante_id, tipo_destino, destino_id, destino_label, valor_vinculado, observacao)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(cp.id, tipo_destino, String(destino_id), label, v, observacao);
@@ -253,11 +253,11 @@ router.post('/:id/vincular', (req, res) => {
 });
 
 // DESVINCULAR
-router.delete('/vinculos/:vid', (req, res) => {
+router.delete('/vinculos/:vid', async (req, res) => {
   try {
-    const v = req.db.prepare('SELECT comprovante_id, tipo_destino, destino_id FROM comprovante_vinculos WHERE id = ?').get(req.params.vid);
+    const v = await req.db.prepare('SELECT comprovante_id, tipo_destino, destino_id FROM comprovante_vinculos WHERE id = ?').get(req.params.vid);
     if (!v) return res.status(404).json({ error: 'Vínculo não encontrado' });
-    req.db.prepare('DELETE FROM comprovante_vinculos WHERE id = ?').run(req.params.vid);
+    await req.db.prepare('DELETE FROM comprovante_vinculos WHERE id = ?').run(req.params.vid);
     recomputarStatus(req.db, v.comprovante_id);
     // Fase C: se era NF, recalcula status derivado
     if (v.tipo_destino === 'NF') {
@@ -270,9 +270,9 @@ router.delete('/vinculos/:vid', (req, res) => {
 });
 
 // SUGERIR MATCHES — busca NFs/despesas/extratos candidatos por CNPJ + valor
-router.get('/:id/sugerir-matches', (req, res) => {
+router.get('/:id/sugerir-matches', async (req, res) => {
   try {
-    const cp = req.db.prepare('SELECT * FROM comprovantes_pagamento WHERE id = ?').get(req.params.id);
+    const cp = await req.db.prepare('SELECT * FROM comprovantes_pagamento WHERE id = ?').get(req.params.id);
     if (!cp) return res.status(404).json({ error: 'Comprovante não encontrado' });
 
     const cnpjDest = digitsOnly(cp.cnpj_destinatario);
@@ -297,11 +297,11 @@ router.get('/:id/sugerir-matches', (req, res) => {
       }
       sql += ' ORDER BY ABS(julianday(data_emissao) - julianday(?)) LIMIT 20';
       params.push(cp.data_pagamento);
-      sugestoes.nfs = req.db.prepare(sql).all(...params);
+      sugestoes.nfs = await req.db.prepare(sql).all(...params);
 
       // Extratos de crédito na janela
       try {
-        sugestoes.extratos = req.db.prepare(`
+        sugestoes.extratos = await req.db.prepare(`
           SELECT id, data_iso, credito, descricao FROM extratos
           WHERE credito BETWEEN ? AND ?
             AND ABS(julianday(data_iso) - julianday(?)) <= ?
@@ -324,12 +324,12 @@ router.get('/:id/sugerir-matches', (req, res) => {
         }
         sql += ' ORDER BY ABS(julianday(data_vencimento) - julianday(?)) LIMIT 20';
         params.push(cp.data_pagamento);
-        sugestoes.despesas = req.db.prepare(sql).all(...params);
+        sugestoes.despesas = await req.db.prepare(sql).all(...params);
       } catch (e) { /* despesas schema varia — falha silenciosa */ }
 
       // Extratos de débito
       try {
-        sugestoes.extratos = req.db.prepare(`
+        sugestoes.extratos = await req.db.prepare(`
           SELECT id, data_iso, debito, descricao FROM extratos
           WHERE debito BETWEEN ? AND ?
             AND ABS(julianday(data_iso) - julianday(?)) <= ?
@@ -345,13 +345,13 @@ router.get('/:id/sugerir-matches', (req, res) => {
 });
 
 // DELETE comprovante inteiro (e vínculos em cascade)
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
-    const cp = req.db.prepare('SELECT arquivo_path FROM comprovantes_pagamento WHERE id = ?').get(req.params.id);
+    const cp = await req.db.prepare('SELECT arquivo_path FROM comprovantes_pagamento WHERE id = ?').get(req.params.id);
     if (!cp) return res.status(404).json({ error: 'Não encontrado' });
     // Captura NFs vinculadas antes do CASCADE, para recalcular depois
-    const nfDest = req.db.prepare(`SELECT DISTINCT destino_id FROM comprovante_vinculos WHERE comprovante_id = ? AND tipo_destino = 'NF'`).all(req.params.id);
-    req.db.prepare('DELETE FROM comprovantes_pagamento WHERE id = ?').run(req.params.id);
+    const nfDest = await req.db.prepare(`SELECT DISTINCT destino_id FROM comprovante_vinculos WHERE comprovante_id = ? AND tipo_destino = 'NF'`).all(req.params.id);
+    await req.db.prepare('DELETE FROM comprovantes_pagamento WHERE id = ?').run(req.params.id);
     for (const r of nfDest) {
       try { recalcularNF(req.db, r.destino_id); } catch (_) {}
     }

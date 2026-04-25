@@ -18,12 +18,12 @@ function resolvePeriodo(query) {
   return { dateFrom: `${now.getFullYear()}-01-01`, dateTo: `${now.getFullYear()}-12-31`, periodo: String(now.getFullYear()) };
 }
 
-function buscarDRE(db, dateFrom, dateTo) {
+async function buscarDRE(db, dateFrom, dateTo) {
   const p = { from: dateFrom, to: dateTo };
 
   // 1. Receita bruta = valor bruto das NFs emitidas no período (base competência)
   //    Exclui NFs canceladas. Fonte limpa: não contamina com transf. internas nem resgates.
-  const receita = db.prepare(`
+  const receita = await db.prepare(`
     SELECT COALESCE(SUM(valor_bruto),0) bruta,
            COUNT(*) qtd_nfs
     FROM notas_fiscais
@@ -49,7 +49,7 @@ function buscarDRE(db, dateFrom, dateTo) {
     `).get(p);
   } catch (_) {
     // Fallback se migração ainda não rodou
-    ret = db.prepare(`
+    ret = await db.prepare(`
       SELECT COALESCE(SUM(inss),0) inss, COALESCE(SUM(ir),0) irrf,
              COALESCE(SUM(iss),0) iss,  COALESCE(SUM(csll),0) csll,
              COALESCE(SUM(pis),0) pis,  COALESCE(SUM(cofins),0) cofins,
@@ -62,7 +62,7 @@ function buscarDRE(db, dateFrom, dateTo) {
   }
 
   // 3. Despesas por categoria no período (UPPER para normalizar nomes)
-  const desps = db.prepare(`
+  const desps = await db.prepare(`
     SELECT UPPER(TRIM(categoria)) as categoria, COALESCE(SUM(valor_bruto),0) total
     FROM despesas WHERE data_iso>=@from AND data_iso<=@to GROUP BY UPPER(TRIM(categoria))
   `).all(p);
@@ -82,7 +82,7 @@ function buscarDRE(db, dateFrom, dateTo) {
   const despOpOther  = despTotal - custosCSP;
 
   // 4. Comparativo mensal — NFs por mês de emissão
-  const porMes = db.prepare(`
+  const porMes = await db.prepare(`
     SELECT substr(data_emissao,1,7) mes_ano,
            COALESCE(SUM(valor_bruto),0) receita,
            0 saidas
@@ -93,7 +93,7 @@ function buscarDRE(db, dateFrom, dateTo) {
   `).all(p);
 
   // Adicionar saídas (despesas) ao comparativo mensal
-  const despMes = db.prepare(`
+  const despMes = await db.prepare(`
     SELECT substr(data_iso,1,7) mes_ano, COALESCE(SUM(valor_bruto),0) saidas
     FROM despesas WHERE data_iso>=@from AND data_iso<=@to AND data_iso!=''
     GROUP BY substr(data_iso,1,7)
@@ -184,7 +184,7 @@ function buscarDRE(db, dateFrom, dateTo) {
 }
 
 // GET /api/dre
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
   const dados = buscarDRE(req.db, dateFrom, dateTo);
   res.json({ periodo, ...dados });
@@ -274,7 +274,7 @@ router.get('/excel', async (req, res) => {
 });
 
 // GET /api/dre/pdf
-router.get('/pdf', (req, res) => {
+router.get('/pdf', async (req, res) => {
   try {
     const PDFDocument = require('pdfkit');
     const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
@@ -353,16 +353,16 @@ router.get('/pdf', (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 // GET /api/dre — DRE principal
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
   const dados = buscarDRE(req.db, dateFrom, dateTo);
   res.json({ periodo, ...dados });
 });
 
 // GET /api/dre/historico — apuração mensal salva pelo cron
-router.get('/historico', (req, res) => {
+router.get('/historico', async (req, res) => {
   try {
-    const rows = req.db.prepare(`
+    const rows = await req.db.prepare(`
       SELECT * FROM apuracao_mensal ORDER BY competencia DESC LIMIT 24
     `).all();
     res.json({ data: rows, total: rows.length });
@@ -373,7 +373,7 @@ router.get('/historico', (req, res) => {
 });
 
 // POST /api/dre/apurar-agora — força apuração do mês atual manualmente
-router.post('/apurar-agora', (req, res) => {
+router.post('/apurar-agora', async (req, res) => {
   try {
     const db = req.db;
     const { ano, mes, competencia } = req.body;
@@ -389,7 +389,7 @@ router.post('/apurar-agora', (req, res) => {
     const comp = `${A}-${M}`;
 
     db.prepare(`CREATE TABLE IF NOT EXISTS apuracao_mensal (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id BIGSERIAL PRIMARY KEY,
       competencia TEXT UNIQUE,
       receita_bruta REAL DEFAULT 0,
       retencoes REAL DEFAULT 0,
@@ -401,7 +401,7 @@ router.post('/apurar-agora', (req, res) => {
       cofins_a_pagar REAL DEFAULT 0,
       irpj_estimado REAL DEFAULT 0,
       csll_estimado REAL DEFAULT 0,
-      gerado_em TEXT DEFAULT (datetime('now','localtime')),
+      gerado_em TIMESTAMP DEFAULT NOW(),
       obs TEXT
     )`).run();
 
@@ -411,7 +411,7 @@ router.post('/apurar-agora', (req, res) => {
     const pisAPagar  = (dre.tributos_proprios && dre.tributos_proprios.pis_a_pagar)    || 0;
     const cofAPagar  = (dre.tributos_proprios && dre.tributos_proprios.cofins_a_pagar) || 0;
 
-    db.prepare(`INSERT OR REPLACE INTO apuracao_mensal
+    await db.prepare(`INSERT INTO apuracao_mensal
       (competencia, receita_bruta, retencoes, receita_liquida, despesas_total,
        resultado, qtd_nfs, pis_a_pagar, cofins_a_pagar, irpj_estimado, csll_estimado, obs)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`

@@ -14,7 +14,7 @@ const fc        = require('../fluxo-caixa-projetado');
 const router = express.Router();
 router.use(companyMw);
 
-router.get('/projecao', (req, res) => {
+router.get('/projecao', async (req, res) => {
   try {
     const opts = {
       dias:          req.query.dias ? Number(req.query.dias) : 90,
@@ -29,7 +29,7 @@ router.get('/projecao', (req, res) => {
   }
 });
 
-router.get('/projecao/entradas', (req, res) => {
+router.get('/projecao/entradas', async (req, res) => {
   try {
     const dias = req.query.dias ? Number(req.query.dias) : 90;
     const itens = fc.projectarEntradas(req.db, dias);
@@ -37,7 +37,7 @@ router.get('/projecao/entradas', (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, erro: e.message }); }
 });
 
-router.get('/projecao/saidas', (req, res) => {
+router.get('/projecao/saidas', async (req, res) => {
   try {
     const dias = req.query.dias ? Number(req.query.dias) : 90;
     const itens = fc.projectarSaidas(req.db, dias);
@@ -45,7 +45,7 @@ router.get('/projecao/saidas', (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, erro: e.message }); }
 });
 
-router.get('/projecao/slas', (req, res) => {
+router.get('/projecao/slas', async (req, res) => {
   try {
     const slas = fc.calcularSLAs(req.db);
     res.json({ ok: true, slas: Object.fromEntries(slas) });

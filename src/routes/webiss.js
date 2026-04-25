@@ -248,13 +248,13 @@ function signRpsXml(rpsXml, privateKeyPem, certPem, refId) {
 
 // ─── Garante colunas extras na tabela notas_fiscais ───────────────────────────
 
-function ensureExtraColumns(db) {
+async function ensureExtraColumns(db) {
   const extras = [
     ['webiss_numero_nfse', 'TEXT'],
     ['discriminacao',      'TEXT'],
   ];
   for (const [col, type] of extras) {
-    try { db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN ${col} ${type}`).run(); } catch (_) {}
+    try { await db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN ${col} ${type}`).run(); } catch (_) {}
   }
 }
 
@@ -367,7 +367,7 @@ router.post('/importar', async (req, res) => {
     ensureExtraColumns(db);
 
     const ins = db.prepare(`
-      INSERT OR IGNORE INTO notas_fiscais
+      INSERT INTO notas_fiscais
         (numero, competencia, cidade, tomador, cnpj_tomador,
          valor_bruto, valor_liquido,
          inss, ir, iss, csll, pis, cofins, retencao,
@@ -570,7 +570,7 @@ router.post('/emitir', async (req, res) => {
 /**
  * GET /webiss/config — retorna estado atual da configuração WebISS para a empresa
  */
-router.get('/config', (req, res) => {
+router.get('/config', async (req, res) => {
   const key = req.companyKey.toUpperCase();
   const certPath = req.company.certificadoPfx;
   const certExists = fs.existsSync(certPath);
@@ -651,7 +651,7 @@ router.post('/upload-cert', certUpload.single('cert'), (req, res) => {
 /**
  * POST /webiss/config-senha — salva login/senha WebISS e senha do certificado no .env
  */
-router.post('/config-senha', (req, res) => {
+router.post('/config-senha', async (req, res) => {
   const { login, senha_login, senha_cert } = req.body;
   const key = req.companyKey.toUpperCase();
   if (login)       _updateEnv(`WEBISS_LOGIN_${key}`, login);

@@ -6,7 +6,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { getDb, COMPANIES } = require('./db');
+const { getDb, COMPANIES } = require('./db_pg');
 
 // ─── ANTI-DUPLICAÇÃO ─────────────────────────────────────────────
 // Hash determinístico para deduplicação de despesas
@@ -36,11 +36,11 @@ function dashCacheInvalidate(company) {
 }
 
 // ─── AUDITORIA ───────────────────────────────────────────────────
-function audit(req, acao, tabela, registroId = '', detalhe = '') {
+async function audit(req, acao, tabela, registroId = '', detalhe = '') {
   try {
     const usuario = req.user?.login || 'anon';
     const ip = req.ip || req.connection?.remoteAddress || '';
-    req.db.prepare(
+    await req.db.prepare(
       `INSERT INTO audit_log (usuario, acao, tabela, registro_id, detalhe, ip) VALUES (?,?,?,?,?,?)`
     ).run(usuario, acao, tabela, String(registroId), detalhe, ip);
   } catch (_) { /* auditoria nunca deve quebrar a operação */ }
@@ -109,7 +109,7 @@ function analisarArquivo(conteudo, nomeArquivo, company) {
 }
 
 // Endpoint de identidade dinâmica
-router.get('/identity', (req, res) => {
+router.get('/identity', async (req, res) => {
   res.json({
     empresa: req.company.nome,
     cnpj: req.company.cnpj,
@@ -282,8 +282,8 @@ function calcularRetencoesEsperadas(valorBruto, tomador, cidade, retencaoReal) {
 }
 
 // Endpoint: análise de retenções por NF
-router.get('/retencoes/analise', (req, res) => {
-  const nfs = req.db.prepare(`
+router.get('/retencoes/analise', async (req, res) => {
+  const nfs = await req.db.prepare(`
     SELECT id, numero, competencia, cidade, tomador, valor_bruto, valor_liquido,
            inss, ir, iss, csll, pis, cofins, retencao, contrato_ref
     FROM notas_fiscais
@@ -373,8 +373,8 @@ router.get('/retencoes/analise', (req, res) => {
 });
 
 // Endpoint: preencher retenções faltantes baseado na legislação
-router.post('/retencoes/preencher', (req, res) => {
-  const nfs = req.db.prepare(`
+router.post('/retencoes/preencher', async (req, res) => {
+  const nfs = await req.db.prepare(`
     SELECT id, numero, valor_bruto, tomador, cidade, inss, ir, iss, csll, pis, cofins, retencao
     FROM notas_fiscais WHERE (inss = 0 OR inss IS NULL) AND (ir = 0 OR ir IS NULL) AND retencao > 0
   `).all();
@@ -385,7 +385,7 @@ router.post('/retencoes/preencher', (req, res) => {
   `);
 
   let preenchidas = 0;
-  const trans = req.db.transaction(() => {
+  const trans = req.db.transaction(async () => {
     for (const nf of nfs) {
       const esp = calcularRetencoesEsperadas(nf.valor_bruto, nf.tomador, nf.cidade, nf.retencao);
       // Ajustar proporcionalmente à retenção real (para fechar o valor)
@@ -402,13 +402,13 @@ router.post('/retencoes/preencher', (req, res) => {
       preenchidas++;
     }
   });
-  trans();
+  await trans();
 
   res.json({ ok: true, message: `${preenchidas} NFs tiveram retenções detalhadas preenchidas com base na legislação`, preenchidas });
 });
 
 // Endpoint: regras tributárias (consulta)
-router.get('/retencoes/regras', (req, res) => {
+router.get('/retencoes/regras', async (req, res) => {
   res.json({
     regras: REGRAS_TRIBUTARIAS,
     iss_municipios: ISS_MUNICIPIOS,
@@ -417,7 +417,7 @@ router.get('/retencoes/regras', (req, res) => {
 });
 
 // ─── DASHBOARD KPIs ──────────────────────────────────────────────
-router.get('/dashboard', (req, res) => {
+router.get('/dashboard', async (req, res) => {
   try {
   const { from, to } = req.query;
 
@@ -528,31 +528,31 @@ router.get('/dashboard', (req, res) => {
   `).get(params);
 
   // 2. Contratos com resumo financeiro
-  const contratos = req.db.prepare(`SELECT COUNT(*) as total, COALESCE(SUM(total_pago),0) as total_pago, COALESCE(SUM(total_aberto),0) as total_aberto FROM contratos`).get();
+  const contratos = await req.db.prepare(`SELECT COUNT(*) as total, COALESCE(SUM(total_pago),0) as total_pago, COALESCE(SUM(total_aberto),0) as total_aberto FROM contratos`).get();
 
   // 3. NFs — filtradas pelo mesmo período quando fornecido
   let nfsDateFilter = '';
   const nfsParams = {};
   if (from) { nfsDateFilter += ' AND data_emissao >= @from'; nfsParams.from = from; }
   if (to)   { nfsDateFilter += ' AND data_emissao <= @to';   nfsParams.to = to; }
-  const nfs = req.db.prepare(`SELECT COUNT(*) as total, COALESCE(SUM(valor_bruto),0) as total_bruto, COALESCE(SUM(valor_liquido),0) as total_liquido FROM notas_fiscais WHERE 1=1 ${nfsDateFilter}`).get(nfsParams);
+  const nfs = await req.db.prepare(`SELECT COUNT(*) as total, COALESCE(SUM(valor_bruto),0) as total_bruto, COALESCE(SUM(valor_liquido),0) as total_liquido FROM notas_fiscais WHERE 1=1 ${nfsDateFilter}`).get(nfsParams);
 
   // 4. Pagamentos filtrados por data
   let pgDateFilter = '';
   const pgParams = {};
   if (from) { pgDateFilter += ' AND data_pagamento_iso >= @from'; pgParams.from = from; }
   if (to) { pgDateFilter += ' AND data_pagamento_iso <= @to'; pgParams.to = to; }
-  const pgs = req.db.prepare(`SELECT COUNT(*) as total, COALESCE(SUM(valor_pago),0) as total_pago FROM pagamentos WHERE 1=1 ${pgDateFilter}`).get(pgParams);
+  const pgs = await req.db.prepare(`SELECT COUNT(*) as total, COALESCE(SUM(valor_pago),0) as total_pago FROM pagamentos WHERE 1=1 ${pgDateFilter}`).get(pgParams);
 
   // 5. Vinculacoes
-  const vincs = req.db.prepare(`SELECT COUNT(*) as total FROM vinculacoes`).get();
+  const vincs = await req.db.prepare(`SELECT COUNT(*) as total FROM vinculacoes`).get();
 
   // 6. Despesas — filtradas pelo mesmo período quando fornecido
   let despDateFilter = '';
   const despParams = {};
   if (from) { despDateFilter += ' AND data_iso >= @from'; despParams.from = from; }
   if (to)   { despDateFilter += ' AND data_iso <= @to';   despParams.to = to; }
-  const despesas = req.db.prepare(`SELECT COUNT(*) as total, COALESCE(SUM(valor_bruto),0) as total_bruto, COALESCE(SUM(valor_liquido),0) as total_liquido, COALESCE(SUM(CASE WHEN UPPER(categoria) IN ('IMPOSTOS','DARF','FGTS','INSS') THEN valor_bruto ELSE 0 END),0) as total_impostos FROM despesas WHERE 1=1 ${despDateFilter}`).get(despParams);
+  const despesas = await req.db.prepare(`SELECT COUNT(*) as total, COALESCE(SUM(valor_bruto),0) as total_bruto, COALESCE(SUM(valor_liquido),0) as total_liquido, COALESCE(SUM(CASE WHEN UPPER(categoria) IN ('IMPOSTOS','DARF','FGTS','INSS') THEN valor_bruto ELSE 0 END),0) as total_impostos FROM despesas WHERE 1=1 ${despDateFilter}`).get(despParams);
 
   // 7. Fluxo mensal — filtrado pelo período quando informado, senão últimos 6 meses
   // Aplica os mesmos filtros da receita_operacional (status, histórico, conta vinculada)
@@ -561,7 +561,7 @@ router.get('/dashboard', (req, res) => {
      ${CONTA_VINC_FILTER}`;
   const fluxoFilter = (from ? ' AND data_iso >= @from' : '') + (to ? ' AND data_iso <= @to' : '');
   const fluxoMensal = from || to
-    ? req.db.prepare(`
+    ? await req.db.prepare(`
         SELECT
           substr(data_iso, 1, 7) as mes,
           COALESCE(SUM(CASE WHEN credito>0 ${EXCLUIR_FLUXO} THEN credito END), 0) as creditos,
@@ -571,7 +571,7 @@ router.get('/dashboard', (req, res) => {
         GROUP BY substr(data_iso, 1, 7)
         ORDER BY mes ASC
       `).all(params)
-    : req.db.prepare(`
+    : await req.db.prepare(`
         SELECT
           substr(data_iso, 1, 7) as mes,
           COALESCE(SUM(CASE WHEN credito>0 ${EXCLUIR_FLUXO} THEN credito END), 0) as creditos,
@@ -584,7 +584,7 @@ router.get('/dashboard', (req, res) => {
       `).all().reverse();
 
   // 8. Top 5 contratos por valor
-  const topContratos = req.db.prepare(`
+  const topContratos = await req.db.prepare(`
     SELECT numContrato, contrato, total_pago, total_aberto, status,
       COALESCE((SELECT SUM(d.valor_bruto) FROM despesas d WHERE d.contrato_ref = c.numContrato), 0) as despesas_total
     FROM contratos c
@@ -593,7 +593,7 @@ router.get('/dashboard', (req, res) => {
   `).all();
 
   // 9. Últimos 10 lançamentos (créditos)
-  const ultimosCreditos = req.db.prepare(`
+  const ultimosCreditos = await req.db.prepare(`
     SELECT id, data, historico, credito, posto, status_conciliacao, contrato_vinculado, banco
     FROM extratos
     WHERE credito > 0
@@ -604,16 +604,16 @@ router.get('/dashboard', (req, res) => {
   // 10. Alertas
   const alertas = [];
   // Alerta apenas para extratos de 2026 (anos anteriores não são prioridade operacional)
-  const semVinculo = req.db.prepare(`SELECT COUNT(*) as n FROM extratos WHERE credito > 0 AND data_iso >= '2026-01-01' AND (status_conciliacao = 'PENDENTE' OR status_conciliacao = '' OR status_conciliacao IS NULL)`).get();
+  const semVinculo = await req.db.prepare(`SELECT COUNT(*) as n FROM extratos WHERE credito > 0 AND data_iso >= '2026-01-01' AND (status_conciliacao = 'PENDENTE' OR status_conciliacao = '' OR status_conciliacao IS NULL)`).get();
   if (semVinculo.n > 0) alertas.push({ tipo: 'warning', msg: `${semVinculo.n} créditos de 2026 sem vínculo a contrato`, icon: '⚠️' });
 
-  const parciais = req.db.prepare(`SELECT COUNT(*) as n FROM extratos WHERE status_conciliacao = 'PARCIAL'`).get();
+  const parciais = await req.db.prepare(`SELECT COUNT(*) as n FROM extratos WHERE status_conciliacao = 'PARCIAL'`).get();
   if (parciais.n > 0) alertas.push({ tipo: 'info', msg: `${parciais.n} lançamentos com conciliação parcial`, icon: '🔶' });
 
-  const despPendentes = req.db.prepare(`SELECT COUNT(*) as n FROM despesas WHERE status = 'PENDENTE'`).get();
+  const despPendentes = await req.db.prepare(`SELECT COUNT(*) as n FROM despesas WHERE status = 'PENDENTE'`).get();
   if (despPendentes.n > 0) alertas.push({ tipo: 'warning', msg: `${despPendentes.n} despesas pendentes de pagamento`, icon: '💸' });
 
-  const contratosVencidos = req.db.prepare(`SELECT COUNT(*) as n FROM contratos WHERE vigencia_fim != '' AND vigencia_fim < date('now')`).get();
+  const contratosVencidos = await req.db.prepare(`SELECT COUNT(*) as n FROM contratos WHERE vigencia_fim != '' AND vigencia_fim < date('now')`).get();
   if (contratosVencidos.n > 0) alertas.push({ tipo: 'danger', msg: `${contratosVencidos.n} contratos com vigência vencida`, icon: '🔴' });
 
   // 11. Conciliação por status (para gráfico donut)
@@ -647,7 +647,7 @@ router.get('/dashboard', (req, res) => {
 // NFs são consideradas pagas quando: status_conciliacao='CONCILIADO' E
 //   - data_pagamento BETWEEN from..to (preferencial), OU
 //   - extrato_id → extratos.data_iso BETWEEN from..to (fallback)
-router.get('/dashboard/apuracao-caixa', (req, res) => {
+router.get('/dashboard/apuracao-caixa', async (req, res) => {
   try {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from e to obrigatórios (YYYY-MM-DD)' });
@@ -753,7 +753,7 @@ router.get('/dashboard/exposicao-intragrupo', (_req, res) => {
       let dbEmp;
       try { dbEmp = getDb(empKey); } catch { continue; }
       // Verifica se tabela despesas existe e tem linhas
-      const hasTab = dbEmp.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='despesas'`).get();
+      const hasTab = dbEmp.prepare(`SELECT table_name as name FROM information_schema.tables WHERE table_schema=current_schema() AND name='despesas'`).get();
       if (!hasTab) continue;
 
       const selfName = (empMeta.nomeAbrev || '').toUpperCase();
@@ -823,7 +823,7 @@ router.get('/dashboard/exposicao-intragrupo', (_req, res) => {
 // `mes` — que historicamente foi poluida com formatos diversos: 'ABR', 'abril
 // 2026', '2026-04', 'Extrato....csv.xls', etc. Assim o filtro sempre funciona
 // independente de como a importação populou `mes`.
-router.get('/extratos/meses', (req, res) => {
+router.get('/extratos/meses', async (req, res) => {
   try {
     const { from, to } = req.query;
     let where = `data_iso IS NOT NULL AND length(data_iso) >= 7`;
@@ -831,7 +831,7 @@ router.get('/extratos/meses', (req, res) => {
     if (from) { where += ' AND data_iso >= @from'; params.from = from; }
     if (to)   { where += ' AND data_iso <= @to';   params.to   = to;   }
     const MES_ORDER = ['JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DEZ'];
-    const rows = req.db.prepare(`
+    const rows = await req.db.prepare(`
       SELECT DISTINCT substr(data_iso, 6, 2) as mm
       FROM extratos WHERE ${where}
     `).all(params);
@@ -843,7 +843,7 @@ router.get('/extratos/meses', (req, res) => {
   } catch(e) { errRes(res, e); }
 });
 
-router.get('/extratos', (req, res) => {
+router.get('/extratos', async (req, res) => {
   try {
   const { from, to, status, mes, posto, page = 1, limit = 100, somente_creditos } = req.query;
   let where = '1=1';
@@ -865,17 +865,17 @@ router.get('/extratos', (req, res) => {
   params.limit = parseInt(limit);
   params.offset = offset;
 
-  const total = req.db.prepare(`SELECT COUNT(*) as cnt FROM extratos WHERE ${where}`).get(params).cnt;
-  const rows = req.db.prepare(`SELECT * FROM extratos WHERE ${where} ORDER BY data_iso DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
+  const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM extratos WHERE ${where}`).get(params).cnt;
+  const rows = await req.db.prepare(`SELECT * FROM extratos WHERE ${where} ORDER BY data_iso DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
 
   res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
   } catch(e) { errRes(res, e); }
 });
 
 // ─── CONTRATOS ───────────────────────────────────────────────────
-router.get('/contratos', (req, res) => {
+router.get('/contratos', async (req, res) => {
   try {
-    const rows = req.db.prepare(`
+    const rows = await req.db.prepare(`
       SELECT c.*,
         COALESCE((SELECT SUM(v.valor) FROM vinculacoes v WHERE v.contrato_num = c.numContrato), 0) as total_vinculado,
         COALESCE((SELECT COUNT(*) FROM vinculacoes v WHERE v.contrato_num = c.numContrato), 0) as qtd_vinculacoes,
@@ -883,7 +883,7 @@ router.get('/contratos', (req, res) => {
       FROM contratos c ORDER BY c.contrato
     `).all();
 
-    const summary = req.db.prepare(`
+    const summary = await req.db.prepare(`
       SELECT
         COALESCE(SUM(total_pago), 0) as soma_pago,
         COALESCE(SUM(total_aberto), 0) as soma_aberto,
@@ -898,7 +898,7 @@ router.get('/contratos', (req, res) => {
 // ─── SAÚDE DOS CONTRATOS ─────────────────────────────────────────
 // NFs e extratos não têm contrato_ref/contrato_vinculado preenchidos na importação,
 // então usamos MAPA de tomadores/keywords por contrato para agregar os dados.
-router.get('/contratos/saude', (req, res) => {
+router.get('/contratos/saude', async (req, res) => {
   try {
     const hoje = new Date().toISOString().slice(0, 10);
 
@@ -976,7 +976,7 @@ router.get('/contratos/saude', (req, res) => {
       },
     };
 
-    const contratos = req.db.prepare(`
+    const contratos = await req.db.prepare(`
       SELECT numContrato, contrato, orgao, status,
              valor_mensal_bruto, valor_mensal_liquido,
              vigencia_inicio, vigencia_fim, total_pago
@@ -1065,9 +1065,9 @@ router.get('/contratos/saude', (req, res) => {
   } catch(e) { errRes(res, e); }
 });
 
-router.get('/contratos/:num/parcelas', (req, res) => {
+router.get('/contratos/:num/parcelas', async (req, res) => {
   try {
-    const rows = req.db.prepare(`
+    const rows = await req.db.prepare(`
       SELECT * FROM parcelas WHERE contrato_num = ? ORDER BY id
     `).all(req.params.num);
     res.json({ data: rows });
@@ -1076,21 +1076,21 @@ router.get('/contratos/:num/parcelas', (req, res) => {
 
 // ─── CRUD DE CONTRATOS ───────────────────────────────────────────
 // POST /contratos — cria um novo contrato
-router.post('/contratos', (req, res) => {
+router.post('/contratos', async (req, res) => {
   try {
     const {
       numContrato, contrato, orgao = '', vigencia_inicio = '', vigencia_fim = '',
       valor_mensal_bruto = 0, valor_mensal_liquido = 0, status = 'ATIVO', obs = '',
     } = req.body;
     if (!numContrato || !contrato) return res.status(400).json({ error: 'numContrato e contrato são obrigatórios' });
-    const existe = req.db.prepare('SELECT id FROM contratos WHERE numContrato = ?').get(numContrato);
+    const existe = await req.db.prepare('SELECT id FROM contratos WHERE numContrato = ?').get(numContrato);
     if (existe) return res.status(409).json({ error: `Contrato ${numContrato} já existe` });
 
-    const result = req.db.prepare(`
+    const result = await req.db.prepare(`
       INSERT INTO contratos (numContrato, contrato, orgao, vigencia_inicio, vigencia_fim,
         valor_mensal_bruto, valor_mensal_liquido, status, obs, created_at, updated_at)
       VALUES (@numContrato, @contrato, @orgao, @vigencia_inicio, @vigencia_fim,
-        @valor_mensal_bruto, @valor_mensal_liquido, @status, @obs, datetime('now'), datetime('now'))
+        @valor_mensal_bruto, @valor_mensal_liquido, @status, @obs, NOW(), NOW())
     `).run({ numContrato, contrato, orgao, vigencia_inicio, vigencia_fim,
              valor_mensal_bruto: parseFloat(valor_mensal_bruto) || 0,
              valor_mensal_liquido: parseFloat(valor_mensal_liquido) || 0,
@@ -1102,10 +1102,10 @@ router.post('/contratos', (req, res) => {
 });
 
 // PUT /contratos/:num — edita campos de um contrato existente
-router.put('/contratos/:num', (req, res) => {
+router.put('/contratos/:num', async (req, res) => {
   try {
     const { num } = req.params;
-    const c = req.db.prepare('SELECT * FROM contratos WHERE numContrato = ?').get(num);
+    const c = await req.db.prepare('SELECT * FROM contratos WHERE numContrato = ?').get(num);
     if (!c) return res.status(404).json({ error: 'Contrato não encontrado' });
 
     const campos = ['contrato','orgao','vigencia_inicio','vigencia_fim',
@@ -1120,37 +1120,37 @@ router.put('/contratos/:num', (req, res) => {
     const params = { num };
     campos.forEach(f => { if (req.body[f] !== undefined) params[f] = req.body[f]; });
 
-    req.db.prepare(`UPDATE contratos SET ${sets}, updated_at = datetime('now') WHERE numContrato = @num`).run(params);
+    await req.db.prepare(`UPDATE contratos SET ${sets}, updated_at=NOW() WHERE numContrato = @num`).run(params);
     audit(req, 'UPDATE', 'contratos', num, sets);
     res.json({ ok: true });
   } catch(e) { errRes(res, e); }
 });
 
 // DELETE /contratos/:num — marca como ENCERRADO (soft delete)
-router.delete('/contratos/:num', (req, res) => {
+router.delete('/contratos/:num', async (req, res) => {
   try {
     const { num } = req.params;
-    const c = req.db.prepare('SELECT numContrato FROM contratos WHERE numContrato = ?').get(num);
+    const c = await req.db.prepare('SELECT numContrato FROM contratos WHERE numContrato = ?').get(num);
     if (!c) return res.status(404).json({ error: 'Contrato não encontrado' });
-    req.db.prepare(`UPDATE contratos SET status = 'ENCERRADO', updated_at = datetime('now') WHERE numContrato = ?`).run(num);
+    await req.db.prepare(`UPDATE contratos SET status = 'ENCERRADO', updated_at=NOW() WHERE numContrato = ?`).run(num);
     audit(req, 'DELETE', 'contratos', num, 'marcado ENCERRADO');
     res.json({ ok: true });
   } catch(e) { errRes(res, e); }
 });
 
 // POST /contratos/:num/parcelas — cria nova parcela
-router.post('/contratos/:num/parcelas', (req, res) => {
+router.post('/contratos/:num/parcelas', async (req, res) => {
   try {
     const { num } = req.params;
-    const c = req.db.prepare('SELECT numContrato FROM contratos WHERE numContrato = ?').get(num);
+    const c = await req.db.prepare('SELECT numContrato FROM contratos WHERE numContrato = ?').get(num);
     if (!c) return res.status(404).json({ error: 'Contrato não encontrado' });
 
     const { competencia, valor_bruto = 0, valor_liquido = 0, valor_pago = 0, data_pagamento = '', status = 'A RECEBER', obs = '' } = req.body;
     if (!competencia) return res.status(400).json({ error: 'competencia é obrigatória (ex: 2025-03)' });
 
-    const result = req.db.prepare(`
+    const result = await req.db.prepare(`
       INSERT INTO parcelas (contrato_num, competencia, valor_bruto, valor_liquido, valor_pago, data_pagamento, status, obs, created_at)
-      VALUES (@num, @competencia, @valor_bruto, @valor_liquido, @valor_pago, @data_pagamento, @status, @obs, datetime('now'))
+      VALUES (@num, @competencia, @valor_bruto, @valor_liquido, @valor_pago, @data_pagamento, @status, @obs, NOW())
     `).run({ num, competencia,
              valor_bruto: parseFloat(valor_bruto) || 0,
              valor_liquido: parseFloat(valor_liquido) || 0,
@@ -1158,12 +1158,12 @@ router.post('/contratos/:num/parcelas', (req, res) => {
              data_pagamento: data_pagamento || null, status, obs });
 
     // Recalcula totais do contrato
-    const totals = req.db.prepare(`
+    const totals = await req.db.prepare(`
       SELECT COALESCE(SUM(valor_pago),0) as total_pago,
              COALESCE(SUM(CASE WHEN valor_pago=0 OR valor_pago IS NULL THEN valor_liquido ELSE 0 END),0) as total_aberto
       FROM parcelas WHERE contrato_num = ?
     `).get(num);
-    req.db.prepare(`UPDATE contratos SET total_pago=?, total_aberto=?, updated_at=datetime('now') WHERE numContrato=?`)
+    await req.db.prepare(`UPDATE contratos SET total_pago=?, total_aberto=?, updated_at=NOW() WHERE numContrato=?`)
       .run(totals.total_pago, totals.total_aberto, num);
 
     audit(req, 'INSERT', 'parcelas', result.lastInsertRowid, `${num} ${competencia}`);
@@ -1172,19 +1172,19 @@ router.post('/contratos/:num/parcelas', (req, res) => {
 });
 
 // DELETE /parcelas/:id — remove parcela
-router.delete('/parcelas/:id', (req, res) => {
+router.delete('/parcelas/:id', async (req, res) => {
   try {
-    const parcela = req.db.prepare('SELECT * FROM parcelas WHERE id = ?').get(req.params.id);
+    const parcela = await req.db.prepare('SELECT * FROM parcelas WHERE id = ?').get(req.params.id);
     if (!parcela) return res.status(404).json({ error: 'Parcela não encontrada' });
-    req.db.prepare('DELETE FROM parcelas WHERE id = ?').run(req.params.id);
+    await req.db.prepare('DELETE FROM parcelas WHERE id = ?').run(req.params.id);
 
     // Recalcula totais do contrato
-    const totals = req.db.prepare(`
+    const totals = await req.db.prepare(`
       SELECT COALESCE(SUM(valor_pago),0) as total_pago,
              COALESCE(SUM(CASE WHEN valor_pago=0 OR valor_pago IS NULL THEN valor_liquido ELSE 0 END),0) as total_aberto
       FROM parcelas WHERE contrato_num = ?
     `).get(parcela.contrato_num);
-    req.db.prepare(`UPDATE contratos SET total_pago=?, total_aberto=?, updated_at=datetime('now') WHERE numContrato=?`)
+    await req.db.prepare(`UPDATE contratos SET total_pago=?, total_aberto=?, updated_at=NOW() WHERE numContrato=?`)
       .run(totals.total_pago, totals.total_aberto, parcela.contrato_num);
 
     audit(req, 'DELETE', 'parcelas', req.params.id, `${parcela.contrato_num} ${parcela.competencia}`);
@@ -1193,10 +1193,10 @@ router.delete('/parcelas/:id', (req, res) => {
 });
 
 // ─── REAJUSTE CONTRATUAL ─────────────────────────────────────────
-router.get('/reajustes', (req, res) => {
+router.get('/reajustes', async (req, res) => {
   try {
     const hoje = new Date().toISOString().slice(0, 10);
-    const contratos = req.db.prepare(`
+    const contratos = await req.db.prepare(`
       SELECT numContrato, contrato, orgao, status, vigencia_fim,
              data_ultimo_reajuste, indice_reajuste, pct_reajuste_ultimo,
              data_proximo_reajuste, obs_reajuste, valor_mensal_bruto
@@ -1238,20 +1238,20 @@ router.get('/reajustes', (req, res) => {
   } catch (e) { errRes(res, e); }
 });
 
-router.patch('/reajustes/:num', (req, res) => {
+router.patch('/reajustes/:num', async (req, res) => {
   const { num } = req.params;
   const { data_ultimo_reajuste, indice_reajuste, pct_reajuste_ultimo, data_proximo_reajuste, obs_reajuste } = req.body;
-  const c = req.db.prepare('SELECT numContrato FROM contratos WHERE numContrato = ?').get(num);
+  const c = await req.db.prepare('SELECT numContrato FROM contratos WHERE numContrato = ?').get(num);
   if (!c) return res.status(404).json({ error: 'Contrato não encontrado' });
 
-  req.db.prepare(`
+  await req.db.prepare(`
     UPDATE contratos SET
       data_ultimo_reajuste  = COALESCE(@data_ultimo_reajuste, data_ultimo_reajuste),
       indice_reajuste       = COALESCE(@indice_reajuste, indice_reajuste),
       pct_reajuste_ultimo   = COALESCE(@pct_reajuste_ultimo, pct_reajuste_ultimo),
       data_proximo_reajuste = COALESCE(@data_proximo_reajuste, data_proximo_reajuste),
       obs_reajuste          = COALESCE(@obs_reajuste, obs_reajuste),
-      updated_at = datetime('now')
+      updated_at=NOW()
     WHERE numContrato = @num
   `).run({ num, data_ultimo_reajuste: data_ultimo_reajuste || null, indice_reajuste: indice_reajuste || null,
            pct_reajuste_ultimo: pct_reajuste_ultimo ?? null, data_proximo_reajuste: data_proximo_reajuste || null,
@@ -1261,13 +1261,13 @@ router.patch('/reajustes/:num', (req, res) => {
   res.json({ ok: true });
 });
 
-router.patch('/parcelas/:id', (req, res) => {
+router.patch('/parcelas/:id', async (req, res) => {
   const { id } = req.params;
   const { status, valor_pago, data_pagamento, obs } = req.body;
-  const parcela = req.db.prepare('SELECT * FROM parcelas WHERE id = ?').get(id);
+  const parcela = await req.db.prepare('SELECT * FROM parcelas WHERE id = ?').get(id);
   if (!parcela) return res.status(404).json({ error: 'Parcela não encontrada' });
 
-  req.db.prepare(`
+  await req.db.prepare(`
     UPDATE parcelas SET
       status = COALESCE(@status, status),
       valor_pago = COALESCE(@valor_pago, valor_pago),
@@ -1280,7 +1280,7 @@ router.patch('/parcelas/:id', (req, res) => {
   });
 
   // Recalculate contract totals
-  const totals = req.db.prepare(`
+  const totals = await req.db.prepare(`
     SELECT COALESCE(SUM(valor_pago), 0) as total_pago,
            COALESCE(SUM(CASE WHEN valor_pago = 0 OR valor_pago IS NULL THEN valor_liquido ELSE 0 END), 0) as total_aberto
     FROM parcelas WHERE contrato_num = ?
@@ -1293,7 +1293,7 @@ router.patch('/parcelas/:id', (req, res) => {
 });
 
 // ─── NOTAS FISCAIS ───────────────────────────────────────────────
-router.get('/nfs', (req, res) => {
+router.get('/nfs', async (req, res) => {
   const { cidade, tomador, from, to, aberto, page = 1, limit = 100 } = req.query;
   let where = '1=1';
   const params = {};
@@ -1309,17 +1309,17 @@ router.get('/nfs', (req, res) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit); params.offset = offset;
 
-  const total = req.db.prepare(`SELECT COUNT(*) as cnt FROM notas_fiscais WHERE ${where}`).get(params).cnt;
-  const rows = req.db.prepare(`SELECT * FROM notas_fiscais WHERE ${where} ORDER BY data_emissao DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
+  const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM notas_fiscais WHERE ${where}`).get(params).cnt;
+  const rows = await req.db.prepare(`SELECT * FROM notas_fiscais WHERE ${where} ORDER BY data_emissao DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
   // Soma total (útil p/ KPI independente do paginado)
-  const soma = req.db.prepare(`SELECT COALESCE(SUM(valor_liquido),0) as soma_liq, COALESCE(SUM(valor_bruto),0) as soma_bruto FROM notas_fiscais WHERE ${where}`).get(params);
+  const soma = await req.db.prepare(`SELECT COALESCE(SUM(valor_liquido),0) as soma_liq, COALESCE(SUM(valor_bruto),0) as soma_bruto FROM notas_fiscais WHERE ${where}`).get(params);
   res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows, soma_liquido: soma.soma_liq, soma_bruto: soma.soma_bruto });
 });
 
-router.delete('/nfs/:id', (req, res) => {
+router.delete('/nfs/:id', async (req, res) => {
   try {
-    const nf = req.db.prepare('SELECT numero FROM notas_fiscais WHERE id = ?').get(req.params.id);
-    req.db.prepare('DELETE FROM notas_fiscais WHERE id = ?').run(req.params.id);
+    const nf = await req.db.prepare('SELECT numero FROM notas_fiscais WHERE id = ?').get(req.params.id);
+    await req.db.prepare('DELETE FROM notas_fiscais WHERE id = ?').run(req.params.id);
     audit(req, 'DELETE', 'notas_fiscais', req.params.id, `NF ${nf?.numero || ''}`);
     dashCacheInvalidate(req.companyKey);
     res.json({ ok: true });
@@ -1327,9 +1327,9 @@ router.delete('/nfs/:id', (req, res) => {
 });
 
 // ─── NFs SEM DATA — listagem e correção em lote ──────────────────
-router.get('/nfs/sem-data', (req, res) => {
+router.get('/nfs/sem-data', async (req, res) => {
   try {
-    const rows = req.db.prepare(`
+    const rows = await req.db.prepare(`
       SELECT id, numero, contrato_ref, competencia, valor_bruto, valor_liquido,
              retencao, data_emissao, created_at
       FROM notas_fiscais
@@ -1355,14 +1355,14 @@ router.get('/nfs/sem-data', (req, res) => {
   } catch(e) { errRes(res, e); }
 });
 
-router.patch('/nfs/:id/corrigir', (req, res) => {
+router.patch('/nfs/:id/corrigir', async (req, res) => {
   try {
     const { data_emissao, competencia, contrato_ref } = req.body;
     const id = req.params.id;
-    const nf = req.db.prepare('SELECT id, numero FROM notas_fiscais WHERE id = ?').get(id);
+    const nf = await req.db.prepare('SELECT id, numero FROM notas_fiscais WHERE id = ?').get(id);
     if (!nf) return res.status(404).json({ error: 'NF não encontrada' });
 
-    req.db.prepare(`
+    await req.db.prepare(`
       UPDATE notas_fiscais SET
         data_emissao  = COALESCE(@data_emissao, data_emissao),
         competencia   = COALESCE(@competencia, competencia),
@@ -1376,7 +1376,7 @@ router.patch('/nfs/:id/corrigir', (req, res) => {
   } catch(e) { errRes(res, e); }
 });
 
-router.post('/nfs/corrigir-lote', (req, res) => {
+router.post('/nfs/corrigir-lote', async (req, res) => {
   try {
     const { itens } = req.body; // [{id, data_emissao, competencia, contrato_ref}]
     if (!Array.isArray(itens) || !itens.length) return res.status(400).json({ error: 'Nenhum item enviado' });
@@ -1415,7 +1415,7 @@ router.post('/nfs/corrigir-lote', (req, res) => {
 // POST /api/nfs/auto-vincular
 // Percorre NFs sem contrato_ref e vincula automaticamente por tomador.
 // Aceita body opcional: { somente_sem_contrato: true (default), competencia: '2026-04' }
-router.post('/nfs/auto-vincular', (req, res) => {
+router.post('/nfs/auto-vincular', async (req, res) => {
   try {
     const { somente_sem_contrato = true, competencia } = req.body || {};
 
@@ -1455,7 +1455,7 @@ router.post('/nfs/auto-vincular', (req, res) => {
       WHERE id = @id
     `);
 
-    req.db.transaction(() => {
+    req.db.transaction(async () => {
       for (const regra of REGRAS) {
         let where = `tomador LIKE @like`;
         const params = { like: regra.like };
@@ -1467,7 +1467,7 @@ router.post('/nfs/auto-vincular', (req, res) => {
         if (regra.discriminacao_not) where += ` AND (discriminacao IS NULL OR (${regra.discriminacao_not}))`;
         if (regra.discriminacao_req) where += ` AND ${regra.discriminacao_req}`;
 
-        const nfs = req.db.prepare(`SELECT id FROM notas_fiscais WHERE ${where}`).all(params);
+        const nfs = await req.db.prepare(`SELECT id FROM notas_fiscais WHERE ${where}`).all(params);
         if (nfs.length > 0) {
           nfs.forEach(n => upd.run({ id: n.id, contrato: regra.contrato }));
           totalVinculadas += nfs.length;
@@ -1480,7 +1480,7 @@ router.post('/nfs/auto-vincular', (req, res) => {
     dashCacheInvalidate(req.companyKey);
 
     // NFs ainda sem vinculação
-    const semContrato = req.db.prepare(`
+    const semContrato = await req.db.prepare(`
       SELECT COUNT(*) as cnt FROM notas_fiscais
       WHERE (contrato_ref IS NULL OR contrato_ref = '')
         AND status_conciliacao != 'CANCELADA'
@@ -1491,7 +1491,7 @@ router.post('/nfs/auto-vincular', (req, res) => {
 });
 
 // ─── LIQUIDAÇÕES ─────────────────────────────────────────────────
-router.get('/liquidacoes', (req, res) => {
+router.get('/liquidacoes', async (req, res) => {
   const { gestao, from, to, page = 1, limit = 100 } = req.query;
   let where = '1=1';
   const params = {};
@@ -1501,13 +1501,13 @@ router.get('/liquidacoes', (req, res) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit); params.offset = offset;
 
-  const total = req.db.prepare(`SELECT COUNT(*) as cnt FROM liquidacoes WHERE ${where}`).get(params).cnt;
-  const rows = req.db.prepare(`SELECT * FROM liquidacoes WHERE ${where} ORDER BY data_liquidacao_iso DESC LIMIT @limit OFFSET @offset`).all(params);
+  const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM liquidacoes WHERE ${where}`).get(params).cnt;
+  const rows = await req.db.prepare(`SELECT * FROM liquidacoes WHERE ${where} ORDER BY data_liquidacao_iso DESC LIMIT @limit OFFSET @offset`).all(params);
   res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
 });
 
 // ─── PAGAMENTOS ──────────────────────────────────────────────────
-router.get('/pagamentos', (req, res) => {
+router.get('/pagamentos', async (req, res) => {
   const { gestao, from, to, page = 1, limit = 100 } = req.query;
   let where = '1=1';
   const params = {};
@@ -1517,14 +1517,14 @@ router.get('/pagamentos', (req, res) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit); params.offset = offset;
 
-  const total = req.db.prepare(`SELECT COUNT(*) as cnt FROM pagamentos WHERE ${where}`).get(params).cnt;
-  const rows = req.db.prepare(`SELECT * FROM pagamentos WHERE ${where} ORDER BY data_pagamento_iso DESC LIMIT @limit OFFSET @offset`).all(params);
+  const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM pagamentos WHERE ${where}`).get(params).cnt;
+  const rows = await req.db.prepare(`SELECT * FROM pagamentos WHERE ${where} ORDER BY data_pagamento_iso DESC LIMIT @limit OFFSET @offset`).all(params);
   res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
 });
 
 // ─── VINCULAÇÕES (CRUD) ─────────────────────────────────────────
-router.get('/vinculacoes', (req, res) => {
-  const rows = req.db.prepare(`
+router.get('/vinculacoes', async (req, res) => {
+  const rows = await req.db.prepare(`
     SELECT v.*, e.data, e.historico, e.credito, e.debito, e.status as status_extrato
     FROM vinculacoes v
     LEFT JOIN extratos e ON e.id = v.extrato_id
@@ -1533,29 +1533,29 @@ router.get('/vinculacoes', (req, res) => {
   res.json({ data: rows });
 });
 
-router.post('/vinculacoes', (req, res) => {
+router.post('/vinculacoes', async (req, res) => {
   const { extrato_id, contrato_num, tipo, valor } = req.body;
   if (!extrato_id || !contrato_num) return res.status(400).json({ error: 'extrato_id e contrato_num obrigatórios' });
 
-  const stmt = req.db.prepare(`
-    INSERT OR REPLACE INTO vinculacoes (extrato_id, contrato_num, tipo, valor)
+  const stmt = await req.db.prepare(`
+    INSERT INTO vinculacoes (extrato_id, contrato_num, tipo, valor)
     VALUES (@extrato_id, @contrato_num, @tipo, @valor)
   `);
   stmt.run({ extrato_id, contrato_num, tipo: tipo || '', valor: valor || 0 });
 
   // Update extrato status
-  req.db.prepare(`UPDATE extratos SET contrato_vinculado = @contrato_num, status_conciliacao = 'CONCILIADO', updated_at = datetime('now') WHERE id = @id`)
+  await req.db.prepare(`UPDATE extratos SET contrato_vinculado = @contrato_num, status_conciliacao = 'CONCILIADO', updated_at=NOW() WHERE id = @id`)
     .run({ contrato_num, id: extrato_id });
 
   res.json({ ok: true, message: `Extrato #${extrato_id} vinculado ao contrato ${contrato_num}` });
 });
 
-router.post('/vinculacoes/batch', (req, res) => {
+router.post('/vinculacoes/batch', async (req, res) => {
   const { vinculacoes } = req.body;
   if (!Array.isArray(vinculacoes)) return res.status(400).json({ error: 'Array de vinculações esperado' });
 
-  const insertVinc = req.db.prepare(`INSERT OR REPLACE INTO vinculacoes (extrato_id, contrato_num, tipo, valor) VALUES (@extrato_id, @contrato_num, @tipo, @valor)`);
-  const updateExt = req.db.prepare(`UPDATE extratos SET contrato_vinculado = @contrato_num, status_conciliacao = 'CONCILIADO', updated_at = datetime('now') WHERE id = @id`);
+  const insertVinc = req.db.prepare(`INSERT INTO vinculacoes (extrato_id, contrato_num, tipo, valor) VALUES (@extrato_id, @contrato_num, @tipo, @valor)`);
+  const updateExt = req.db.prepare(`UPDATE extratos SET contrato_vinculado = @contrato_num, status_conciliacao = 'CONCILIADO', updated_at=NOW() WHERE id = @id`);
 
   const batch = req.db.transaction((items) => {
     let count = 0;
@@ -1572,10 +1572,10 @@ router.post('/vinculacoes/batch', (req, res) => {
   res.json({ ok: true, message: `${count} vinculações salvas` });
 });
 
-router.delete('/vinculacoes/:extrato_id', (req, res) => {
+router.delete('/vinculacoes/:extrato_id', async (req, res) => {
   const { extrato_id } = req.params;
-  req.db.prepare(`DELETE FROM vinculacoes WHERE extrato_id = ?`).run(extrato_id);
-  req.db.prepare(`UPDATE extratos SET contrato_vinculado = '', status_conciliacao = 'PENDENTE', updated_at = datetime('now') WHERE id = ?`).run(extrato_id);
+  await req.db.prepare(`DELETE FROM vinculacoes WHERE extrato_id = ?`).run(extrato_id);
+  await req.db.prepare(`UPDATE extratos SET contrato_vinculado = '', status_conciliacao = 'PENDENTE', updated_at=NOW() WHERE id = ?`).run(extrato_id);
   audit(req, 'DELETE', 'vinculacoes', extrato_id, `desvinculação extrato ${extrato_id}`);
   res.json({ ok: true });
 });
@@ -1598,12 +1598,12 @@ router.post('/import/extratos', (req, res, next) => getUpload(req).single('file'
 
     const header = lines[0].split(';').map(h => h.trim().replace(/"/g, ''));
     const insert = req.db.prepare(`
-      INSERT OR IGNORE INTO extratos (id, mes, data, data_iso, tipo, historico, debito, credito, posto, competencia, valor_liquido, valor_bruto, retencao, status, obs, status_conciliacao)
+      INSERT INTO extratos (id, mes, data, data_iso, tipo, historico, debito, credito, posto, competencia, valor_liquido, valor_bruto, retencao, status, obs, status_conciliacao)
       VALUES (@id, @mes, @data, @data_iso, @tipo, @historico, @debito, @credito, @posto, @competencia, @valor_liquido, @valor_bruto, @retencao, @status, @obs, 'PENDENTE')
     `);
 
     let imported = 0, skipped = 0;
-    const batch = req.db.transaction(() => {
+    const batch = req.db.transaction(async () => {
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(';').map(c => c.trim().replace(/"/g, ''));
         if (cols.length < 5) continue;
@@ -1631,11 +1631,11 @@ router.post('/import/extratos', (req, res, next) => getUpload(req).single('file'
         if (r.changes > 0) imported++; else skipped++;
       }
     });
-    batch();
+    await batch();
     dashCacheInvalidate(req.companyKey);
 
     // Log import
-    req.db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('extratos', @arquivo, @registros)`)
+    await req.db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('extratos', @arquivo, @registros)`)
       .run({ arquivo: req.file.originalname, registros: imported });
 
     fs.unlinkSync(req.file.path);
@@ -1669,7 +1669,7 @@ router.post('/import/pagamentos', (req, res, next) => getUpload(req).single('fil
     `);
 
     let imported = 0;
-    const batch = req.db.transaction(() => {
+    const batch = req.db.transaction(async () => {
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(';').map(c => c.trim().replace(/"/g, ''));
         if (cols.length < 4) continue;
@@ -1690,9 +1690,9 @@ router.post('/import/pagamentos', (req, res, next) => getUpload(req).single('fil
         imported++;
       }
     });
-    batch();
+    await batch();
 
-    req.db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('pagamentos', @arquivo, @registros)`)
+    await req.db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('pagamentos', @arquivo, @registros)`)
       .run({ arquivo: req.file.originalname, registros: imported });
     dashCacheInvalidate(req.companyKey);
     fs.unlinkSync(req.file.path);
@@ -1724,7 +1724,7 @@ router.post('/import/liquidacoes', (req, res, next) => getUpload(req).single('fi
     `);
 
     let imported = 0;
-    const batch = req.db.transaction(() => {
+    const batch = req.db.transaction(async () => {
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(';').map(c => c.trim().replace(/"/g, ''));
         if (cols.length < 3) continue;
@@ -1744,9 +1744,9 @@ router.post('/import/liquidacoes', (req, res, next) => getUpload(req).single('fi
         imported++;
       }
     });
-    batch();
+    await batch();
 
-    req.db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('liquidacoes', @arquivo, @registros)`)
+    await req.db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('liquidacoes', @arquivo, @registros)`)
       .run({ arquivo: req.file.originalname, registros: imported });
     dashCacheInvalidate(req.companyKey);
     fs.unlinkSync(req.file.path);
@@ -1758,14 +1758,14 @@ router.post('/import/liquidacoes', (req, res, next) => getUpload(req).single('fi
 });
 
 // ─── RELATÓRIOS ──────────────────────────────────────────────────
-router.get('/relatorios/conciliacao', (req, res) => {
+router.get('/relatorios/conciliacao', async (req, res) => {
   const { from, to, format = 'json' } = req.query;
   let dateFilter = '';
   const params = {};
   if (from) { dateFilter += ' AND e.data_iso >= @from'; params.from = from; }
   if (to) { dateFilter += ' AND e.data_iso <= @to'; params.to = to; }
 
-  const rows = req.db.prepare(`
+  const rows = await req.db.prepare(`
     SELECT e.id, e.data, e.mes, e.historico, e.debito, e.credito, e.posto, e.status,
            e.contrato_vinculado, e.status_conciliacao,
            v.contrato_num, v.data_vinculacao
@@ -1788,8 +1788,8 @@ router.get('/relatorios/conciliacao', (req, res) => {
   res.json({ total: rows.length, data: rows });
 });
 
-router.get('/relatorios/por-contrato', (req, res) => {
-  const rows = req.db.prepare(`
+router.get('/relatorios/por-contrato', async (req, res) => {
+  const rows = await req.db.prepare(`
     SELECT c.numContrato, c.contrato, c.status, c.valor_mensal_liquido,
       COALESCE(SUM(CASE WHEN e.credito > 0 THEN e.credito END), 0) as total_creditos,
       COALESCE(SUM(CASE WHEN e.debito > 0 THEN e.debito END), 0) as total_debitos,
@@ -1804,21 +1804,21 @@ router.get('/relatorios/por-contrato', (req, res) => {
 });
 
 // ─── Relatório de Lucro por Contrato ─────────────────────────────
-router.get('/relatorios/lucro-por-contrato', (req, res) => {
+router.get('/relatorios/lucro-por-contrato', async (req, res) => {
   const { from, to } = req.query;
   const params = {};
   let nfFilter = '1=1', despFilter = '1=1', recFilter = '1=1';
   if (from) { nfFilter += ' AND n.data_emissao >= @from'; despFilter += ' AND d.data_iso >= @from'; recFilter += ' AND e.data_iso >= @from'; params.from = from; }
   if (to)   { nfFilter += ' AND n.data_emissao <= @to';   despFilter += ' AND d.data_iso <= @to';   recFilter += ' AND e.data_iso <= @to';   params.to   = to;   }
 
-  const contratos = req.db.prepare(`
+  const contratos = await req.db.prepare(`
     SELECT numContrato, contrato, orgao, status, total_pago, valor_mensal_bruto, valor_mensal_liquido,
            vigencia_inicio, vigencia_fim, obs
     FROM contratos ORDER BY contrato
   `).all();
 
   // Receita real: NFs vinculadas ao contrato no período
-  const nfsPorContrato = req.db.prepare(`
+  const nfsPorContrato = await req.db.prepare(`
     SELECT n.contrato_ref as contrato_num,
            COUNT(*) as qtd_nfs,
            COALESCE(SUM(n.valor_bruto),0) as receita_bruta,
@@ -1831,7 +1831,7 @@ router.get('/relatorios/lucro-por-contrato', (req, res) => {
   nfsPorContrato.forEach(n => { nfMap[n.contrato_num] = n; });
 
   // Receita bancária: créditos conciliados no período
-  const recBanc = req.db.prepare(`
+  const recBanc = await req.db.prepare(`
     SELECT v.contrato_num, COALESCE(SUM(e.credito),0) as creditos_bancarios, COUNT(*) as qtd_creditos
     FROM vinculacoes v JOIN extratos e ON e.id = v.extrato_id
     WHERE e.credito > 0 AND ${recFilter}
@@ -1855,7 +1855,7 @@ router.get('/relatorios/lucro-por-contrato', (req, res) => {
   despesas.forEach(d => { despMap[d.contrato_ref] = d; });
 
   // Evolução mensal por contrato (últimos 6 meses)
-  const evolMensal = req.db.prepare(`
+  const evolMensal = await req.db.prepare(`
     SELECT n.contrato_ref, substr(n.data_emissao,1,7) as mes,
            COALESCE(SUM(n.valor_bruto),0) as receita,
            0 as despesa
@@ -1863,7 +1863,7 @@ router.get('/relatorios/lucro-por-contrato', (req, res) => {
     GROUP BY n.contrato_ref, substr(n.data_emissao,1,7)
     ORDER BY mes
   `).all();
-  const despMensal = req.db.prepare(`
+  const despMensal = await req.db.prepare(`
     SELECT d.contrato_ref, substr(d.data_iso,1,7) as mes,
            COALESCE(SUM(d.valor_bruto),0) as despesa
     FROM despesas d WHERE d.data_iso >= date('now','-6 months') AND d.contrato_ref != ''
@@ -1937,7 +1937,7 @@ router.get('/relatorios/lucro-por-contrato', (req, res) => {
   });
 });
 
-router.get('/relatorios/a-receber-por-contrato', (req, res) => {
+router.get('/relatorios/a-receber-por-contrato', async (req, res) => {
   const contratos = req.db.prepare(`
     SELECT
       c.numContrato, c.contrato, c.orgao, c.status, c.valor_mensal_liquido,
@@ -1983,8 +1983,8 @@ router.get('/relatorios/a-receber-por-contrato', (req, res) => {
   });
 });
 
-router.get('/relatorios/fluxo-caixa', (req, res) => {
-  const rows = req.db.prepare(`
+router.get('/relatorios/fluxo-caixa', async (req, res) => {
+  const rows = await req.db.prepare(`
     SELECT
       substr(data_iso, 1, 7) as mes_ano,
       COALESCE(SUM(credito), 0) as entradas,
@@ -2072,7 +2072,7 @@ router.get('/relatorios/excel', async (req, res) => {
       if (from) { dateFilter += ' AND e.data_iso >= ?'; params.from = from; }
       if (to) { dateFilter += ' AND e.data_iso <= ?'; params.to = to; }
 
-      const rows = req.db.prepare(`
+      const rows = await req.db.prepare(`
         SELECT e.*, v.contrato_num, v.data_vinculacao
         FROM extratos e LEFT JOIN vinculacoes v ON v.extrato_id = e.id
         WHERE 1=1 ${dateFilter.replace(/@\w+/g, '?')}
@@ -2102,7 +2102,7 @@ router.get('/relatorios/excel', async (req, res) => {
       const pgParams = {};
       if (from) { pgFilter += ' AND data_pagamento_iso >= ?'; pgParams.from = from; }
       if (to) { pgFilter += ' AND data_pagamento_iso <= ?'; pgParams.to = to; }
-      const pgs = req.db.prepare(`SELECT * FROM pagamentos WHERE 1=1 ${pgFilter} ORDER BY data_pagamento_iso DESC`).all(...Object.values(pgParams));
+      const pgs = await req.db.prepare(`SELECT * FROM pagamentos WHERE 1=1 ${pgFilter} ORDER BY data_pagamento_iso DESC`).all(...Object.values(pgParams));
       ws2.columns = [
         { header: 'OB', key: 'ob', width: 20 },
         { header: 'Gestão', key: 'gestao', width: 30 },
@@ -2117,7 +2117,7 @@ router.get('/relatorios/excel', async (req, res) => {
 
     if (tipo === 'contratos' || tipo === 'completo') {
       const ws3 = wb.addWorksheet('Contratos');
-      const conts = req.db.prepare(`SELECT * FROM contratos ORDER BY contrato`).all();
+      const conts = await req.db.prepare(`SELECT * FROM contratos ORDER BY contrato`).all();
       ws3.columns = [
         { header: 'Contrato', key: 'numContrato', width: 25 },
         { header: 'Órgão', key: 'contrato', width: 45 },
@@ -2135,7 +2135,7 @@ router.get('/relatorios/excel', async (req, res) => {
 
       // Parcelas sheet
       const ws3b = wb.addWorksheet('Parcelas');
-      const parcs = req.db.prepare(`SELECT * FROM parcelas ORDER BY contrato_num, id`).all();
+      const parcs = await req.db.prepare(`SELECT * FROM parcelas ORDER BY contrato_num, id`).all();
       ws3b.columns = [
         { header: 'Contrato', key: 'contrato_num', width: 25 },
         { header: 'Competência', key: 'competencia', width: 25 },
@@ -2156,7 +2156,7 @@ router.get('/relatorios/excel', async (req, res) => {
       const dParams = {};
       if (from) { dFilter += ' AND data_iso >= ?'; dParams.from = from; }
       if (to) { dFilter += ' AND data_iso <= ?'; dParams.to = to; }
-      const desps = req.db.prepare(`SELECT * FROM despesas WHERE 1=1 ${dFilter} ORDER BY data_iso DESC`).all(...Object.values(dParams));
+      const desps = await req.db.prepare(`SELECT * FROM despesas WHERE 1=1 ${dFilter} ORDER BY data_iso DESC`).all(...Object.values(dParams));
       ws4.columns = [
         { header: 'Data', key: 'data_despesa', width: 12 },
         { header: 'Categoria', key: 'categoria', width: 15 },
@@ -2181,7 +2181,7 @@ router.get('/relatorios/excel', async (req, res) => {
 
     if (tipo === 'nfs' || tipo === 'completo') {
       const ws5 = wb.addWorksheet('Notas Fiscais');
-      const nfs = req.db.prepare(`SELECT * FROM notas_fiscais ORDER BY id DESC`).all();
+      const nfs = await req.db.prepare(`SELECT * FROM notas_fiscais ORDER BY id DESC`).all();
       ws5.columns = [
         { header: 'Número', key: 'numero', width: 12 },
         { header: 'Competência', key: 'competencia', width: 12 },
@@ -2211,12 +2211,12 @@ router.get('/relatorios/excel', async (req, res) => {
       if (from) { apNFFilter += ' AND data_emissao >= @from'; apParams.from = from; }
       if (to)   { apNFFilter += ' AND data_emissao <= @to';   apParams.to = to; }
 
-      const apReceita = req.db.prepare(`
+      const apReceita = await req.db.prepare(`
         SELECT COALESCE(SUM(valor_bruto),0) as total, COALESCE(SUM(valor_liquido),0) as liquido
         FROM notas_fiscais WHERE ${apNFFilter}
       `).get(apParams);
 
-      const apRetNFs = req.db.prepare(`
+      const apRetNFs = await req.db.prepare(`
         SELECT COALESCE(SUM(pis),0) as pis, COALESCE(SUM(cofins),0) as cofins,
                COALESCE(SUM(inss),0) as inss, COALESCE(SUM(ir),0) as irrf,
                COALESCE(SUM(retencao),0) as total_ret
@@ -2387,7 +2387,7 @@ function calcRetencoes(categoria, valor_bruto) {
   return ret;
 }
 
-router.get('/despesas', (req, res) => {
+router.get('/despesas', async (req, res) => {
   const { categoria, fornecedor, status, from, to, contrato_ref, centro_custo, page = 1, limit = 100 } = req.query;
   let where = '1=1';
   const params = {};
@@ -2405,12 +2405,12 @@ router.get('/despesas', (req, res) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit); params.offset = offset;
 
-  const total = req.db.prepare(`SELECT COUNT(*) as cnt FROM despesas WHERE ${where}`).get(params).cnt;
-  const rows  = req.db.prepare(`SELECT * FROM despesas WHERE ${where} ORDER BY data_iso DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
+  const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM despesas WHERE ${where}`).get(params).cnt;
+  const rows  = await req.db.prepare(`SELECT * FROM despesas WHERE ${where} ORDER BY data_iso DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
   res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
 });
 
-router.get('/despesas/resumo', (req, res) => {
+router.get('/despesas/resumo', async (req, res) => {
   const { from, to } = req.query;
   let dateFilter = '';
   const params = {};
@@ -2433,14 +2433,14 @@ router.get('/despesas/resumo', (req, res) => {
     FROM despesas WHERE 1=1 ${dateFilter}
   `).get(params);
 
-  const porCategoria = req.db.prepare(`
+  const porCategoria = await req.db.prepare(`
     SELECT categoria, COUNT(*) as qtd, COALESCE(SUM(valor_bruto), 0) as total
     FROM despesas WHERE 1=1 ${dateFilter}
     GROUP BY categoria ORDER BY total DESC
   `).all(params);
 
   // Overhead (despesas não vinculadas a contrato — ESCRITORIO, OPERACIONAL, DIVIDENDOS)
-  const overhead = req.db.prepare(`
+  const overhead = await req.db.prepare(`
     SELECT
       COALESCE(centro_custo,'') as tipo,
       COUNT(*) as qtd,
@@ -2459,7 +2459,7 @@ router.get('/despesas/resumo', (req, res) => {
 });
 
 // ─── RATEIO DE OVERHEAD POR CONTRATO ─────────────────────────────────────────
-router.get('/despesas/rateio', (req, res) => {
+router.get('/despesas/rateio', async (req, res) => {
   const { from, to } = req.query;
   let dateFilter = '';
   const params = {};
@@ -2467,7 +2467,7 @@ router.get('/despesas/rateio', (req, res) => {
   if (to)   { dateFilter += ' AND data_iso <= @to';   params.to   = to; }
 
   // Total de overhead rateável (ESCRITORIO + OPERACIONAL, excluindo DIVIDENDOS)
-  const overheadRows = req.db.prepare(`
+  const overheadRows = await req.db.prepare(`
     SELECT COALESCE(centro_custo,'') as tipo,
            COUNT(*) as qtd,
            COALESCE(SUM(valor_bruto), 0) as total
@@ -2479,13 +2479,13 @@ router.get('/despesas/rateio', (req, res) => {
   const totalOverhead = overheadRows.reduce((s, r) => s + r.total, 0);
 
   // Dividendos (separado — não entra no custo operacional)
-  const dividendos = req.db.prepare(`
+  const dividendos = await req.db.prepare(`
     SELECT COALESCE(SUM(valor_bruto),0) as total, COUNT(*) as qtd
     FROM despesas WHERE COALESCE(centro_custo,'')='DIVIDENDOS' ${dateFilter}
   `).get(params);
 
   // Contratos ativos para base de rateio — usa valor_mensal_bruto como peso
-  const contratos = req.db.prepare(`
+  const contratos = await req.db.prepare(`
     SELECT numContrato, contrato, orgao,
            COALESCE(valor_mensal_bruto, 0) as valor_mensal_bruto,
            COALESCE(total_pago, 0) as total_pago
@@ -2520,7 +2520,7 @@ router.get('/despesas/rateio', (req, res) => {
   });
 });
 
-router.get('/despesas/compensacao', (req, res) => {
+router.get('/despesas/compensacao', async (req, res) => {
   const { competencia } = req.query;
   let nfFilter = '', despFilter = '';
   const nfParams = {}, despParams = {};
@@ -2530,7 +2530,7 @@ router.get('/despesas/compensacao', (req, res) => {
   }
 
   // PIS/COFINS devidos sobre receita (não-cumulativo — Lucro Real)
-  const receita = req.db.prepare(`
+  const receita = await req.db.prepare(`
     SELECT COALESCE(SUM(valor_bruto), 0) as receita_bruta,
            COALESCE(SUM(pis), 0) as pis_retido_clientes,
            COALESCE(SUM(cofins), 0) as cofins_retido_clientes
@@ -2543,7 +2543,7 @@ router.get('/despesas/compensacao', (req, res) => {
   const cofins_a_pagar = +(cofins_devido - receita.cofins_retido_clientes).toFixed(2);
 
   // Retenções feitas sobre despesas (informativo)
-  const retDesp = req.db.prepare(`
+  const retDesp = await req.db.prepare(`
     SELECT COALESCE(SUM(pis_retido), 0) as pis_feito,
            COALESCE(SUM(cofins_retido), 0) as cofins_feito,
            COALESCE(SUM(irrf), 0) as irrf_feito,
@@ -2578,7 +2578,7 @@ function calcVencimento(mes, ano) {
   return `${vencAno}-${String(vencMes).padStart(2,'0')}-25`;
 }
 
-router.get('/apuracao-caixa', (req, res) => {
+router.get('/apuracao-caixa', async (req, res) => {
   const { from, to } = req.query;
   let dateFilter = '';
   const params = {};
@@ -2596,14 +2596,14 @@ router.get('/apuracao-caixa', (req, res) => {
   `;
 
   // 1. Receita efetivamente recebida (apenas receita de contratos, comp. 2026+)
-  const receita = req.db.prepare(`
+  const receita = await req.db.prepare(`
     SELECT COALESCE(SUM(credito), 0) as total_recebido,
            COUNT(*) as qtd_creditos
     FROM extratos WHERE 1=1 ${dateFilter} ${receitaFilter}
   `).get(params);
 
   // Receita excluída (transferências internas + comp. 2025)
-  const excluida = req.db.prepare(`
+  const excluida = await req.db.prepare(`
     SELECT COALESCE(SUM(credito), 0) as total_excluido,
            COUNT(*) as qtd_excluidos
     FROM extratos WHERE credito > 0 ${dateFilter}
@@ -2614,7 +2614,7 @@ router.get('/apuracao-caixa', (req, res) => {
   `).get(params);
 
   // 2. Retenções sofridas na fonte em NFs de competência 2026+ — são CRÉDITOS a deduzir
-  const retencoes = req.db.prepare(`
+  const retencoes = await req.db.prepare(`
     SELECT COALESCE(SUM(pis), 0) as pis_retido,
            COALESCE(SUM(cofins), 0) as cofins_retido,
            COALESCE(SUM(retencao), 0) as total_retencao
@@ -2630,7 +2630,7 @@ router.get('/apuracao-caixa', (req, res) => {
   const cofins_a_pagar = +(cofins_devido - retencoes.cofins_retido).toFixed(2);
 
   // 4. Detalhamento por mês com data de vencimento e status
-  const porMes = req.db.prepare(`
+  const porMes = await req.db.prepare(`
     SELECT mes,
            COALESCE(SUM(credito), 0) as recebido,
            COUNT(*) as qtd,
@@ -2694,7 +2694,7 @@ router.get('/apuracao-caixa', (req, res) => {
   });
 });
 
-router.post('/despesas', (req, res) => {
+router.post('/despesas', async (req, res) => {
   const { categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa,
           competencia, valor_bruto, obs, contrato_ref, centro_custo } = req.body;
   if (!valor_bruto) return res.status(400).json({ error: 'valor_bruto obrigatório' });
@@ -2715,7 +2715,7 @@ router.post('/despesas', (req, res) => {
   const dedup_hash_val = dedupHash(req.companyKey, data_iso_val, valor_bruto, fornecedor || '', descricao || '');
 
   const r = req.db.prepare(`
-    INSERT OR IGNORE INTO despesas (categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, data_iso, competencia,
+    INSERT INTO despesas (categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, data_iso, competencia,
       valor_bruto, irrf, csll, pis_retido, cofins_retido, inss_retido, iss_retido, total_retencao, valor_liquido,
       status, obs, contrato_ref, centro_custo, dedup_hash)
     VALUES (@categoria, @descricao, @fornecedor, @cnpj, @nf, @data, @data_iso, @comp,
@@ -2740,9 +2740,9 @@ router.post('/despesas', (req, res) => {
   res.json({ ok: true, id: r.lastInsertRowid, retencoes: ret });
 });
 
-router.patch('/despesas/:id', (req, res) => {
+router.patch('/despesas/:id', async (req, res) => {
   const { id } = req.params;
-  const desp = req.db.prepare('SELECT * FROM despesas WHERE id = ?').get(id);
+  const desp = await req.db.prepare('SELECT * FROM despesas WHERE id = ?').get(id);
   if (!desp) return res.status(404).json({ error: 'Despesa não encontrada' });
 
   const fields = ['categoria','descricao','fornecedor','cnpj_fornecedor','nf_numero','data_despesa','competencia',
@@ -2760,20 +2760,20 @@ router.patch('/despesas/:id', (req, res) => {
 
   // Recalculate totals
   updates.push('updated_at = datetime(\'now\')');
-  req.db.prepare(`UPDATE despesas SET ${updates.join(', ')} WHERE id = @id`).run(params);
+  await req.db.prepare(`UPDATE despesas SET ${updates.join(', ')} WHERE id = @id`).run(params);
 
   // Recalculate retencao and liquido after field updates
-  const updated = req.db.prepare('SELECT * FROM despesas WHERE id = ?').get(id);
+  const updated = await req.db.prepare('SELECT * FROM despesas WHERE id = ?').get(id);
   const totalRet = +(updated.irrf + updated.csll + updated.pis_retido + updated.cofins_retido + updated.inss_retido + updated.iss_retido).toFixed(2);
   const vliq = +(updated.valor_bruto - totalRet).toFixed(2);
-  req.db.prepare('UPDATE despesas SET total_retencao = ?, valor_liquido = ? WHERE id = ?').run(totalRet, vliq, id);
+  await req.db.prepare('UPDATE despesas SET total_retencao = ?, valor_liquido = ? WHERE id = ?').run(totalRet, vliq, id);
 
   res.json({ ok: true });
 });
 
-router.delete('/despesas/:id', (req, res) => {
-  const desp = req.db.prepare('SELECT descricao, valor_bruto FROM despesas WHERE id = ?').get(req.params.id);
-  req.db.prepare('DELETE FROM despesas WHERE id = ?').run(req.params.id);
+router.delete('/despesas/:id', async (req, res) => {
+  const desp = await req.db.prepare('SELECT descricao, valor_bruto FROM despesas WHERE id = ?').get(req.params.id);
+  await req.db.prepare('DELETE FROM despesas WHERE id = ?').run(req.params.id);
   audit(req, 'DELETE', 'despesas', req.params.id, `${desp?.descricao || ''} R$${desp?.valor_bruto || 0}`);
   res.json({ ok: true });
 });
@@ -2788,14 +2788,14 @@ router.post('/import/despesas', (req, res, next) => getUpload(req).single('file'
 
     const header = lines[0].split(';').map(h => h.trim().replace(/"/g, ''));
     const insert = req.db.prepare(`
-      INSERT OR IGNORE INTO despesas (categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, data_iso, competencia,
+      INSERT INTO despesas (categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, data_iso, competencia,
         valor_bruto, irrf, csll, pis_retido, cofins_retido, inss_retido, iss_retido, total_retencao, valor_liquido, status, obs, contrato_ref, dedup_hash)
       VALUES (@categoria, @descricao, @fornecedor, @cnpj, @nf, @data, @data_iso, @comp,
         @vbruto, @irrf, @csll, @pis, @cofins, @inss, @iss, @total_ret, @vliq, @status, @obs, @contrato_ref, @dedup_hash)
     `);
 
     let imported = 0;
-    const batch = req.db.transaction(() => {
+    const batch = req.db.transaction(async () => {
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(';').map(c => c.trim().replace(/"/g, ''));
         if (cols.length < 4) continue;
@@ -2836,9 +2836,9 @@ router.post('/import/despesas', (req, res, next) => getUpload(req).single('file'
         if (r.changes > 0) imported++;
       }
     });
-    batch();
+    await batch();
 
-    req.db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('despesas', @arquivo, @registros)`)
+    await req.db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('despesas', @arquivo, @registros)`)
       .run({ arquivo: req.file.originalname, registros: imported });
     dashCacheInvalidate(req.companyKey);
     fs.unlinkSync(req.file.path);
@@ -2850,8 +2850,8 @@ router.post('/import/despesas', (req, res, next) => getUpload(req).single('file'
 });
 
 // ─── HISTÓRICO DE IMPORTAÇÕES ────────────────────────────────────
-router.get('/importacoes', (req, res) => {
-  const rows = req.db.prepare(`SELECT * FROM importacoes ORDER BY data_importacao DESC LIMIT 50`).all();
+router.get('/importacoes', async (req, res) => {
+  const rows = await req.db.prepare(`SELECT * FROM importacoes ORDER BY data_importacao DESC LIMIT 50`).all();
   res.json({ data: rows });
 });
 
@@ -2909,11 +2909,11 @@ router.post('/import/ofx', (req, res, next) => getUpload(req).single('file')(req
     if (!txs.length) { fs.unlinkSync(req.file.path); return res.status(400).json({ error: 'Nenhuma transação encontrada no OFX' }); }
     const MESES = ['','JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DEZ'];
     const ins = req.db.prepare(
-      "INSERT OR IGNORE INTO extratos (id, mes, data, data_iso, tipo, historico, debito, credito, status_conciliacao) " +
+      "INSERT INTO extratos (id, mes, data, data_iso, tipo, historico, debito, credito, status_conciliacao) " +
       "VALUES (@id, @mes, @data, @data_iso, @tipo, @historico, @debito, @credito, 'PENDENTE')"
     );
     let imported = 0, skipped = 0;
-    req.db.transaction(() => {
+    req.db.transaction(async () => {
       for (const t of txs) {
         const [y, m, d] = t.data_iso.split('-').map(Number);
         const r = ins.run({
@@ -3086,11 +3086,11 @@ ${amostra}`,
 
     // ── Inserir no banco ──────────────────────────────────────────
     const ins = req.db.prepare(`
-      INSERT OR IGNORE INTO extratos (mes, data, data_iso, tipo, historico, debito, credito, status_conciliacao)
+      INSERT INTO extratos (mes, data, data_iso, tipo, historico, debito, credito, status_conciliacao)
       VALUES (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito, 'PENDENTE')
     `);
     let imported = 0, skipped = 0;
-    req.db.transaction(() => {
+    req.db.transaction(async () => {
       for (const t of txs) {
         const r = ins.run({
           mes:      t.data.mes,
@@ -3124,9 +3124,9 @@ ${amostra}`,
 // ═══════════════════════════════════════════════════════════════════
 
 // Dashboard KPIs
-router.get('/prefeitura/dashboard', (req, res) => {
+router.get('/prefeitura/dashboard', async (req, res) => {
   try {
-    const totais = req.db.prepare(`
+    const totais = await req.db.prepare(`
       SELECT COUNT(*) as total_pgtos,
         COALESCE(SUM(valor_pago),0) as total_bruto,
         COALESCE(SUM(valor_liquido_ob),0) as total_liquido,
@@ -3136,15 +3136,15 @@ router.get('/prefeitura/dashboard', (req, res) => {
       FROM pref_pagamentos
     `).get();
 
-    const gestoes = req.db.prepare(`SELECT COUNT(*) as total FROM pref_contratos`).get();
-    const nfs = req.db.prepare(`SELECT COUNT(*) as total FROM pref_nfs`).get();
+    const gestoes = await req.db.prepare(`SELECT COUNT(*) as total FROM pref_contratos`).get();
+    const nfs = await req.db.prepare(`SELECT COUNT(*) as total FROM pref_nfs`).get();
 
-    const por_ano = req.db.prepare(`
+    const por_ano = await req.db.prepare(`
       SELECT ano_empenho as ano, COUNT(*) as qtd, SUM(valor_pago) as total
       FROM pref_pagamentos WHERE ano_empenho > 0 GROUP BY ano_empenho ORDER BY ano_empenho
     `).all();
 
-    const por_status = req.db.prepare(`
+    const por_status = await req.db.prepare(`
       SELECT status_conciliacao as status, COUNT(*) as qtd, SUM(valor_pago) as total
       FROM pref_pagamentos GROUP BY status_conciliacao
     `).all();
@@ -3154,15 +3154,15 @@ router.get('/prefeitura/dashboard', (req, res) => {
 });
 
 // Gestões (contratos)
-router.get('/prefeitura/gestoes', (req, res) => {
+router.get('/prefeitura/gestoes', async (req, res) => {
   try {
-    const rows = req.db.prepare(`SELECT * FROM pref_contratos ORDER BY total_pago DESC`).all();
+    const rows = await req.db.prepare(`SELECT * FROM pref_contratos ORDER BY total_pago DESC`).all();
     res.json({ data: rows });
   } catch(e) { errRes(res, e); }
 });
 
 // Pagamentos with filters
-router.get('/prefeitura/pagamentos', (req, res) => {
+router.get('/prefeitura/pagamentos', async (req, res) => {
   try {
     const { gestao, ano, status, from, to, limit: lim, offset: off } = req.query;
     let where = '1=1';
@@ -3173,19 +3173,19 @@ router.get('/prefeitura/pagamentos', (req, res) => {
     if (from) { where += ' AND data_pagamento_iso >= @from'; params.from = from; }
     if (to) { where += ' AND data_pagamento_iso <= @to'; params.to = to; }
 
-    const total = req.db.prepare(`SELECT COUNT(*) as cnt FROM pref_pagamentos WHERE ${where}`).get(params);
-    const sumario = req.db.prepare(`SELECT COALESCE(SUM(valor_pago),0) as bruto, COALESCE(SUM(valor_liquido_ob),0) as liquido, COALESCE(SUM(retencao),0) as ret FROM pref_pagamentos WHERE ${where}`).get(params);
+    const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM pref_pagamentos WHERE ${where}`).get(params);
+    const sumario = await req.db.prepare(`SELECT COALESCE(SUM(valor_pago),0) as bruto, COALESCE(SUM(valor_liquido_ob),0) as liquido, COALESCE(SUM(retencao),0) as ret FROM pref_pagamentos WHERE ${where}`).get(params);
 
     params.limit = parseInt(lim) || 100;
     params.offset = parseInt(off) || 0;
-    const rows = req.db.prepare(`SELECT * FROM pref_pagamentos WHERE ${where} ORDER BY data_pagamento_iso DESC, valor_pago DESC LIMIT @limit OFFSET @offset`).all(params);
+    const rows = await req.db.prepare(`SELECT * FROM pref_pagamentos WHERE ${where} ORDER BY data_pagamento_iso DESC, valor_pago DESC LIMIT @limit OFFSET @offset`).all(params);
 
     res.json({ data: rows, total: total.cnt, sumario });
   } catch(e) { errRes(res, e); }
 });
 
 // NFs
-router.get('/prefeitura/nfs', (req, res) => {
+router.get('/prefeitura/nfs', async (req, res) => {
   try {
     const { cidade, status } = req.query;
     let where = '1=1';
@@ -3193,15 +3193,15 @@ router.get('/prefeitura/nfs', (req, res) => {
     if (cidade) { where += " AND cidade LIKE @cidade"; params.cidade = `%${cidade}%`; }
     if (status) { where += ' AND status = @status'; params.status = status; }
 
-    const rows = req.db.prepare(`SELECT * FROM pref_nfs WHERE ${where} ORDER BY CAST(numero AS INTEGER) DESC`).all(params);
+    const rows = await req.db.prepare(`SELECT * FROM pref_nfs WHERE ${where} ORDER BY CAST(numero AS INTEGER) DESC`).all(params);
     res.json({ data: rows });
   } catch(e) { errRes(res, e); }
 });
 
 // Resumo por gestão + mês
-router.get('/prefeitura/resumo-mensal', (req, res) => {
+router.get('/prefeitura/resumo-mensal', async (req, res) => {
   try {
-    const rows = req.db.prepare(`
+    const rows = await req.db.prepare(`
       SELECT gestao, gestao_codigo,
         SUBSTR(data_pagamento_iso,1,7) as mes,
         COUNT(*) as qtd, SUM(valor_pago) as bruto,
@@ -3217,14 +3217,14 @@ router.get('/prefeitura/resumo-mensal', (req, res) => {
 });
 
 // Conciliação: pagamentos x NFs x extrato
-router.get('/prefeitura/conciliacao', (req, res) => {
+router.get('/prefeitura/conciliacao', async (req, res) => {
   try {
     const { mes } = req.query;
     let dateFilter = '';
     const params = {};
     if (mes) { dateFilter = " AND SUBSTR(p.data_pagamento_iso,1,7) = @mes"; params.mes = mes; }
 
-    const pagamentos = req.db.prepare(`
+    const pagamentos = await req.db.prepare(`
       SELECT p.*,
         (SELECT GROUP_CONCAT(n.numero) FROM pref_nfs n WHERE n.pagamento_id = p.id) as nfs_vinculadas
       FROM pref_pagamentos p
@@ -3232,40 +3232,40 @@ router.get('/prefeitura/conciliacao', (req, res) => {
       ORDER BY p.data_pagamento_iso DESC, p.valor_pago DESC
     `).all(params);
 
-    const nfs_livres = req.db.prepare(`SELECT * FROM pref_nfs WHERE pagamento_id IS NULL ORDER BY CAST(numero AS INTEGER) DESC`).all();
+    const nfs_livres = await req.db.prepare(`SELECT * FROM pref_nfs WHERE pagamento_id IS NULL ORDER BY CAST(numero AS INTEGER) DESC`).all();
 
     res.json({ pagamentos, nfs_livres });
   } catch(e) { errRes(res, e); }
 });
 
 // Vincular NF a pagamento
-router.post('/prefeitura/vincular-nf', (req, res) => {
+router.post('/prefeitura/vincular-nf', async (req, res) => {
   try {
     const { pagamento_id, nf_id } = req.body;
-    req.db.prepare('UPDATE pref_nfs SET pagamento_id = ?, status = ? WHERE id = ?').run(pagamento_id, 'VINCULADA', nf_id);
-    const nf = req.db.prepare('SELECT numero FROM pref_nfs WHERE id = ?').get(nf_id);
+    await req.db.prepare('UPDATE pref_nfs SET pagamento_id = ?, status = ? WHERE id = ?').run(pagamento_id, 'VINCULADA', nf_id);
+    const nf = await req.db.prepare('SELECT numero FROM pref_nfs WHERE id = ?').get(nf_id);
     if (nf) {
-      req.db.prepare('UPDATE pref_pagamentos SET nf_vinculada = ? WHERE id = ?').run(nf.numero, pagamento_id);
+      await req.db.prepare('UPDATE pref_pagamentos SET nf_vinculada = ? WHERE id = ?').run(nf.numero, pagamento_id);
     }
     res.json({ ok: true });
   } catch(e) { errRes(res, e); }
 });
 
 // Desvincular NF
-router.delete('/prefeitura/vincular-nf/:nf_id', (req, res) => {
+router.delete('/prefeitura/vincular-nf/:nf_id', async (req, res) => {
   try {
-    const nf = req.db.prepare('SELECT pagamento_id FROM pref_nfs WHERE id = ?').get(req.params.nf_id);
+    const nf = await req.db.prepare('SELECT pagamento_id FROM pref_nfs WHERE id = ?').get(req.params.nf_id);
     if (nf && nf.pagamento_id) {
-      req.db.prepare("UPDATE pref_pagamentos SET nf_vinculada = '' WHERE id = ?").run(nf.pagamento_id);
+      await req.db.prepare("UPDATE pref_pagamentos SET nf_vinculada = '' WHERE id = ?").run(nf.pagamento_id);
     }
-    req.db.prepare("UPDATE pref_nfs SET pagamento_id = NULL, status = 'EMITIDA' WHERE id = ?").run(req.params.nf_id);
+    await req.db.prepare("UPDATE pref_nfs SET pagamento_id = NULL, status = 'EMITIDA' WHERE id = ?").run(req.params.nf_id);
     res.json({ ok: true });
   } catch(e) { errRes(res, e); }
 });
 
 
 // ─── FLUXO DE CAIXA PROJETADO ────────────────────────────────────
-router.get('/fluxo-projetado', (req, res) => {
+router.get('/fluxo-projetado', async (req, res) => {
   try {
     const meses = Math.min(Math.max(parseInt(req.query.meses) || 6, 1), 24);
 
@@ -3279,9 +3279,9 @@ router.get('/fluxo-projetado', (req, res) => {
 
     const despMedia = req.db.prepare(
       "SELECT COALESCE(AVG(mensal),0) as media FROM (" +
-        "SELECT strftime('%Y-%m', data_iso) as mes, SUM(valor_bruto) as mensal " +
+        "SELECT to_char((data_iso)::date, 'YYYY-MM') as mes, SUM(valor_bruto) as mensal " +
         "FROM despesas WHERE data_iso >= date('now', '-3 months') AND data_iso != '' " +
-        "GROUP BY strftime('%Y-%m', data_iso) ORDER BY mes DESC LIMIT 3)"
+        "GROUP BY to_char((data_iso)::date, 'YYYY-MM') ORDER BY mes DESC LIMIT 3)"
     ).get().media || 0;
 
     const extR = req.db.prepare(
@@ -3325,7 +3325,7 @@ router.get('/fluxo-projetado', (req, res) => {
 });
 
 // ─── FLUXO REAL POR PARCELAS (próximos 3 meses) ──────────────────
-router.get('/fluxo-parcelas', (req, res) => {
+router.get('/fluxo-parcelas', async (req, res) => {
   try {
     const hoje = new Date();
     const meses = [];
@@ -3335,7 +3335,7 @@ router.get('/fluxo-parcelas', (req, res) => {
     }
 
     // Parcelas por mês — exclui apenas as já pagas integralmente
-    const parcelas = req.db.prepare(`
+    const parcelas = await req.db.prepare(`
       SELECT p.id, p.contrato_num, p.competencia, p.valor_liquido, p.valor_bruto,
              p.valor_pago, p.status, p.obs,
              c.contrato as orgao
@@ -3347,11 +3347,11 @@ router.get('/fluxo-parcelas', (req, res) => {
     `).all(meses[0], meses[2]);
 
     // Despesa média mensal (últimos 3 meses)
-    const despMedia = req.db.prepare(`
+    const despMedia = await req.db.prepare(`
       SELECT COALESCE(AVG(mensal), 0) as media FROM (
         SELECT SUM(valor_bruto) as mensal FROM despesas
         WHERE data_iso >= date('now','-3 months') AND data_iso != ''
-        GROUP BY strftime('%Y-%m', data_iso) ORDER BY 1 DESC LIMIT 3
+        GROUP BY to_char((data_iso)::date, 'YYYY-MM') ORDER BY 1 DESC LIMIT 3
       )
     `).get().media || 0;
 
@@ -3411,12 +3411,12 @@ const CONTA_VINCULADA_PROVISOES = {
 // Em contratos de cessão de mão de obra, remuneração ≈ 33-42% do preço mensal
 const FATOR_REMUNERACAO_PADRAO = 0.38; // 38% — média para contratos de assessoria/vigilância
 
-router.get('/conta-vinculada/estimativa', (req, res) => {
+router.get('/conta-vinculada/estimativa', async (req, res) => {
   try {
     const db = req.db;
 
     // Buscar contratos federais com conta vinculada (UFT, UFNT, ou que tenham "CV" no obs)
-    const contratos = db.prepare(`
+    const contratos = await db.prepare(`
       SELECT * FROM contratos
       WHERE numContrato LIKE '%UFT%'
          OR numContrato LIKE '%UFNT%'
@@ -3445,8 +3445,8 @@ router.get('/conta-vinculada/estimativa', (req, res) => {
                      ORDER BY competencia, cidade`;
       }
       const nfs = contrato.numContrato.includes('UFT')
-        ? db.prepare(nfsQuery).all()
-        : db.prepare(nfsQuery).all(contrato.numContrato);
+        ? await db.prepare(nfsQuery).all()
+        : await db.prepare(nfsQuery).all(contrato.numContrato);
 
       // Valor mensal bruto do contrato
       const valorMensalBruto = contrato.valor_mensal_bruto || 0;
@@ -3606,7 +3606,7 @@ router.get('/export/extratos', async (req, res) => {
     let where = '1=1'; const p = {};
     if (from) { where += ' AND data_iso >= @from'; p.from = from; }
     if (to)   { where += ' AND data_iso <= @to';   p.to   = to; }
-    const rows = req.db.prepare(`SELECT * FROM extratos WHERE ${where} ORDER BY data_iso DESC LIMIT 20000`).all(p);
+    const rows = await req.db.prepare(`SELECT * FROM extratos WHERE ${where} ORDER BY data_iso DESC LIMIT 20000`).all(p);
     const ExcelJS = require('exceljs');
     const wb = new ExcelJS.Workbook();
     wb.creator = 'Montana';
@@ -3641,7 +3641,7 @@ router.get('/export/nfs', async (req, res) => {
     let where = '1=1'; const p = {};
     if (from) { where += ' AND data_emissao >= @from'; p.from = from; }
     if (to)   { where += ' AND data_emissao <= @to';   p.to   = to; }
-    const rows = req.db.prepare(`SELECT * FROM notas_fiscais WHERE ${where} ORDER BY data_emissao DESC LIMIT 10000`).all(p);
+    const rows = await req.db.prepare(`SELECT * FROM notas_fiscais WHERE ${where} ORDER BY data_emissao DESC LIMIT 10000`).all(p);
     const ExcelJS = require('exceljs');
     const wb = new ExcelJS.Workbook(); wb.creator = 'Montana';
     const ws = wb.addWorksheet('Notas Fiscais');
@@ -3675,7 +3675,7 @@ router.get('/export/pagamentos', async (req, res) => {
     let where = '1=1'; const p = {};
     if (from) { where += ' AND data_pagamento_iso >= @from'; p.from = from; }
     if (to)   { where += ' AND data_pagamento_iso <= @to';   p.to   = to; }
-    const rows = req.db.prepare(`SELECT * FROM pagamentos WHERE ${where} ORDER BY data_pagamento_iso DESC LIMIT 10000`).all(p);
+    const rows = await req.db.prepare(`SELECT * FROM pagamentos WHERE ${where} ORDER BY data_pagamento_iso DESC LIMIT 10000`).all(p);
     const ExcelJS = require('exceljs');
     const wb = new ExcelJS.Workbook(); wb.creator = 'Montana';
     const ws = wb.addWorksheet('Pagamentos');
@@ -3705,7 +3705,7 @@ router.get('/export/despesas', async (req, res) => {
     let where = '1=1'; const p = {};
     if (from) { where += ' AND data_iso >= @from'; p.from = from; }
     if (to)   { where += ' AND data_iso <= @to';   p.to   = to; }
-    const rows = req.db.prepare(`SELECT * FROM despesas WHERE ${where} ORDER BY data_iso DESC LIMIT 10000`).all(p);
+    const rows = await req.db.prepare(`SELECT * FROM despesas WHERE ${where} ORDER BY data_iso DESC LIMIT 10000`).all(p);
     const ExcelJS = require('exceljs');
     const wb = new ExcelJS.Workbook(); wb.creator = 'Montana';
     const ws = wb.addWorksheet('Despesas');
@@ -3740,7 +3740,7 @@ router.get('/export/despesas', async (req, res) => {
 
 router.get('/export/contratos', async (req, res) => {
   try {
-    const rows = req.db.prepare(`SELECT * FROM contratos ORDER BY status ASC`).all();
+    const rows = await req.db.prepare(`SELECT * FROM contratos ORDER BY status ASC`).all();
     const ExcelJS = require('exceljs');
     const wb = new ExcelJS.Workbook(); wb.creator = 'Montana';
     const ws = wb.addWorksheet('Contratos');
@@ -3776,11 +3776,11 @@ router.get('/export/margem', async (req, res) => {
     if (from) { nfFilter += ' AND n.data_emissao >= @from'; despFilter += ' AND d.data_iso >= @from'; params.from = from; }
     if (to)   { nfFilter += ' AND n.data_emissao <= @to';   despFilter += ' AND d.data_iso <= @to';   params.to   = to; }
 
-    const contratos = req.db.prepare(`SELECT numContrato, contrato, orgao, status, valor_mensal_bruto, vigencia_inicio, vigencia_fim, total_pago FROM contratos ORDER BY contrato`).all();
+    const contratos = await req.db.prepare(`SELECT numContrato, contrato, orgao, status, valor_mensal_bruto, vigencia_inicio, vigencia_fim, total_pago FROM contratos ORDER BY contrato`).all();
     const nfMap  = {};
-    req.db.prepare(`SELECT n.contrato_ref, SUM(n.valor_bruto) as receita_bruta, SUM(n.valor_liquido) as receita_liquida, SUM(n.retencao) as total_retencao, COUNT(*) as qtd_nfs FROM notas_fiscais n WHERE ${nfFilter} GROUP BY n.contrato_ref`).all(params).forEach(r => { nfMap[r.contrato_ref] = r; });
+    await req.db.prepare(`SELECT n.contrato_ref, SUM(n.valor_bruto) as receita_bruta, SUM(n.valor_liquido) as receita_liquida, SUM(n.retencao) as total_retencao, COUNT(*) as qtd_nfs FROM notas_fiscais n WHERE ${nfFilter} GROUP BY n.contrato_ref`).all(params).forEach(r => { nfMap[r.contrato_ref] = r; });
     const despMap = {};
-    req.db.prepare(`SELECT d.contrato_ref, SUM(d.valor_bruto) as total_despesas, SUM(CASE WHEN d.categoria='FOLHA' THEN d.valor_bruto ELSE 0 END) as desp_folha, SUM(CASE WHEN d.categoria='FORNECEDOR' THEN d.valor_bruto ELSE 0 END) as desp_fornecedor, SUM(CASE WHEN d.categoria NOT IN ('FOLHA','FORNECEDOR') THEN d.valor_bruto ELSE 0 END) as desp_outras FROM despesas d WHERE ${despFilter} GROUP BY d.contrato_ref`).all(params).forEach(r => { despMap[r.contrato_ref] = r; });
+    await req.db.prepare(`SELECT d.contrato_ref, SUM(d.valor_bruto) as total_despesas, SUM(CASE WHEN d.categoria='FOLHA' THEN d.valor_bruto ELSE 0 END) as desp_folha, SUM(CASE WHEN d.categoria='FORNECEDOR' THEN d.valor_bruto ELSE 0 END) as desp_fornecedor, SUM(CASE WHEN d.categoria NOT IN ('FOLHA','FORNECEDOR') THEN d.valor_bruto ELSE 0 END) as desp_outras FROM despesas d WHERE ${despFilter} GROUP BY d.contrato_ref`).all(params).forEach(r => { despMap[r.contrato_ref] = r; });
 
     const ExcelJS = require('exceljs');
     const wb = new ExcelJS.Workbook(); wb.creator = 'Montana';
@@ -3852,13 +3852,13 @@ router.get('/export/margem', async (req, res) => {
 });
 
 // ─── BUSCA GLOBAL ─────────────────────────────────────────────────
-router.get('/busca', (req, res) => {
+router.get('/busca', async (req, res) => {
   try {
     const { q } = req.query;
     if (!q || q.trim().length < 2) return res.json({ data: [] });
     const termo = '%' + q.trim() + '%';
 
-    const nfs = req.db.prepare(`
+    const nfs = await req.db.prepare(`
       SELECT 'nf' as tipo, id, numero as codigo, tomador as descricao,
              valor_bruto as valor, data_emissao as data, contrato_ref as extra
       FROM notas_fiscais
@@ -3866,7 +3866,7 @@ router.get('/busca', (req, res) => {
       LIMIT 8
     `).all(termo, termo, termo, termo);
 
-    const extratos = req.db.prepare(`
+    const extratos = await req.db.prepare(`
       SELECT 'extrato' as tipo, id, historico as codigo, historico as descricao,
              credito as valor, data_iso as data, status as extra
       FROM extratos
@@ -3874,7 +3874,7 @@ router.get('/busca', (req, res) => {
       LIMIT 8
     `).all(termo, termo, termo);
 
-    const contratos = req.db.prepare(`
+    const contratos = await req.db.prepare(`
       SELECT 'contrato' as tipo, id, numContrato as codigo, contrato as descricao,
              valor_mensal_bruto as valor, vigencia_fim as data, status as extra
       FROM contratos
@@ -3882,7 +3882,7 @@ router.get('/busca', (req, res) => {
       LIMIT 6
     `).all(termo, termo, termo);
 
-    const despesas = req.db.prepare(`
+    const despesas = await req.db.prepare(`
       SELECT 'despesa' as tipo, id, categoria as codigo, descricao,
              valor_bruto as valor, data_iso as data, contrato_ref as extra
       FROM despesas
@@ -3896,7 +3896,7 @@ router.get('/busca', (req, res) => {
 
 router.get('/export/certidoes', async (req, res) => {
   try {
-    const rows = req.db.prepare(`SELECT * FROM certidoes ORDER BY data_validade ASC`).all();
+    const rows = await req.db.prepare(`SELECT * FROM certidoes ORDER BY data_validade ASC`).all();
     const ExcelJS = require('exceljs');
     const wb = new ExcelJS.Workbook(); wb.creator = 'Montana';
     const ws = wb.addWorksheet('Certidões');
@@ -3919,7 +3919,7 @@ router.get('/export/certidoes', async (req, res) => {
 
 router.get('/export/licitacoes', async (req, res) => {
   try {
-    const rows = req.db.prepare(`SELECT * FROM licitacoes ORDER BY data_abertura DESC`).all();
+    const rows = await req.db.prepare(`SELECT * FROM licitacoes ORDER BY data_abertura DESC`).all();
     const ExcelJS = require('exceljs');
     const wb = new ExcelJS.Workbook(); wb.creator = 'Montana';
     const ws = wb.addWorksheet('Licitações');
@@ -3956,7 +3956,7 @@ router.get('/export/audit', async (req, res) => {
     if (usuario) { where += ' AND usuario = ?';         params.push(usuario); }
     if (from)    { where += ' AND created_at >= ?';     params.push(from); }
     if (to)      { where += ' AND created_at <= ?';     params.push(to + ' 23:59:59'); }
-    const rows = req.db.prepare(
+    const rows = await req.db.prepare(
       `SELECT id, tabela, acao, registro_id, usuario, detalhe, ip, created_at
        FROM audit_log WHERE ${where} ORDER BY created_at DESC LIMIT 5000`
     ).all(...params);
@@ -3999,7 +3999,7 @@ router.get('/export/audit', async (req, res) => {
 
 // ─── CONCILIAÇÃO 3 VIAS ──────────────────────────────────────────
 // Cruza: Notas Fiscais emitidas ↔ Extratos bancários recebidos ↔ Pagamentos do governo
-router.get('/conciliacao/tres-vias', (req, res) => {
+router.get('/conciliacao/tres-vias', async (req, res) => {
   try {
     const { from, to, contrato } = req.query;
 
@@ -4008,7 +4008,7 @@ router.get('/conciliacao/tres-vias', (req, res) => {
     if (from)     { nfWhere += ' AND data_emissao >= @from';   nfP.from     = from; }
     if (to)       { nfWhere += ' AND data_emissao <= @to';     nfP.to       = to; }
     if (contrato) { nfWhere += ' AND contrato_ref = @contrato'; nfP.contrato = contrato; }
-    const nfs = req.db.prepare(
+    const nfs = await req.db.prepare(
       `SELECT contrato_ref, numero, data_emissao, valor_bruto, valor_liquido, retencao FROM notas_fiscais WHERE ${nfWhere} ORDER BY data_emissao DESC`
     ).all(nfP);
 
@@ -4017,7 +4017,7 @@ router.get('/conciliacao/tres-vias', (req, res) => {
     if (from)     { extWhere += ' AND data_iso >= @from';            extP.from     = from; }
     if (to)       { extWhere += ' AND data_iso <= @to';              extP.to       = to; }
     if (contrato) { extWhere += ' AND contrato_vinculado = @contrato'; extP.contrato = contrato; }
-    const extratos = req.db.prepare(
+    const extratos = await req.db.prepare(
       `SELECT contrato_vinculado, id, data, historico, credito FROM extratos WHERE ${extWhere} ORDER BY data_iso DESC`
     ).all(extP);
 
@@ -4025,7 +4025,7 @@ router.get('/conciliacao/tres-vias', (req, res) => {
     let pgWhere = '1=1'; const pgP = {};
     if (from) { pgWhere += ' AND data_pagamento_iso >= @from'; pgP.from = from; }
     if (to)   { pgWhere += ' AND data_pagamento_iso <= @to';   pgP.to   = to; }
-    const pagamentos = req.db.prepare(
+    const pagamentos = await req.db.prepare(
       `SELECT ob, gestao, favorecido, data_pagamento, valor_pago FROM pagamentos WHERE ${pgWhere} ORDER BY data_pagamento_iso DESC LIMIT 500`
     ).all(pgP);
 
@@ -4034,7 +4034,7 @@ router.get('/conciliacao/tres-vias', (req, res) => {
     //   - marcador "⚠️ CONTAMINADA" (NFs pertencentes a outra empresa)
     //   - labels técnicos não-contrato (JUROS, SALDO, TRANSFERÊNCIA, PIX REJEITADO, Montana Segurança/Assessoria)
     const contratosCanon = new Set(
-      req.db.prepare('SELECT numContrato FROM contratos').all().map(r => r.numContrato)
+      await req.db.prepare('SELECT numContrato FROM contratos').all().map(r => r.numContrato)
     );
     // Mapeamento de labels históricos → numContrato atual (mesma empresa).
     // Preenchido manualmente conforme contaminação identificada nos bancos.
@@ -4091,10 +4091,10 @@ router.get('/conciliacao/tres-vias', (req, res) => {
 });
 
 // ─── DETALHE DO CONTRATO (Dashboard por contrato) ────────────────
-router.get('/contratos/:num/detalhe', (req, res) => {
+router.get('/contratos/:num/detalhe', async (req, res) => {
   try {
     const num = decodeURIComponent(req.params.num);
-    const c = req.db.prepare(`SELECT * FROM contratos WHERE numContrato = ?`).get(num);
+    const c = await req.db.prepare(`SELECT * FROM contratos WHERE numContrato = ?`).get(num);
     if (!c) return res.status(404).json({ error: 'Contrato não encontrado' });
 
     // Prefixo da org para busca fuzzy (NFs e extratos podem usar numerações históricas
@@ -4102,23 +4102,23 @@ router.get('/contratos/:num/detalhe', (req, res) => {
     const orgKey = num.split(' ')[0];
     const orgLike = '%' + orgKey + '%';
 
-    const parcelas  = req.db.prepare(`SELECT * FROM parcelas WHERE contrato_num = ? ORDER BY competencia DESC`).all(num);
+    const parcelas  = await req.db.prepare(`SELECT * FROM parcelas WHERE contrato_num = ? ORDER BY competencia DESC`).all(num);
     // NFs: tenta match exato em contrato_ref; fallback por prefixo da org
-    const nfs       = req.db.prepare(`
+    const nfs       = await req.db.prepare(`
       SELECT id, numero, competencia, data_emissao, valor_bruto, valor_liquido, retencao, contrato_ref
       FROM notas_fiscais
       WHERE contrato_ref = ? OR (contrato_ref LIKE ? AND contrato_ref != '')
       ORDER BY COALESCE(NULLIF(data_emissao,''),'0000-00-00') DESC
     `).all(num, orgLike);
     // Extratos: match exato em contrato_vinculado; fallback por prefixo da org
-    const extratos  = req.db.prepare(`
+    const extratos  = await req.db.prepare(`
       SELECT id, data, historico, credito, debito, status_conciliacao, contrato_vinculado
       FROM extratos
       WHERE contrato_vinculado = ? OR (contrato_vinculado LIKE ? AND contrato_vinculado != '')
       ORDER BY data_iso DESC LIMIT 200
     `).all(num, orgLike);
     // Despesas: sempre usam numContrato atual (correto por design)
-    const despesas  = req.db.prepare(`SELECT id, categoria, descricao, data_despesa, valor_bruto, valor_liquido, status FROM despesas WHERE contrato_ref = ? ORDER BY data_iso DESC LIMIT 200`).all(num);
+    const despesas  = await req.db.prepare(`SELECT id, categoria, descricao, data_despesa, valor_bruto, valor_liquido, status FROM despesas WHERE contrato_ref = ? ORDER BY data_iso DESC LIMIT 200`).all(num);
 
     const totalRecebido = extratos.reduce((s, e) => s + (e.credito || 0), 0);
     const totalNFs      = nfs.reduce((s, n) => s + (n.valor_bruto || 0), 0);
@@ -4127,7 +4127,7 @@ router.get('/contratos/:num/detalhe', (req, res) => {
     const baseCalculo   = totalRecebido > 0 ? totalRecebido : (c.total_pago || 0);
     const margem        = baseCalculo > 0 ? +((baseCalculo - totalDespesas) / baseCalculo * 100).toFixed(1) : 0;
 
-    const fluxoMensal = req.db.prepare(`
+    const fluxoMensal = await req.db.prepare(`
       SELECT substr(data_iso,1,7) as mes, SUM(credito) as recebido, COUNT(*) as qtd
       FROM extratos
       WHERE (contrato_vinculado = ? OR contrato_vinculado LIKE ?) AND data_iso != ''
@@ -4144,7 +4144,7 @@ router.get('/contratos/:num/detalhe', (req, res) => {
 // ─── CLASSIFICAR CRÉDITOS INTERNO / INVESTIMENTO ─────────────────
 // Marca extratos de crédito que são transferências internas ou resgates de aplicação
 // (não são receita operacional → excluídos do DRE de faturamento)
-router.post('/extratos/classificar-interno', (req, res) => {
+router.post('/extratos/classificar-interno', async (req, res) => {
   try {
     const PALAVRAS_INTERNO = [
       'MONTANA SEG', 'MONTANA ASSESSORIA', 'MONTANA VIGILANCIA',
@@ -4184,7 +4184,7 @@ router.post('/extratos/classificar-interno', (req, res) => {
     const resInv = stmtInv.run(...buildParams(PALAVRAS_INVESTIMENTO));
 
     // Contagem de cada tipo após classificação
-    const contagens = db.prepare(`
+    const contagens = await db.prepare(`
       SELECT status_conciliacao, COUNT(*) as qtd, COALESCE(SUM(credito),0) as total
       FROM extratos WHERE credito > 0
       GROUP BY status_conciliacao ORDER BY total DESC
@@ -4202,7 +4202,7 @@ router.post('/extratos/classificar-interno', (req, res) => {
 // ─── CONCILIAÇÃO DE CRÉDITOS PENDENTES ───────────────────────────
 // Identifica créditos PENDENTE, classifica por categoria (contrato/INTERNO/INVESTIMENTO/DESCONHECIDO)
 // e retorna resumo + detalhes para análise do financeiro.
-router.get('/conciliacao/creditos', (req, res) => {
+router.get('/conciliacao/creditos', async (req, res) => {
   try {
     const db = req.db;
     const { from, to } = req.query;
@@ -4254,7 +4254,7 @@ router.get('/conciliacao/creditos', (req, res) => {
     if (to)   { dateWhere += ' AND data_iso <= @to';   dateParams.to   = to; }
 
     // Busca todos créditos pendentes
-    const pendentes = db.prepare(`
+    const pendentes = await db.prepare(`
       SELECT id, data, data_iso, historico, credito
       FROM extratos
       WHERE credito > 0
@@ -4325,7 +4325,7 @@ router.get('/conciliacao/creditos', (req, res) => {
 // Diferente de /classificar-interno (que só atualiza INTERNO/INVESTIMENTO),
 // este endpoint aplica TODAS as REGRAS e grava status + contrato_vinculado no banco.
 // Só toca lançamentos com status PENDENTE ou NULL — nunca sobrescreve CONCILIADO.
-router.post('/extratos/classificar-todos', (req, res) => {
+router.post('/extratos/classificar-todos', async (req, res) => {
   try {
     const db = req.db;
     const { from, to, banco, conta } = req.body || {};
@@ -4369,7 +4369,7 @@ router.post('/extratos/classificar-todos', (req, res) => {
     if (conta){ extraWhere += ' AND conta = @conta';    extraParams.conta = conta; }
 
     // Busca todos créditos PENDENTE (nunca sobrescreve CONCILIADO)
-    const pendentes = db.prepare(`
+    const pendentes = await db.prepare(`
       SELECT id, historico FROM extratos
       WHERE credito > 0
         AND (status_conciliacao IS NULL OR status_conciliacao IN ('PENDENTE',''))
@@ -4380,14 +4380,14 @@ router.post('/extratos/classificar-todos', (req, res) => {
       UPDATE extratos
       SET status_conciliacao = @status,
           contrato_vinculado  = CASE WHEN @contrato IS NOT NULL THEN @contrato ELSE contrato_vinculado END,
-          updated_at = datetime('now')
+          updated_at=NOW()
       WHERE id = @id
     `);
 
     let totalAtualizados = 0;
     const porCategoria = {};
 
-    const updateMany = db.transaction(() => {
+    const updateMany = db.transaction(async () => {
       for (const e of pendentes) {
         const hist = (e.historico || '').toUpperCase();
         for (const regra of REGRAS) {
@@ -4410,7 +4410,7 @@ router.post('/extratos/classificar-todos', (req, res) => {
     updateMany();
 
     // Resumo pós-classificação
-    const contagens = db.prepare(`
+    const contagens = await db.prepare(`
       SELECT status_conciliacao, COUNT(*) as qtd, COALESCE(SUM(credito),0) as total
       FROM extratos WHERE credito > 0
       GROUP BY status_conciliacao ORDER BY total DESC
@@ -4430,7 +4430,7 @@ router.post('/extratos/classificar-todos', (req, res) => {
 // Para lançamentos com histórico vazio, tenta encontrar uma NF ou mês de contrato
 // cujo valor_liquido bate exatamente (ou dentro de tolerância) com o crédito.
 // Retorna sugestões — não grava automaticamente, o usuário confirma cada uma.
-router.get('/conciliacao/match-por-valor', (req, res) => {
+router.get('/conciliacao/match-por-valor', async (req, res) => {
   try {
     const db = req.db;
     const { from, to, banco, tolerancia = 0.02 } = req.query;
@@ -4443,7 +4443,7 @@ router.get('/conciliacao/match-por-valor', (req, res) => {
     if (banco){ dateWhere += ' AND banco = @banco';    dateParams.banco = banco; }
 
     // Créditos sem histórico (ou histórico muito curto) ainda PENDENTE
-    const semHistorico = db.prepare(`
+    const semHistorico = await db.prepare(`
       SELECT id, data, data_iso, credito, historico, banco, conta
       FROM extratos
       WHERE credito > 0
@@ -4454,7 +4454,7 @@ router.get('/conciliacao/match-por-valor', (req, res) => {
     `).all(dateParams);
 
     // NFs com status diferente de CONCILIADO
-    const nfs = db.prepare(`
+    const nfs = await db.prepare(`
       SELECT id, numero, data_emissao, tomador, valor_liquido, valor_bruto, contrato_ref, status_conciliacao
       FROM notas_fiscais
       WHERE (status_conciliacao IS NULL OR status_conciliacao != 'CONCILIADO')
@@ -4462,7 +4462,7 @@ router.get('/conciliacao/match-por-valor', (req, res) => {
     `).all();
 
     // Contratos ativos com valor mensal
-    const contratos = db.prepare(`
+    const contratos = await db.prepare(`
       SELECT id, numContrato, contrato, orgao, valor_mensal_liquido, valor_mensal_bruto
       FROM contratos
       WHERE status = 'ATIVO' AND valor_mensal_liquido > 0
@@ -4556,7 +4556,7 @@ router.get('/conciliacao/match-por-valor', (req, res) => {
 });
 
 // ─── APLICAR MATCH: confirma uma sugestão de match-por-valor ─────────────────
-router.post('/conciliacao/aplicar-match', (req, res) => {
+router.post('/conciliacao/aplicar-match', async (req, res) => {
   try {
     const db = req.db;
     const { extrato_id, contrato_ref, status, obs } = req.body;
@@ -4567,12 +4567,12 @@ router.post('/conciliacao/aplicar-match', (req, res) => {
     if (!statusValidos.includes(status)) {
       return res.status(400).json({ error: `status inválido. Use: ${statusValidos.join(', ')}` });
     }
-    db.prepare(`
+    await db.prepare(`
       UPDATE extratos
       SET status_conciliacao = @status,
           contrato_vinculado  = @contrato_ref,
           obs = CASE WHEN @obs IS NOT NULL THEN @obs ELSE obs END,
-          updated_at = datetime('now')
+          updated_at=NOW()
       WHERE id = @extrato_id
     `).run({ extrato_id, contrato_ref, status, obs: obs || null });
     res.json({ ok: true });
@@ -4581,7 +4581,7 @@ router.post('/conciliacao/aplicar-match', (req, res) => {
 
 // ─── DASHBOARD DE CONCILIAÇÃO ─────────────────────────────────────────────────
 // Retorna progresso de conciliação por mês e por contrato para painel gerencial.
-router.get('/conciliacao/dashboard', (req, res) => {
+router.get('/conciliacao/dashboard', async (req, res) => {
   try {
     const db = req.db;
     const { ano } = req.query;
@@ -4620,7 +4620,7 @@ router.get('/conciliacao/dashboard', (req, res) => {
     `).all({ ano: anoFiltro });
 
     // Totais gerais do ano
-    const totais = db.prepare(`
+    const totais = await db.prepare(`
       SELECT
         COUNT(*) as total,
         SUM(credito) as total_credito,
@@ -4631,7 +4631,7 @@ router.get('/conciliacao/dashboard', (req, res) => {
     `).get({ ano: anoFiltro });
 
     // Créditos sem histórico ainda pendentes (problema de conciliação manual)
-    const semHistorico = db.prepare(`
+    const semHistorico = await db.prepare(`
       SELECT COUNT(*) as qtd, COALESCE(SUM(credito),0) as total
       FROM extratos
       WHERE credito > 0
@@ -4641,7 +4641,7 @@ router.get('/conciliacao/dashboard', (req, res) => {
     `).get({ ano: anoFiltro });
 
     // Resumo por categoria (todo o banco)
-    const porCategoria = db.prepare(`
+    const porCategoria = await db.prepare(`
       SELECT
         COALESCE(status_conciliacao,'PENDENTE') as categoria,
         COUNT(*) as qtd,
@@ -4694,7 +4694,7 @@ router.get('/conciliacao/dashboard', (req, res) => {
 // ─── DUPLICATAS: detecta lançamentos suspeitos de duplicidade ──────────────
 // Busca créditos com mesmo valor e data próxima em bancos diferentes (possível duplicata
 // entre BB e BRB, situação já detectada no 03/10/2025).
-router.get('/conciliacao/duplicatas', (req, res) => {
+router.get('/conciliacao/duplicatas', async (req, res) => {
   try {
     const db = req.db;
     const { from, to, janela_dias = 3, tolerancia_valor = 0.01 } = req.query;
@@ -4742,9 +4742,9 @@ router.get('/conciliacao/duplicatas', (req, res) => {
 });
 
 // ─── KEYWORDS DE AUTO-VINCULAÇÃO ─────────────────────────────────
-router.get('/configuracoes/keywords', (req, res) => {
+router.get('/configuracoes/keywords', async (req, res) => {
   try {
-    const row = req.db.prepare(`SELECT valor FROM configuracoes WHERE chave = 'autovinc_keywords'`).get();
+    const row = await req.db.prepare(`SELECT valor FROM configuracoes WHERE chave = 'autovinc_keywords'`).get();
     if (row && row.valor) {
       try { return res.json({ keywords: JSON.parse(row.valor) }); } catch(_e) {}
     }
@@ -4768,14 +4768,14 @@ router.get('/configuracoes/keywords', (req, res) => {
 });
 
 // ─── GET /api/relatorios/apuracao-mensal — histórico do cron ─────
-router.get('/relatorios/apuracao-mensal', (req, res) => {
+router.get('/relatorios/apuracao-mensal', async (req, res) => {
   try {
     const meses = Math.min(parseInt(req.query.meses) || 12, 24);
     let rows = [];
     let fonte = 'cron';
 
     try {
-      rows = req.db.prepare(`
+      rows = await req.db.prepare(`
         SELECT * FROM apuracao_mensal
         ORDER BY competencia DESC LIMIT ?
       `).all(meses);
@@ -4826,30 +4826,30 @@ router.get('/relatorios/apuracao-mensal', (req, res) => {
 // ═══════════════════════════════════════════════════════════════
 
 // Dashboard de compras
-router.get('/compras/dashboard', (req, res) => {
+router.get('/compras/dashboard', async (req, res) => {
   try {
     const db = req.db;
-    const porStatus = db.prepare(`
+    const porStatus = await db.prepare(`
       SELECT status, COUNT(*) as total,
              COALESCE(SUM(valor_aprovado), SUM(valor_estimado), 0) as valor
       FROM compras_requisicoes
       GROUP BY status
     `).all();
 
-    const urgentes = db.prepare(`
+    const urgentes = await db.prepare(`
       SELECT COUNT(*) as total FROM compras_requisicoes
       WHERE prioridade = 'URGENTE' AND status NOT IN ('COMPRADA','CANCELADA')
     `).get();
 
     const mesAtual = new Date().toISOString().substring(0, 7);
-    const valorMes = db.prepare(`
+    const valorMes = await db.prepare(`
       SELECT COALESCE(SUM(valor_aprovado), SUM(valor_estimado), 0) as total
       FROM compras_requisicoes
       WHERE substr(created_at, 1, 7) = ?
         AND status NOT IN ('CANCELADA')
     `).get(mesAtual);
 
-    const recentes = db.prepare(`
+    const recentes = await db.prepare(`
       SELECT r.id, r.titulo, r.prioridade, r.status, r.solicitante,
              r.valor_estimado, r.valor_aprovado, r.created_at, r.data_necessidade,
              (SELECT COUNT(*) FROM compras_cotacoes c WHERE c.requisicao_id = r.id) as qtd_cotacoes
@@ -4862,7 +4862,7 @@ router.get('/compras/dashboard', (req, res) => {
 });
 
 // Listar requisições
-router.get('/compras/requisicoes', (req, res) => {
+router.get('/compras/requisicoes', async (req, res) => {
   try {
     const db = req.db;
     const { status, prioridade, contrato_ref, q } = req.query;
@@ -4875,7 +4875,7 @@ router.get('/compras/requisicoes', (req, res) => {
     if (q)            { where.push('(r.titulo LIKE ? OR r.solicitante LIKE ? OR r.fornecedor_escolhido LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
 
     const clause = where.length ? 'WHERE ' + where.join(' AND ') : '';
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT r.*,
              (SELECT COUNT(*) FROM compras_itens    i WHERE i.requisicao_id = r.id) as qtd_itens,
              (SELECT COUNT(*) FROM compras_cotacoes c WHERE c.requisicao_id = r.id) as qtd_cotacoes
@@ -4890,31 +4890,31 @@ router.get('/compras/requisicoes', (req, res) => {
 });
 
 // Detalhe de uma requisição (com itens e cotações)
-router.get('/compras/requisicoes/:id', (req, res) => {
+router.get('/compras/requisicoes/:id', async (req, res) => {
   try {
     const db = req.db;
     const id = Number(req.params.id);
-    const req_ = db.prepare('SELECT * FROM compras_requisicoes WHERE id = ?').get(id);
+    const req_ = await db.prepare('SELECT * FROM compras_requisicoes WHERE id = ?').get(id);
     if (!req_) return res.status(404).json({ error: 'Requisição não encontrada' });
-    const itens = db.prepare('SELECT * FROM compras_itens WHERE requisicao_id = ? ORDER BY id').all(id);
-    const cotacoes = db.prepare('SELECT * FROM compras_cotacoes WHERE requisicao_id = ? ORDER BY created_at').all(id);
+    const itens = await db.prepare('SELECT * FROM compras_itens WHERE requisicao_id = ? ORDER BY id').all(id);
+    const cotacoes = await db.prepare('SELECT * FROM compras_cotacoes WHERE requisicao_id = ? ORDER BY created_at').all(id);
     res.json({ ...req_, itens, cotacoes });
   } catch(e) { errRes(res, e, 'compras/requisicoes/:id'); }
 });
 
 // Criar requisição (com itens opcionais)
-router.post('/compras/requisicoes', (req, res) => {
+router.post('/compras/requisicoes', async (req, res) => {
   try {
     const db = req.db;
     const { titulo, solicitante, contrato_ref, prioridade, status, descricao,
             valor_estimado, data_necessidade, itens } = req.body;
     if (!titulo) return res.status(400).json({ error: 'titulo é obrigatório' });
 
-    const info = db.prepare(`
+    const info = await db.prepare(`
       INSERT INTO compras_requisicoes
         (titulo, solicitante, contrato_ref, prioridade, status, descricao,
          valor_estimado, data_necessidade, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,datetime('now'))
+      VALUES (?,?,?,?,?,?,?,?,NOW())
     `).run(
       titulo, solicitante || '', contrato_ref || '',
       prioridade || 'NORMAL', status || 'PENDENTE',
@@ -4940,7 +4940,7 @@ router.post('/compras/requisicoes', (req, res) => {
 });
 
 // Atualizar requisição
-router.put('/compras/requisicoes/:id', (req, res) => {
+router.put('/compras/requisicoes/:id', async (req, res) => {
   try {
     const db = req.db;
     const id = Number(req.params.id);
@@ -4961,23 +4961,23 @@ router.put('/compras/requisicoes/:id', (req, res) => {
     if (data_necessidade !== undefined)    { fields.push('data_necessidade = ?');    params.push(data_necessidade); }
 
     if (!fields.length) return res.status(400).json({ error: 'Nenhum campo para atualizar' });
-    fields.push("updated_at = datetime('now')");
+    fields.push("updated_at=NOW()");
     params.push(id);
 
-    db.prepare(`UPDATE compras_requisicoes SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+    await db.prepare(`UPDATE compras_requisicoes SET ${fields.join(', ')} WHERE id = ?`).run(...params);
     audit(req, 'UPDATE', 'compras_requisicoes', id, status || '');
     res.json({ ok: true });
   } catch(e) { errRes(res, e, 'compras/requisicoes PUT'); }
 });
 
 // Adicionar cotação
-router.post('/compras/cotacoes', (req, res) => {
+router.post('/compras/cotacoes', async (req, res) => {
   try {
     const db = req.db;
     const { requisicao_id, fornecedor, cnpj_cpf, valor_total, prazo_entrega, observacoes } = req.body;
     if (!requisicao_id || !fornecedor) return res.status(400).json({ error: 'requisicao_id e fornecedor são obrigatórios' });
 
-    const info = db.prepare(`
+    const info = await db.prepare(`
       INSERT INTO compras_cotacoes (requisicao_id, fornecedor, cnpj_cpf, valor_total, prazo_entrega, observacoes)
       VALUES (?,?,?,?,?,?)
     `).run(requisicao_id, fornecedor, cnpj_cpf || '', valor_total || null, prazo_entrega || '', observacoes || '');
@@ -4988,21 +4988,21 @@ router.post('/compras/cotacoes', (req, res) => {
 });
 
 // Escolher cotação vencedora
-router.put('/compras/cotacoes/:id/escolher', (req, res) => {
+router.put('/compras/cotacoes/:id/escolher', async (req, res) => {
   try {
     const db = req.db;
     const cotId = Number(req.params.id);
-    const cot = db.prepare('SELECT * FROM compras_cotacoes WHERE id = ?').get(cotId);
+    const cot = await db.prepare('SELECT * FROM compras_cotacoes WHERE id = ?').get(cotId);
     if (!cot) return res.status(404).json({ error: 'Cotação não encontrada' });
 
     // Desmarcar todas da mesma requisição
-    db.prepare('UPDATE compras_cotacoes SET escolhida = 0 WHERE requisicao_id = ?').run(cot.requisicao_id);
+    await db.prepare('UPDATE compras_cotacoes SET escolhida = 0 WHERE requisicao_id = ?').run(cot.requisicao_id);
     // Marcar a escolhida
-    db.prepare('UPDATE compras_cotacoes SET escolhida = 1 WHERE id = ?').run(cotId);
+    await db.prepare('UPDATE compras_cotacoes SET escolhida = 1 WHERE id = ?').run(cotId);
     // Atualizar requisição
-    db.prepare(`
+    await db.prepare(`
       UPDATE compras_requisicoes
-      SET fornecedor_escolhido = ?, valor_aprovado = ?, status = 'APROVADA', updated_at = datetime('now')
+      SET fornecedor_escolhido = ?, valor_aprovado = ?, status = 'APROVADA', updated_at=NOW()
       WHERE id = ?
     `).run(cot.fornecedor, cot.valor_total, cot.requisicao_id);
 
@@ -5016,33 +5016,33 @@ router.put('/compras/cotacoes/:id/escolher', (req, res) => {
 // ═══════════════════════════════════════════════════════════════
 
 // Dashboard supervisor
-router.get('/supervisor/dashboard', (req, res) => {
+router.get('/supervisor/dashboard', async (req, res) => {
   try {
     const db = req.db;
     const hoje = new Date().toISOString().substring(0, 10);
 
-    const abertas = db.prepare(`
+    const abertas = await db.prepare(`
       SELECT contrato_ref, COUNT(*) as total
       FROM sup_ocorrencias WHERE status = 'ABERTA'
       GROUP BY contrato_ref ORDER BY total DESC
     `).all();
 
-    const hoje_count = db.prepare(`
+    const hoje_count = await db.prepare(`
       SELECT COUNT(*) as total FROM sup_ocorrencias
       WHERE data_ocorrencia_iso = ?
     `).get(hoje);
 
-    const checklists_hoje = db.prepare(`
+    const checklists_hoje = await db.prepare(`
       SELECT COUNT(*) as total FROM sup_checklist WHERE data_iso = ?
     `).get(hoje);
 
-    const por_tipo = db.prepare(`
+    const por_tipo = await db.prepare(`
       SELECT tipo, COUNT(*) as total
       FROM sup_ocorrencias WHERE status = 'ABERTA'
       GROUP BY tipo ORDER BY total DESC
     `).all();
 
-    const recentes = db.prepare(`
+    const recentes = await db.prepare(`
       SELECT * FROM sup_ocorrencias
       ORDER BY created_at DESC LIMIT 10
     `).all();
@@ -5059,7 +5059,7 @@ router.get('/supervisor/dashboard', (req, res) => {
 });
 
 // Listar ocorrências
-router.get('/supervisor/ocorrencias', (req, res) => {
+router.get('/supervisor/ocorrencias', async (req, res) => {
   try {
     const db = req.db;
     const { status, tipo, contrato_ref, de, ate, q } = req.query;
@@ -5074,7 +5074,7 @@ router.get('/supervisor/ocorrencias', (req, res) => {
     if (q)            { where.push('(descricao LIKE ? OR funcionario_nome LIKE ? OR posto LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
 
     const clause = where.length ? 'WHERE ' + where.join(' AND ') : '';
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT * FROM sup_ocorrencias ${clause}
       ORDER BY created_at DESC
     `).all(...params);
@@ -5083,14 +5083,14 @@ router.get('/supervisor/ocorrencias', (req, res) => {
 });
 
 // Registrar ocorrência
-router.post('/supervisor/ocorrencias', (req, res) => {
+router.post('/supervisor/ocorrencias', async (req, res) => {
   try {
     const db = req.db;
     const { contrato_ref, posto, tipo, descricao, funcionario_nome,
             data_ocorrencia, data_ocorrencia_iso, registrado_por } = req.body;
     if (!descricao) return res.status(400).json({ error: 'descricao é obrigatória' });
 
-    const info = db.prepare(`
+    const info = await db.prepare(`
       INSERT INTO sup_ocorrencias
         (contrato_ref, posto, tipo, descricao, funcionario_nome,
          data_ocorrencia, data_ocorrencia_iso, registrado_por)
@@ -5108,7 +5108,7 @@ router.post('/supervisor/ocorrencias', (req, res) => {
 });
 
 // Atualizar ocorrência (status / resolução)
-router.put('/supervisor/ocorrencias/:id', (req, res) => {
+router.put('/supervisor/ocorrencias/:id', async (req, res) => {
   try {
     const db = req.db;
     const id = Number(req.params.id);
@@ -5128,17 +5128,17 @@ router.put('/supervisor/ocorrencias/:id', (req, res) => {
     if (data_ocorrencia_iso !== undefined) { fields.push('data_ocorrencia_iso = ?'); params.push(data_ocorrencia_iso); }
 
     if (!fields.length) return res.status(400).json({ error: 'Nenhum campo para atualizar' });
-    fields.push("updated_at = datetime('now')");
+    fields.push("updated_at=NOW()");
     params.push(id);
 
-    db.prepare(`UPDATE sup_ocorrencias SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+    await db.prepare(`UPDATE sup_ocorrencias SET ${fields.join(', ')} WHERE id = ?`).run(...params);
     audit(req, 'UPDATE', 'sup_ocorrencias', id, status || '');
     res.json({ ok: true });
   } catch(e) { errRes(res, e, 'supervisor/ocorrencias PUT'); }
 });
 
 // Listar checklists
-router.get('/supervisor/checklist', (req, res) => {
+router.get('/supervisor/checklist', async (req, res) => {
   try {
     const db = req.db;
     const { data_iso, contrato_ref, turno } = req.query;
@@ -5150,7 +5150,7 @@ router.get('/supervisor/checklist', (req, res) => {
     if (turno)        { where.push('turno = ?');        params.push(turno); }
 
     const clause = where.length ? 'WHERE ' + where.join(' AND ') : '';
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT * FROM sup_checklist ${clause}
       ORDER BY data_iso DESC, id DESC
     `).all(...params);
@@ -5159,7 +5159,7 @@ router.get('/supervisor/checklist', (req, res) => {
 });
 
 // Registrar checklist
-router.post('/supervisor/checklist', (req, res) => {
+router.post('/supervisor/checklist', async (req, res) => {
   try {
     const db = req.db;
     const { contrato_ref, posto, data_iso, turno, supervisor,
@@ -5167,7 +5167,7 @@ router.post('/supervisor/checklist', (req, res) => {
     if (!contrato_ref || !data_iso) {
       return res.status(400).json({ error: 'contrato_ref e data_iso são obrigatórios' });
     }
-    const info = db.prepare(`
+    const info = await db.prepare(`
       INSERT INTO sup_checklist
         (contrato_ref, posto, data_iso, turno, supervisor, itens_json, observacoes, assinatura)
       VALUES (?,?,?,?,?,?,?,?)
@@ -5182,7 +5182,7 @@ router.post('/supervisor/checklist', (req, res) => {
 });
 
 // Atualizar checklist
-router.put('/supervisor/checklist/:id', (req, res) => {
+router.put('/supervisor/checklist/:id', async (req, res) => {
   try {
     const db = req.db;
     const id = Number(req.params.id);
@@ -5195,18 +5195,18 @@ router.put('/supervisor/checklist/:id', (req, res) => {
     if (supervisor  !== undefined) { fields.push('supervisor = ?');  params.push(supervisor); }
     if (!fields.length) return res.status(400).json({ error: 'Nenhum campo para atualizar' });
     params.push(id);
-    db.prepare(`UPDATE sup_checklist SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+    await db.prepare(`UPDATE sup_checklist SET ${fields.join(', ')} WHERE id = ?`).run(...params);
     audit(req, 'UPDATE', 'sup_checklist', id, '');
     res.json({ ok: true });
   } catch(e) { errRes(res, e, 'supervisor/checklist PUT'); }
 });
 
 // Excluir checklist
-router.delete('/supervisor/checklist/:id', (req, res) => {
+router.delete('/supervisor/checklist/:id', async (req, res) => {
   try {
     const db = req.db;
     const id = Number(req.params.id);
-    db.prepare('DELETE FROM sup_checklist WHERE id = ?').run(id);
+    await db.prepare('DELETE FROM sup_checklist WHERE id = ?').run(id);
     audit(req, 'DELETE', 'sup_checklist', id, '');
     res.json({ ok: true });
   } catch(e) { errRes(res, e, 'supervisor/checklist DELETE'); }

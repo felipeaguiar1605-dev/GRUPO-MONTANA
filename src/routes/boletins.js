@@ -30,10 +30,10 @@ router.use((req, res, next) => {
     ['nfse_xml',          'TEXT'],
     ['nfse_erro',         'TEXT'],
     ['obs',               'TEXT'],
-    ['updated_at',        "TEXT DEFAULT (datetime('now'))"],
+    ['updated_at',        "TIMESTAMP DEFAULT NOW()"],
   ];
   for (const [col, def] of bolCols) {
-    try { db.prepare(`ALTER TABLE bol_boletins ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
+    try { await db.prepare(`ALTER TABLE bol_boletins ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
   }
 
   // Colunas adicionais na tabela bol_contratos (necessárias para vinculação contrato financeiro + NFS-e)
@@ -43,7 +43,7 @@ router.use((req, res, next) => {
     ['insc_municipal',  "TEXT DEFAULT ''"],  // CNPJ do tomador (campo nomenclatura WebISS)
   ];
   for (const [col, def] of contrCols) {
-    try { db.prepare(`ALTER TABLE bol_contratos ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
+    try { await db.prepare(`ALTER TABLE bol_contratos ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
   }
 
   next();
@@ -80,26 +80,26 @@ function calcularPeriodo(competencia) {
 
 // ─── CONTRATOS — CRUD ─────────────────────────────────────────
 
-router.get('/contratos', (req, res) => {
-  const rows = req.db.prepare('SELECT * FROM bol_contratos ORDER BY ativo DESC, nome ASC').all();
+router.get('/contratos', async (req, res) => {
+  const rows = await req.db.prepare('SELECT * FROM bol_contratos ORDER BY ativo DESC, nome ASC').all();
   res.json(rows);
 });
 
-router.get('/contratos/:id', (req, res) => {
-  const c = req.db.prepare('SELECT * FROM bol_contratos WHERE id = ?').get(req.params.id);
+router.get('/contratos/:id', async (req, res) => {
+  const c = await req.db.prepare('SELECT * FROM bol_contratos WHERE id = ?').get(req.params.id);
   if (!c) return res.status(404).json({ error: 'Contrato não encontrado' });
   // Incluir postos e itens
-  const postos = req.db.prepare('SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem').all(c.id);
+  const postos = await req.db.prepare('SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem').all(c.id);
   for (const p of postos) {
-    p.itens = req.db.prepare('SELECT * FROM bol_itens WHERE posto_id = ? ORDER BY ordem').all(p.id);
+    p.itens = await req.db.prepare('SELECT * FROM bol_itens WHERE posto_id = ? ORDER BY ordem').all(p.id);
   }
   c.postos = postos;
   res.json(c);
 });
 
-router.post('/contratos', (req, res) => {
+router.post('/contratos', async (req, res) => {
   const b = req.body;
-  const r = req.db.prepare(`
+  const r = await req.db.prepare(`
     INSERT INTO bol_contratos (nome, contratante, numero_contrato, processo, pregao,
       descricao_servico, escala, empresa_razao, empresa_cnpj, empresa_endereco,
       empresa_email, empresa_telefone)
@@ -112,15 +112,15 @@ router.post('/contratos', (req, res) => {
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 
-router.put('/contratos/:id', (req, res) => {
+router.put('/contratos/:id', async (req, res) => {
   const b = req.body;
   // FIX2: inclui contrato_ref, orgao (CNPJ tomador), insc_municipal
-  req.db.prepare(`
+  await req.db.prepare(`
     UPDATE bol_contratos SET nome=?, contratante=?, numero_contrato=?, processo=?, pregao=?,
       descricao_servico=?, escala=?, empresa_razao=?, empresa_cnpj=?, empresa_endereco=?,
       empresa_email=?, empresa_telefone=?,
       contrato_ref=?, orgao=?, insc_municipal=?,
-      updated_at=datetime('now')
+      updated_at=NOW()
     WHERE id=?
   `).run(
     b.nome, b.contratante, b.numero_contrato, b.processo||'', b.pregao||'',
@@ -132,80 +132,80 @@ router.put('/contratos/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete('/contratos/:id', (req, res) => {
-  req.db.prepare('DELETE FROM bol_contratos WHERE id = ?').run(req.params.id);
+router.delete('/contratos/:id', async (req, res) => {
+  await req.db.prepare('DELETE FROM bol_contratos WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 
 // ─── POSTOS — CRUD ────────────────────────────────────────────
 
-router.get('/contratos/:id/postos', (req, res) => {
-  const postos = req.db.prepare('SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem').all(req.params.id);
+router.get('/contratos/:id/postos', async (req, res) => {
+  const postos = await req.db.prepare('SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem').all(req.params.id);
   for (const p of postos) {
-    p.itens = req.db.prepare('SELECT * FROM bol_itens WHERE posto_id = ? ORDER BY ordem').all(p.id);
+    p.itens = await req.db.prepare('SELECT * FROM bol_itens WHERE posto_id = ? ORDER BY ordem').all(p.id);
   }
   res.json(postos);
 });
 
-router.post('/contratos/:id/postos', (req, res) => {
+router.post('/contratos/:id/postos', async (req, res) => {
   const b = req.body;
-  const maxOrdem = req.db.prepare('SELECT COALESCE(MAX(ordem),0) as m FROM bol_postos WHERE contrato_id=?').get(req.params.id);
-  const r = req.db.prepare(`
+  const maxOrdem = await req.db.prepare('SELECT COALESCE(MAX(ordem),0) as m FROM bol_postos WHERE contrato_id=?').get(req.params.id);
+  const r = await req.db.prepare(`
     INSERT INTO bol_postos (contrato_id, campus_key, campus_nome, municipio, descricao_posto, label_resumo, ordem)
     VALUES (?,?,?,?,?,?,?)
   `).run(req.params.id, b.campus_key, b.campus_nome, b.municipio||'', b.descricao_posto||'', b.label_resumo||b.campus_nome, (maxOrdem?.m||0)+1);
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 
-router.put('/postos/:id', (req, res) => {
+router.put('/postos/:id', async (req, res) => {
   const b = req.body;
-  req.db.prepare(`
+  await req.db.prepare(`
     UPDATE bol_postos SET campus_key=?, campus_nome=?, municipio=?, descricao_posto=?, label_resumo=?, ordem=?
     WHERE id=?
   `).run(b.campus_key, b.campus_nome, b.municipio||'', b.descricao_posto||'', b.label_resumo||'', b.ordem||0, req.params.id);
   res.json({ ok: true });
 });
 
-router.delete('/postos/:id', (req, res) => {
-  req.db.prepare('DELETE FROM bol_postos WHERE id = ?').run(req.params.id);
+router.delete('/postos/:id', async (req, res) => {
+  await req.db.prepare('DELETE FROM bol_postos WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 
 // ─── ITENS — CRUD ─────────────────────────────────────────────
 
-router.post('/postos/:id/itens', (req, res) => {
+router.post('/postos/:id/itens', async (req, res) => {
   const b = req.body;
-  const maxOrdem = req.db.prepare('SELECT COALESCE(MAX(ordem),0) as m FROM bol_itens WHERE posto_id=?').get(req.params.id);
-  const r = req.db.prepare(`
+  const maxOrdem = await req.db.prepare('SELECT COALESCE(MAX(ordem),0) as m FROM bol_itens WHERE posto_id=?').get(req.params.id);
+  const r = await req.db.prepare(`
     INSERT INTO bol_itens (posto_id, descricao, quantidade, valor_unitario, ordem)
     VALUES (?,?,?,?,?)
   `).run(req.params.id, b.descricao, b.quantidade||1, b.valor_unitario||0, (maxOrdem?.m||0)+1);
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 
-router.put('/itens/:id', (req, res) => {
+router.put('/itens/:id', async (req, res) => {
   const b = req.body;
   req.db.prepare('UPDATE bol_itens SET descricao=?, quantidade=?, valor_unitario=?, ordem=? WHERE id=?')
     .run(b.descricao, b.quantidade||1, b.valor_unitario||0, b.ordem||0, req.params.id);
   res.json({ ok: true });
 });
 
-router.delete('/itens/:id', (req, res) => {
-  req.db.prepare('DELETE FROM bol_itens WHERE id = ?').run(req.params.id);
+router.delete('/itens/:id', async (req, res) => {
+  await req.db.prepare('DELETE FROM bol_itens WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 
 // ─── BOLETINS — HISTÓRICO ─────────────────────────────────────
 
-router.get('/historico', (req, res) => {
-  const rows = req.db.prepare(`
+router.get('/historico', async (req, res) => {
+  const rows = await req.db.prepare(`
     SELECT b.*, c.nome as contrato_nome, c.contratante
     FROM bol_boletins b
     JOIN bol_contratos c ON c.id = b.contrato_id
     ORDER BY b.created_at DESC
   `).all();
   for (const r of rows) {
-    r.nfs = req.db.prepare(`
+    r.nfs = await req.db.prepare(`
       SELECT bn.*, bp.campus_nome, bp.municipio
       FROM bol_boletins_nfs bn
       LEFT JOIN bol_postos bp ON bp.id = bn.posto_id
@@ -217,17 +217,17 @@ router.get('/historico', (req, res) => {
 
 // ─── GERAR BOLETINS (PDF) ─────────────────────────────────────
 
-router.post('/gerar', (req, res) => {
+router.post('/gerar', async (req, res) => {
   try {
     const { contrato_id, competencia, data_emissao, notas_fiscais } = req.body;
     // notas_fiscais = [{ posto_id: X, nf_numero: "440" }, ...]
 
-    const contrato = req.db.prepare('SELECT * FROM bol_contratos WHERE id = ?').get(contrato_id);
+    const contrato = await req.db.prepare('SELECT * FROM bol_contratos WHERE id = ?').get(contrato_id);
     if (!contrato) return res.status(404).json({ error: 'Contrato não encontrado' });
 
-    const postos = req.db.prepare('SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem').all(contrato_id);
+    const postos = await req.db.prepare('SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem').all(contrato_id);
     for (const p of postos) {
-      p.itens = req.db.prepare('SELECT * FROM bol_itens WHERE posto_id = ? ORDER BY ordem').all(p.id);
+      p.itens = await req.db.prepare('SELECT * FROM bol_itens WHERE posto_id = ? ORDER BY ordem').all(p.id);
     }
 
     const periodo = calcularPeriodo(competencia);
@@ -239,7 +239,7 @@ router.post('/gerar', (req, res) => {
     fs.mkdirSync(outputDir, { recursive: true });
 
     // Registrar boletim no banco
-    const bolResult = req.db.prepare(`
+    const bolResult = await req.db.prepare(`
       INSERT INTO bol_boletins (contrato_id, competencia, data_emissao, periodo_inicio, periodo_fim)
       VALUES (?,?,?,?,?)
     `).run(contrato_id, competencia, data_emissao, '', '');
@@ -266,7 +266,7 @@ router.post('/gerar', (req, res) => {
       totalGeral += totalPosto;
 
       // Registrar NF no banco
-      req.db.prepare(`
+      await req.db.prepare(`
         INSERT INTO bol_boletins_nfs (boletim_id, posto_id, nf_numero, valor_total, arquivo_pdf)
         VALUES (?,?,?,?,?)
       `).run(boletimId, posto.id, nfNumero, totalPosto, filepath);
@@ -282,7 +282,7 @@ router.post('/gerar', (req, res) => {
     gerarResumoPDF(dadosResumo, contrato, ano, resumoPath);
 
     // Atualizar total
-    req.db.prepare('UPDATE bol_boletins SET total_geral = ? WHERE id = ?').run(totalGeral, boletimId);
+    await req.db.prepare('UPDATE bol_boletins SET total_geral = ? WHERE id = ?').run(totalGeral, boletimId);
 
     res.json({
       ok: true,
@@ -302,7 +302,7 @@ router.post('/gerar', (req, res) => {
 const MESES_NOME_COMPLETO = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho',
   'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
-router.post('/gerar-boletim', (req, res) => {
+router.post('/gerar-boletim', async (req, res) => {
   try {
     const { contrato_id, competencia } = req.body; // competencia = "2026-03"
     if (!contrato_id || !competencia) {
@@ -311,12 +311,12 @@ router.post('/gerar-boletim', (req, res) => {
     const db = req.db;
 
     // Verificar se já existe
-    const existente = db.prepare('SELECT * FROM bol_boletins WHERE contrato_id=? AND competencia=?').get(contrato_id, competencia);
+    const existente = await db.prepare('SELECT * FROM bol_boletins WHERE contrato_id=? AND competencia=?').get(contrato_id, competencia);
     if (existente) return res.json({ data: existente, novo: false });
 
     // Buscar contrato de boletim para calcular valor base
-    const bc = db.prepare('SELECT * FROM bol_contratos WHERE id=?').get(contrato_id);
-    const ct = bc ? db.prepare('SELECT * FROM contratos WHERE numContrato=?').get(bc.contrato_ref) : null;
+    const bc = await db.prepare('SELECT * FROM bol_contratos WHERE id=?').get(contrato_id);
+    const ct = bc ? await db.prepare('SELECT * FROM contratos WHERE numContrato=?').get(bc.contrato_ref) : null;
     const valor_mensal = ct?.valor_mensal_bruto || 0;
     const valor_base = Math.round(valor_mensal * 100) / 100;
 
@@ -331,7 +331,7 @@ router.post('/gerar-boletim', (req, res) => {
       (contrato_id, competencia, data_emissao, valor_base, valor_total, glosas, acrescimos, discriminacao, status, nfse_status)
       VALUES (?, ?, date('now'), ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')`);
     const info = stmt.run(contrato_id, competencia, valor_base, valor_base, discriminacao);
-    const novo = db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(info.lastInsertRowid);
+    const novo = await db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(info.lastInsertRowid);
     res.json({ data: novo, novo: true });
   } catch (err) {
     console.error('Erro ao gerar boletim:', err);
@@ -341,11 +341,11 @@ router.post('/gerar-boletim', (req, res) => {
 
 // ─── AJUSTAR BOLETIM (glosas, acréscimos, discriminação) ───────
 
-router.patch('/:id/ajustar', (req, res) => {
+router.patch('/:id/ajustar', async (req, res) => {
   try {
     const db = req.db;
     const { glosas, acrescimos, discriminacao, obs } = req.body;
-    const bol = db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id);
+    const bol = await db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id);
     if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
 
     const g = parseFloat(glosas ?? bol.glosas ?? 0);
@@ -353,13 +353,13 @@ router.patch('/:id/ajustar', (req, res) => {
     const base = bol.valor_base || bol.valor_total || 0;
     const novo_total = Math.round((base - g + a) * 100) / 100;
 
-    db.prepare(`UPDATE bol_boletins SET
+    await db.prepare(`UPDATE bol_boletins SET
       glosas=?, acrescimos=?, valor_total=?,
       discriminacao=COALESCE(?,discriminacao), obs=COALESCE(?,obs),
-      updated_at=datetime('now')
+      updated_at=NOW()
       WHERE id=?`).run(g, a, novo_total, discriminacao || null, obs || null, req.params.id);
 
-    res.json({ data: db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id) });
+    res.json({ data: await db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id) });
   } catch (err) {
     console.error('Erro ao ajustar boletim:', err);
     res.status(500).json({ error: err.message });
@@ -425,11 +425,11 @@ router.post('/:id/emitir-nfse', async (req, res) => {
 
     // FIX4: RPS idempotente — reutiliza rps_numero gravado se for retentativa
     // Garante coluna rps_numero
-    try { db.prepare(`ALTER TABLE bol_boletins ADD COLUMN rps_numero TEXT`).run(); } catch (_) {}
+    try { await db.prepare(`ALTER TABLE bol_boletins ADD COLUMN rps_numero TEXT`).run(); } catch (_) {}
     const rpsNum = bol.rps_numero || String(bol.id).padStart(10, '0');
     // Persiste rps_numero imediatamente para garantir idempotência em retentativas
     if (!bol.rps_numero) {
-      db.prepare(`UPDATE bol_boletins SET rps_numero=? WHERE id=?`).run(rpsNum, bol.id);
+      await db.prepare(`UPDATE bol_boletins SET rps_numero=? WHERE id=?`).run(rpsNum, bol.id);
     }
 
     const today  = new Date().toISOString().substring(0, 10);
@@ -454,7 +454,7 @@ router.post('/:id/emitir-nfse', async (req, res) => {
     }
 
     // Registrar tentativa
-    db.prepare(`UPDATE bol_boletins SET nfse_status='ENVIANDO', nfse_erro=NULL, updated_at=datetime('now') WHERE id=?`)
+    await db.prepare(`UPDATE bol_boletins SET nfse_status='ENVIANDO', nfse_erro=NULL, updated_at=NOW() WHERE id=?`)
       .run(bol.id);
 
     // Fazer chamada interna ao /api/webiss/emitir
@@ -509,14 +509,14 @@ router.post('/:id/emitir-nfse', async (req, res) => {
       const nfseNum = result.nfse.numero;
       const today   = new Date().toISOString().slice(0, 10);
 
-      db.prepare(`UPDATE bol_boletins SET
-        nfse_status='EMITIDA', nfse_numero=?, nfse_data_emissao=datetime('now'),
-        nfse_xml=?, nfse_erro=NULL, status='emitido', updated_at=datetime('now')
+      await db.prepare(`UPDATE bol_boletins SET
+        nfse_status='EMITIDA', nfse_numero=?, nfse_data_emissao=NOW(),
+        nfse_xml=?, nfse_erro=NULL, status='emitido', updated_at=NOW()
         WHERE id=?`).run(nfseNum, JSON.stringify(result.nfse), bol.id);
 
       // ── Auto-sync: cria NF em notas_fiscais se ainda não existe ──
       try {
-        const jaExiste = db.prepare(`SELECT id FROM notas_fiscais WHERE numero=? OR webiss_numero_nfse=?`).get(nfseNum, nfseNum);
+        const jaExiste = await db.prepare(`SELECT id FROM notas_fiscais WHERE numero=? OR webiss_numero_nfse=?`).get(nfseNum, nfseNum);
         if (!jaExiste) {
           const nfse = result.nfse;
           // FIX1: usa valor_efetivo (COALESCE já aplicado) como fallback
@@ -532,10 +532,10 @@ router.post('/:id/emitir-nfse', async (req, res) => {
           const cnpjTomador  = tomadorCnpj ? formatCnpj(tomadorCnpj) : '';
 
           // Garante colunas webiss_numero_nfse e discriminacao
-          try { db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN webiss_numero_nfse TEXT`).run(); } catch (_) {}
-          try { db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN discriminacao TEXT`).run(); } catch (_) {}
+          try { await db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN webiss_numero_nfse TEXT`).run(); } catch (_) {}
+          try { await db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN discriminacao TEXT`).run(); } catch (_) {}
 
-          db.prepare(`INSERT OR IGNORE INTO notas_fiscais
+          await db.prepare(`INSERT INTO notas_fiscais
             (numero, competencia, cidade, tomador, cnpj_tomador,
              valor_bruto, valor_liquido,
              inss, ir, iss, csll, pis, cofins, retencao,
@@ -584,7 +584,7 @@ router.post('/:id/emitir-nfse', async (req, res) => {
       erroMsg = result.error;
     }
 
-    db.prepare(`UPDATE bol_boletins SET nfse_status='ERRO', nfse_erro=?, updated_at=datetime('now') WHERE id=?`)
+    await db.prepare(`UPDATE bol_boletins SET nfse_status='ERRO', nfse_erro=?, updated_at=NOW() WHERE id=?`)
       .run(erroMsg, bol.id);
     return res.status(422).json({ error: erroMsg, detalhes: result });
 
@@ -592,7 +592,7 @@ router.post('/:id/emitir-nfse', async (req, res) => {
     console.error('Erro ao emitir NFS-e:', e);
     const erroMsg = e.message || String(e);
     try {
-      db.prepare(`UPDATE bol_boletins SET nfse_status='ERRO', nfse_erro=?, updated_at=datetime('now') WHERE id=?`)
+      await db.prepare(`UPDATE bol_boletins SET nfse_status='ERRO', nfse_erro=?, updated_at=NOW() WHERE id=?`)
         .run(erroMsg, req.params.id);
     } catch (_) {}
     res.status(500).json({ error: 'Falha na emissão: ' + erroMsg });
@@ -601,8 +601,8 @@ router.post('/:id/emitir-nfse', async (req, res) => {
 
 // ─── DOWNLOAD PDF ──────────────────────────────────────────────
 
-router.get('/download/:boletimNfId', (req, res) => {
-  const nf = req.db.prepare('SELECT * FROM bol_boletins_nfs WHERE id = ?').get(req.params.boletimNfId);
+router.get('/download/:boletimNfId', async (req, res) => {
+  const nf = await req.db.prepare('SELECT * FROM bol_boletins_nfs WHERE id = ?').get(req.params.boletimNfId);
   if (!nf || !nf.arquivo_pdf) return res.status(404).json({ error: 'PDF não encontrado' });
   if (!fs.existsSync(nf.arquivo_pdf)) return res.status(404).json({ error: 'Arquivo não existe no disco' });
   res.download(nf.arquivo_pdf);
@@ -610,10 +610,10 @@ router.get('/download/:boletimNfId', (req, res) => {
 
 // ─── PACOTE FISCAL (ZIP: boletim PDF + NFS-e espelho + XML + ofício) ──
 // Agrupa todos os artefatos do boletim para envio ao gestor/fiscal do contrato
-router.get('/:id/pacote-fiscal.zip', (req, res) => {
+router.get('/:id/pacote-fiscal.zip', async (req, res) => {
   try {
     const db = req.db;
-    const bol = db.prepare(`
+    const bol = await db.prepare(`
       SELECT b.*, bc.nome AS contrato_nome, bc.contratante, bc.numero_contrato,
              bc.processo, bc.pregao, bc.orgao, bc.insc_municipal AS tomador_cnpj,
              bc.empresa_razao, bc.empresa_cnpj, bc.empresa_endereco,
@@ -625,7 +625,7 @@ router.get('/:id/pacote-fiscal.zip', (req, res) => {
 
     if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
 
-    const nfs = db.prepare(`
+    const nfs = await db.prepare(`
       SELECT bn.*, bp.campus_nome, bp.municipio
       FROM bol_boletins_nfs bn
       LEFT JOIN bol_postos bp ON bp.id = bn.posto_id
@@ -1141,7 +1141,7 @@ function gerarOficioEncaminhamentoBuffer(bol, nfseNum, nfs) {
 // ─── PAINEL DE FATURAMENTO MENSAL ──────────────────────────────
 // GET /api/boletins/painel-faturamento?mes=YYYY-MM
 // Retorna todos os contratos ativos com status do boletim no mês
-router.get('/painel-faturamento', (req, res) => {
+router.get('/painel-faturamento', async (req, res) => {
   try {
     const { mes } = req.query; // "2026-04"
     if (!mes || !/^\d{4}-\d{2}$/.test(mes)) {
@@ -1169,7 +1169,7 @@ router.get('/painel-faturamento', (req, res) => {
 
     const resultado = contratos.map(bc => {
       // FIX1: COALESCE(valor_total, total_geral)
-      const boletim = db.prepare(`
+      const boletim = await db.prepare(`
         SELECT *, COALESCE(valor_total, total_geral, 0) AS valor_efetivo
         FROM bol_boletins
         WHERE contrato_id = ? AND competencia = ?
@@ -1232,7 +1232,7 @@ router.get('/painel-faturamento', (req, res) => {
 // ─── GERAR MÊS (batch) ─────────────────────────────────────────
 // POST /api/boletins/gerar-mes  { mes: "YYYY-MM" }
 // Cria boletins em rascunho para TODOS os contratos ativos sem boletim no mês
-router.post('/gerar-mes', (req, res) => {
+router.post('/gerar-mes', async (req, res) => {
   try {
     const { mes } = req.body;
     if (!mes || !/^\d{4}-\d{2}$/.test(mes)) {
@@ -1240,7 +1240,7 @@ router.post('/gerar-mes', (req, res) => {
     }
     const db = req.db;
 
-    const contratos = db.prepare(`
+    const contratos = await db.prepare(`
       SELECT bc.*, c.valor_mensal_bruto
       FROM bol_contratos bc
       LEFT JOIN contratos c ON bc.contrato_ref = c.numContrato
@@ -1256,9 +1256,9 @@ router.post('/gerar-mes', (req, res) => {
 
     let criados = 0, existentes = 0;
 
-    const criar = db.transaction(() => {
+    const criar = db.transaction(async () => {
       for (const bc of contratos) {
-        const existe = db.prepare('SELECT id FROM bol_boletins WHERE contrato_id=? AND competencia=?').get(bc.id, mes);
+        const existe = await db.prepare('SELECT id FROM bol_boletins WHERE contrato_id=? AND competencia=?').get(bc.id, mes);
         if (existe) { existentes++; continue; }
 
         const valor_base = Math.round((bc.valor_mensal_bruto || 0) * 100) / 100;
@@ -1281,16 +1281,16 @@ router.post('/gerar-mes', (req, res) => {
 
 // ─── APROVAR BOLETIM ───────────────────────────────────────────
 // POST /api/boletins/:id/aprovar
-router.post('/:id/aprovar', (req, res) => {
+router.post('/:id/aprovar', async (req, res) => {
   try {
     const db = req.db;
-    const bol = db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id);
+    const bol = await db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id);
     if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
     if (bol.nfse_status === 'EMITIDA') {
       return res.status(400).json({ error: 'NFS-e já emitida — não é possível alterar status' });
     }
-    db.prepare(`UPDATE bol_boletins SET status='aprovado', updated_at=datetime('now') WHERE id=?`).run(req.params.id);
-    res.json({ ok: true, data: db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id) });
+    await db.prepare(`UPDATE bol_boletins SET status='aprovado', updated_at=NOW() WHERE id=?`).run(req.params.id);
+    res.json({ ok: true, data: await db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1298,15 +1298,15 @@ router.post('/:id/aprovar', (req, res) => {
 
 // ─── REABRIR BOLETIM ──────────────────────────────────────────
 // POST /api/boletins/:id/reabrir
-router.post('/:id/reabrir', (req, res) => {
+router.post('/:id/reabrir', async (req, res) => {
   try {
     const db = req.db;
-    const bol = db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id);
+    const bol = await db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id);
     if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
     if (bol.nfse_status === 'EMITIDA') {
       return res.status(400).json({ error: 'NFS-e já emitida — não é possível reabrir' });
     }
-    db.prepare(`UPDATE bol_boletins SET status='rascunho', updated_at=datetime('now') WHERE id=?`).run(req.params.id);
+    await db.prepare(`UPDATE bol_boletins SET status='rascunho', updated_at=NOW() WHERE id=?`).run(req.params.id);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1315,11 +1315,11 @@ router.post('/:id/reabrir', (req, res) => {
 
 // ─── HISTÓRICO simplificado por mês ───────────────────────────
 // GET /api/boletins/historico-mes?mes=YYYY-MM
-router.get('/historico-mes', (req, res) => {
+router.get('/historico-mes', async (req, res) => {
   const { mes } = req.query;
   if (!mes) return res.status(400).json({ error: 'mes obrigatório' });
   try {
-    const rows = req.db.prepare(`
+    const rows = await req.db.prepare(`
       SELECT b.*, bc.nome as contrato_nome, bc.contratante
       FROM bol_boletins b
       JOIN bol_contratos bc ON bc.id = b.contrato_id

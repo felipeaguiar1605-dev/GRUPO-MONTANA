@@ -30,7 +30,7 @@ const STATUS_NF_PAGA = [
   STATUS.CONCILIADO,
 ];
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const db = req.db;
     const competencia = (req.query.competencia || hojeMes()).slice(0, 7);
@@ -42,7 +42,7 @@ router.get('/', (req, res) => {
     // Filtro robusto: coluna `status` é texto livre (tem 'Encerrado', 'encerrado',
     // 'Ativo', 'EMERGENCIAL', emojis como '🔴 CRÍTICO', etc). Casa-insensitivo
     // + verifica se o próprio numContrato contém '— encerrado' como label
-    const contratosAtivos = db.prepare(`
+    const contratosAtivos = await db.prepare(`
       SELECT numContrato, contrato, orgao, valor_mensal_bruto
       FROM contratos
       WHERE LOWER(COALESCE(status,'')) NOT LIKE '%encerrad%'
@@ -53,7 +53,7 @@ router.get('/', (req, res) => {
     // ───────── ETAPA 2: Boletins da competência ─────────
     let boletinsMes = [];
     try {
-      boletinsMes = db.prepare(`
+      boletinsMes = await db.prepare(`
         SELECT b.id, b.contrato_id, b.competencia, b.total_geral AS valor_total,
                b.status AS status_boletim,
                bc.nome AS contrato_ref, bc.contratante AS orgao, bc.numero_contrato
@@ -70,12 +70,12 @@ router.get('/', (req, res) => {
     }
 
     // ───────── ETAPA 3: NFs emitidas na competência ─────────
-    const nfsMes = db.prepare(`
+    const nfsMes = await db.prepare(`
       SELECT id, numero, tomador, contrato_ref, data_emissao, data_pagamento,
              valor_bruto, valor_liquido, status_conciliacao, extrato_id,
              inss, ir, iss, csll, pis, cofins, COALESCE(retencao, 0) AS retencao
       FROM notas_fiscais
-      WHERE strftime('%Y-%m', data_emissao) = ?
+      WHERE to_char((data_emissao)::date, 'YYYY-MM') = ?
         AND COALESCE(valor_bruto, 0) > 0
         AND COALESCE(status_conciliacao,'') NOT IN ('ASSESSORIA','IGNORAR','CANCELADA')
     `).all(competencia);
@@ -83,7 +83,7 @@ router.get('/', (req, res) => {
     // ───────── ETAPA 4+5+6: cruzar NF com comprovantes ─────────
     let nfsComComprovante = new Set();
     try {
-      const rows = db.prepare(`
+      const rows = await db.prepare(`
         SELECT DISTINCT destino_id
         FROM comprovante_vinculos
         WHERE tipo_destino = 'NF'
@@ -143,7 +143,7 @@ router.get('/', (req, res) => {
     let retencaoApuradaComprovantes = 0;
     let nfsComRetencaoApurada = 0;
     try {
-      const rows = db.prepare(`
+      const rows = await db.prepare(`
         SELECT cv.destino_id AS nf_id,
                SUM(cv.valor_vinculado) AS valor_recebido
         FROM comprovante_vinculos cv
@@ -250,7 +250,7 @@ router.get('/', (req, res) => {
 });
 
 // ── GET /api/ciclo/aging — Aging de recebíveis por contrato (ano corrente) ────
-router.get('/aging', (req, res) => {
+router.get('/aging', async (req, res) => {
   try {
     const db   = req.db;
     const hoje = new Date().toISOString().slice(0, 10);

@@ -8,9 +8,9 @@ const companyMw = require('../companyMiddleware');
 const router = express.Router();
 router.use(companyMw);
 
-function getConfig(db) {
+async function getConfig(db) {
   try {
-    const rows = db.prepare("SELECT chave, valor FROM configuracoes WHERE chave LIKE 'whatsapp_%'").all();
+    const rows = await db.prepare("SELECT chave, valor FROM configuracoes WHERE chave LIKE 'whatsapp_%'").all();
     const cfg = {};
     rows.forEach(r => { cfg[r.chave.replace('whatsapp_', '')] = r.valor; });
     return cfg;
@@ -49,26 +49,26 @@ async function enviarMensagem(cfg, numero, mensagem) {
 }
 
 // GET /api/whatsapp/config
-router.get('/config', (req, res) => {
+router.get('/config', async (req, res) => {
   const cfg = getConfig(req.db);
   if (cfg.token) cfg.token = '••••••••';
   res.json(cfg);
 });
 
 // PUT /api/whatsapp/config
-router.put('/config', (req, res) => {
+router.put('/config', async (req, res) => {
   const { provider, instance_id, token, client_token, api_url, numero_destino } = req.body;
   // Garantir que tabela configuracoes existe
   try {
-    req.db.prepare(`CREATE TABLE IF NOT EXISTS configuracoes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+    await req.db.prepare(`CREATE TABLE IF NOT EXISTS configuracoes (
+      id BIGSERIAL PRIMARY KEY,
       chave TEXT UNIQUE NOT NULL,
       valor TEXT,
-      updated_at TEXT DEFAULT (datetime('now','localtime'))
+      updated_at TIMESTAMP DEFAULT NOW()
     )`).run();
   } catch(e) {}
-  const upsert = req.db.prepare("INSERT OR REPLACE INTO configuracoes (chave,valor,updated_at) VALUES (@chave,@valor,datetime('now'))");
-  const t = req.db.transaction(() => {
+  const upsert = req.db.prepare("INSERT INTO configuracoes (chave,valor,updated_at) VALUES (@chave,@valor,NOW())");
+  const t = req.db.transaction(async () => {
     if (provider)        upsert.run({ chave:'whatsapp_provider',       valor: provider });
     if (instance_id)     upsert.run({ chave:'whatsapp_instance_id',    valor: instance_id });
     if (token && token !== '••••••••') upsert.run({ chave:'whatsapp_token', valor: token });
@@ -106,8 +106,8 @@ router.post('/enviar-alertas', async (req, res) => {
 
   let certidoes = [];
   let contratos = [];
-  try { certidoes = db.prepare("SELECT tipo, data_validade FROM certidoes WHERE data_validade<=? AND data_validade>=? ORDER BY data_validade").all(em15, hoje); } catch(e) {}
-  try { contratos = db.prepare("SELECT numContrato, vigencia_fim FROM contratos WHERE vigencia_fim<=? AND vigencia_fim>=? ORDER BY vigencia_fim").all(em30, hoje); } catch(e) {}
+  try { certidoes = await db.prepare("SELECT tipo, data_validade FROM certidoes WHERE data_validade<=? AND data_validade>=? ORDER BY data_validade").all(em15, hoje); } catch(e) {}
+  try { contratos = await db.prepare("SELECT numContrato, vigencia_fim FROM contratos WHERE vigencia_fim<=? AND vigencia_fim>=? ORDER BY vigencia_fim").all(em30, hoje); } catch(e) {}
 
   if (certidoes.length === 0 && contratos.length === 0) {
     return res.json({ ok: true, enviado: false, message: 'Sem alertas pendentes' });
@@ -128,7 +128,7 @@ router.post('/enviar-alertas', async (req, res) => {
   try {
     await enviarMensagem(cfg, numero, msg);
     // Log
-    try { db.prepare("INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('whatsapp',?,?,?,'enviado')").run(numero, 'Alertas Montana', msg); } catch(e2) {}
+    try { await db.prepare("INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('whatsapp',?,?,?,'enviado')").run(numero, 'Alertas Montana', msg); } catch(e2) {}
     res.json({ ok: true, enviado: true, numero, certidoes: certidoes.length, contratos: contratos.length });
   } catch(e) {
     res.status(500).json({ error: e.message });

@@ -2,7 +2,7 @@
  * Montana — Middleware de resolução de empresa
  * Lê header X-Company ou query ?company= e injeta req.db, req.company, req.companyKey.
  */
-const { getDb, COMPANIES } = require('./db');
+const { getDb, COMPANIES } = require('./db_pg');
 
 module.exports = function companyMiddleware(req, res, next) {
   const companyKey = (req.headers['x-company'] || req.query.company || 'seguranca').toLowerCase();

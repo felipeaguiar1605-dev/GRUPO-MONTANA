@@ -107,7 +107,7 @@ function faturamentoNaoEmitido(db, company, opcoes = {}) {
     const realizadoRow = db.prepare(`
       SELECT COALESCE(SUM(valor_bruto),0) v, COUNT(*) n
       FROM notas_fiscais
-      WHERE strftime('%Y-%m', data_emissao) = ?
+      WHERE to_char((data_emissao)::date, 'YYYY-MM') = ?
         AND (contrato_ref = ? OR contrato_ref LIKE ?)
     `).get(competencia, c.numContrato, `%${c.numContrato}%`);
 

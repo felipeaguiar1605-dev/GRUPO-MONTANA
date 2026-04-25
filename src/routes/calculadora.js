@@ -79,11 +79,11 @@ function calcularPosto(dados) {
 }
 
 // POST /api/calculadora/calcular
-router.post('/calcular', (req, res) => {
+router.post('/calcular', async (req, res) => {
   const resultado = calcularPosto(req.body);
 
   if (req.body.salvar && req.body.nome) {
-    const r = req.db.prepare(`
+    const r = await req.db.prepare(`
       INSERT INTO orcamentos_posto (nome,tipo_posto,salario_base,dados_json,preco_mensal,preco_anual)
       VALUES (@nome,@tipo_posto,@salario_base,@dados_json,@preco_mensal,@preco_anual)
     `).run({
@@ -100,8 +100,8 @@ router.post('/calcular', (req, res) => {
 });
 
 // GET /api/calculadora/orcamentos
-router.get('/orcamentos', (req, res) => {
-  const rows = req.db.prepare(`
+router.get('/orcamentos', async (req, res) => {
+  const rows = await req.db.prepare(`
     SELECT id,nome,tipo_posto,salario_base,preco_mensal,preco_anual,created_at
     FROM orcamentos_posto ORDER BY created_at DESC
   `).all();
@@ -109,16 +109,16 @@ router.get('/orcamentos', (req, res) => {
 });
 
 // GET /api/calculadora/orcamentos/:id
-router.get('/orcamentos/:id', (req, res) => {
-  const row = req.db.prepare(`SELECT * FROM orcamentos_posto WHERE id=?`).get(req.params.id);
+router.get('/orcamentos/:id', async (req, res) => {
+  const row = await req.db.prepare(`SELECT * FROM orcamentos_posto WHERE id=?`).get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Não encontrado' });
   try { row.dados = JSON.parse(row.dados_json); } catch(e) { row.dados = {}; }
   res.json(row);
 });
 
 // DELETE /api/calculadora/orcamentos/:id
-router.delete('/orcamentos/:id', (req, res) => {
-  req.db.prepare(`DELETE FROM orcamentos_posto WHERE id=?`).run(req.params.id);
+router.delete('/orcamentos/:id', async (req, res) => {
+  await req.db.prepare(`DELETE FROM orcamentos_posto WHERE id=?`).run(req.params.id);
   res.json({ ok: true });
 });
 
@@ -126,7 +126,7 @@ router.delete('/orcamentos/:id', (req, res) => {
 router.get('/exportar/:id', async (req, res) => {
   try {
     const ExcelJS = require('exceljs');
-    const row = req.db.prepare(`SELECT * FROM orcamentos_posto WHERE id=?`).get(req.params.id);
+    const row = await req.db.prepare(`SELECT * FROM orcamentos_posto WHERE id=?`).get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Não encontrado' });
 
     let dados = {};

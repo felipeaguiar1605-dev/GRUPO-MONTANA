@@ -37,9 +37,9 @@ const DEPT_CONTRATO = {
 
 // ─── Ensure tables ─────────────────────────────────────────────────────────
 
-function ensureTables(db) {
-  db.prepare(`CREATE TABLE IF NOT EXISTS volus_pedidos (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+async function await ensureTables(db) {
+  await db.prepare(`CREATE TABLE IF NOT EXISTS volus_pedidos (
+    id              BIGSERIAL PRIMARY KEY,
     departamento    TEXT NOT NULL,
     contrato_ref    TEXT DEFAULT '',
     competencia     TEXT NOT NULL,
@@ -49,11 +49,11 @@ function ensureTables(db) {
     num_ativos      INTEGER DEFAULT 0,
     status          TEXT DEFAULT 'PAGO',
     obs             TEXT DEFAULT '',
-    created_at      TEXT DEFAULT (datetime('now'))
+    created_at      TIMESTAMP DEFAULT NOW()
   )`).run();
 
-  db.prepare(`CREATE TABLE IF NOT EXISTS volus_funcionarios (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  await db.prepare(`CREATE TABLE IF NOT EXISTS volus_funcionarios (
+    id              BIGSERIAL PRIMARY KEY,
     nome            TEXT NOT NULL,
     cpf             TEXT DEFAULT '',
     departamento    TEXT DEFAULT '',
@@ -62,26 +62,26 @@ function ensureTables(db) {
     valor_vr        REAL DEFAULT 0,
     status          TEXT DEFAULT 'ATIVO',
     data_cadastro   TEXT DEFAULT '',
-    updated_at      TEXT DEFAULT (datetime('now')),
+    updated_at      TIMESTAMP DEFAULT NOW(),
     UNIQUE(cpf, departamento)
   )`).run();
 }
 
 // ─── GET /api/volus/status ─────────────────────────────────────────────────
 
-router.get('/status', (req, res) => {
-  ensureTables(req.db);
-  const pedidos = req.db.prepare(`
+router.get('/status', async (req, res) => {
+  await ensureTables(req.db);
+  const pedidos = await req.db.prepare(`
     SELECT COUNT(*) cnt, COALESCE(SUM(valor_total),0) total,
            MAX(competencia) ultima_comp
     FROM volus_pedidos
   `).get();
-  const funcs = req.db.prepare(`
+  const funcs = await req.db.prepare(`
     SELECT COUNT(*) total,
            SUM(CASE WHEN status='ATIVO' THEN 1 ELSE 0 END) ativos
     FROM volus_funcionarios
   `).get();
-  const porDept = req.db.prepare(`
+  const porDept = await req.db.prepare(`
     SELECT departamento, contrato_ref,
            COUNT(*) pedidos, COALESCE(SUM(valor_total),0) total
     FROM volus_pedidos
@@ -100,22 +100,22 @@ router.get('/status', (req, res) => {
 // ─── POST /api/volus/pedidos — importa batch de pedidos ───────────────────
 // Body: { pedidos: [{ departamento, competencia, data_pedido, valor_total, num_cartoes, num_ativos, status }] }
 
-router.post('/pedidos', (req, res) => {
-  ensureTables(req.db);
+router.post('/pedidos', async (req, res) => {
+  await ensureTables(req.db);
   const { pedidos } = req.body;
   if (!Array.isArray(pedidos) || pedidos.length === 0) {
     return res.status(400).json({ error: 'pedidos deve ser array não vazio' });
   }
 
   const ins = req.db.prepare(`
-    INSERT OR REPLACE INTO volus_pedidos
+    INSERT INTO volus_pedidos
       (departamento, contrato_ref, competencia, data_pedido, valor_total, num_cartoes, num_ativos, status, obs)
     VALUES
       (@departamento, @contrato_ref, @competencia, @data_pedido, @valor_total, @num_cartoes, @num_ativos, @status, @obs)
   `);
 
   let imported = 0;
-  req.db.transaction(() => {
+  req.db.transaction(async () => {
     for (const p of pedidos) {
       const dept = (p.departamento || '').toUpperCase().trim();
       ins.run({
@@ -138,8 +138,8 @@ router.post('/pedidos', (req, res) => {
 
 // ─── GET /api/volus/resumo — resumo por departamento e competência ────────
 
-router.get('/resumo', (req, res) => {
-  ensureTables(req.db);
+router.get('/resumo', async (req, res) => {
+  await ensureTables(req.db);
   const { ano, mes } = req.query;
   let where = '1=1';
   const params = {};
@@ -151,7 +151,7 @@ router.get('/resumo', (req, res) => {
     params.comp = `${ano}-%`;
   }
 
-  const porDept = req.db.prepare(`
+  const porDept = await req.db.prepare(`
     SELECT departamento, contrato_ref, competencia,
            COALESCE(SUM(valor_total),0) valor_total,
            COALESCE(SUM(num_cartoes),0) num_cartoes,
@@ -162,7 +162,7 @@ router.get('/resumo', (req, res) => {
     ORDER BY competencia DESC, valor_total DESC
   `).all(params);
 
-  const porMes = req.db.prepare(`
+  const porMes = await req.db.prepare(`
     SELECT competencia,
            COALESCE(SUM(valor_total),0) total,
            COUNT(DISTINCT departamento) contratos
@@ -171,7 +171,7 @@ router.get('/resumo', (req, res) => {
     GROUP BY competencia ORDER BY competencia
   `).all(params);
 
-  const totais = req.db.prepare(`
+  const totais = await req.db.prepare(`
     SELECT COALESCE(SUM(valor_total),0) total,
            COALESCE(SUM(num_ativos),0) beneficiarios
     FROM volus_pedidos WHERE ${where}
@@ -182,22 +182,22 @@ router.get('/resumo', (req, res) => {
 
 // ─── POST /api/volus/funcionarios — importa lista de beneficiários ────────
 
-router.post('/funcionarios', (req, res) => {
-  ensureTables(req.db);
+router.post('/funcionarios', async (req, res) => {
+  await ensureTables(req.db);
   const { funcionarios } = req.body;
   if (!Array.isArray(funcionarios) || funcionarios.length === 0) {
     return res.status(400).json({ error: 'funcionarios deve ser array não vazio' });
   }
 
   const ins = req.db.prepare(`
-    INSERT OR REPLACE INTO volus_funcionarios
+    INSERT INTO volus_funcionarios
       (nome, cpf, departamento, contrato_ref, valor_va, valor_vr, status, data_cadastro)
     VALUES
       (@nome, @cpf, @departamento, @contrato_ref, @valor_va, @valor_vr, @status, @data_cadastro)
   `);
 
   let imported = 0;
-  req.db.transaction(() => {
+  req.db.transaction(async () => {
     for (const f of funcionarios) {
       const dept = (f.departamento || '').toUpperCase().trim();
       ins.run({
@@ -219,19 +219,19 @@ router.post('/funcionarios', (req, res) => {
 
 // ─── GET /api/volus/funcionarios ──────────────────────────────────────────
 
-router.get('/funcionarios', (req, res) => {
-  ensureTables(req.db);
+router.get('/funcionarios', async (req, res) => {
+  await ensureTables(req.db);
   const { departamento, contrato } = req.query;
   let where = '1=1';
   const params = {};
   if (departamento) { where += ` AND departamento=@dep`; params.dep = departamento.toUpperCase(); }
   if (contrato)     { where += ` AND contrato_ref LIKE @ctr`; params.ctr = `%${contrato}%`; }
 
-  const rows = req.db.prepare(`
+  const rows = await req.db.prepare(`
     SELECT * FROM volus_funcionarios WHERE ${where} ORDER BY departamento, nome
   `).all(params);
 
-  const totais = req.db.prepare(`
+  const totais = await req.db.prepare(`
     SELECT departamento, contrato_ref,
            COUNT(*) total,
            SUM(CASE WHEN status='ATIVO' THEN 1 ELSE 0 END) ativos,
@@ -246,11 +246,11 @@ router.get('/funcionarios', (req, res) => {
 // ─── POST /api/volus/auto-categorizar — categoriza débitos bancários ──────
 // Busca débitos com "VOLUS" no histórico e os categoriza como Vale Alimentação
 
-router.post('/auto-categorizar', (req, res) => {
-  ensureTables(req.db);
+router.post('/auto-categorizar', async (req, res) => {
+  await ensureTables(req.db);
 
   // Encontra débitos não categorizados com Volus no histórico
-  const debitos = req.db.prepare(`
+  const debitos = await req.db.prepare(`
     SELECT e.id, e.data_iso, e.debito, e.historico,
            e.status_conciliacao
     FROM extratos e
@@ -274,11 +274,11 @@ router.post('/auto-categorizar', (req, res) => {
   let categorizados = 0;
   const detalhes = [];
 
-  req.db.transaction(() => {
+  req.db.transaction(async () => {
     for (const deb of debitos) {
       const comp = deb.data_iso.substring(0, 7);
       // Tenta casar com pedido Volus do mesmo mês pelo valor
-      const pedido = req.db.prepare(`
+      const pedido = await req.db.prepare(`
         SELECT departamento, contrato_ref, valor_total
         FROM volus_pedidos
         WHERE competencia = ?

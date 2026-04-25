@@ -9,15 +9,15 @@ const router = express.Router();
 router.use(companyMw);
 
 // ─── Config SMTP ─────────────────────────────────────────────────
-function getSmtp(db) {
-  const rows = db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'smtp_%'`).all();
+async function getSmtp(db) {
+  const rows = await db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'smtp_%'`).all();
   const smtp = {};
   rows.forEach(r => { smtp[r.chave.replace('smtp_', '')] = r.valor; });
   return smtp;
 }
 
 // GET /api/notificacoes/smtp
-router.get('/smtp', (req, res) => {
+router.get('/smtp', async (req, res) => {
   const smtp = getSmtp(req.db);
   // Não retornar a senha em texto puro — mascarar
   if (smtp.pass) smtp.pass = '••••••••';
@@ -25,10 +25,10 @@ router.get('/smtp', (req, res) => {
 });
 
 // PUT /api/notificacoes/smtp
-router.put('/smtp', (req, res) => {
+router.put('/smtp', async (req, res) => {
   const { host, port, user, pass, from, to } = req.body;
-  const upsert = req.db.prepare(`INSERT OR REPLACE INTO configuracoes (chave,valor,updated_at) VALUES (@chave,@valor,datetime('now'))`);
-  const trans = req.db.transaction(() => {
+  const upsert = req.db.prepare(`INSERT INTO configuracoes (chave,valor,updated_at) VALUES (@chave,@valor,NOW())`);
+  const trans = req.db.transaction(async () => {
     if (host !== undefined) upsert.run({ chave:'smtp_host',  valor: host       || '' });
     if (port !== undefined) upsert.run({ chave:'smtp_port',  valor: String(port|| 587) });
     if (user !== undefined) upsert.run({ chave:'smtp_user',  valor: user        || '' });
@@ -36,18 +36,18 @@ router.put('/smtp', (req, res) => {
     if (from !== undefined) upsert.run({ chave:'smtp_from',  valor: from        || '' });
     if (to   !== undefined) upsert.run({ chave:'smtp_to',    valor: to          || '' });
   });
-  trans();
+  await trans();
   res.json({ ok: true });
 });
 
 // GET /api/notificacoes/log
-router.get('/log', (req, res) => {
-  const rows = req.db.prepare(`SELECT * FROM notificacoes_log ORDER BY created_at DESC LIMIT 100`).all();
+router.get('/log', async (req, res) => {
+  const rows = await req.db.prepare(`SELECT * FROM notificacoes_log ORDER BY created_at DESC LIMIT 100`).all();
   res.json({ data: rows, total: rows.length });
 });
 
 // GET /api/notificacoes/preview — lista alertas pendentes sem enviar
-router.get('/preview', (req, res) => {
+router.get('/preview', async (req, res) => {
   const hoje = new Date().toISOString().split('T')[0];
   const em15 = new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0];
   const em30 = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
@@ -56,15 +56,15 @@ router.get('/preview', (req, res) => {
 
   const ha60 = new Date(Date.now() - 60 * 86400000).toISOString().split('T')[0];
 
-  const certidoes  = req.db.prepare(`SELECT tipo,numero,data_validade FROM certidoes WHERE data_validade<=@em15 AND data_validade>=@hoje ORDER BY data_validade`).all({ em15, hoje });
-  const contratos  = req.db.prepare(`SELECT numContrato,contrato,vigencia_fim FROM contratos WHERE vigencia_fim<=@em30 AND vigencia_fim>=@hoje ORDER BY vigencia_fim`).all({ em30, hoje });
-  const pagAtras   = req.db.prepare(`SELECT COUNT(*) n FROM despesas WHERE status='PENDENTE' AND data_iso<=@ha30`).get({ ha30 });
-  const licitacoes = req.db.prepare(`SELECT orgao,numero_edital,data_abertura FROM licitacoes WHERE data_abertura>=@hoje AND data_abertura<=@em5 AND status IN ('em análise','proposta enviada') ORDER BY data_abertura`).all({ hoje, em5 });
+  const certidoes  = await req.db.prepare(`SELECT tipo,numero,data_validade FROM certidoes WHERE data_validade<=@em15 AND data_validade>=@hoje ORDER BY data_validade`).all({ em15, hoje });
+  const contratos  = await req.db.prepare(`SELECT numContrato,contrato,vigencia_fim FROM contratos WHERE vigencia_fim<=@em30 AND vigencia_fim>=@hoje ORDER BY vigencia_fim`).all({ em30, hoje });
+  const pagAtras   = await req.db.prepare(`SELECT COUNT(*) n FROM despesas WHERE status='PENDENTE' AND data_iso<=@ha30`).get({ ha30 });
+  const licitacoes = await req.db.prepare(`SELECT orgao,numero_edital,data_abertura FROM licitacoes WHERE data_abertura>=@hoje AND data_abertura<=@em5 AND status IN ('em análise','proposta enviada') ORDER BY data_abertura`).all({ hoje, em5 });
 
   // NFs sem pagamento há > 60 dias
   let nfsSemPagamento = [];
   try {
-    nfsSemPagamento = req.db.prepare(`
+    nfsSemPagamento = await req.db.prepare(`
       SELECT tomador, COUNT(*) cnt, COALESCE(SUM(valor_liquido),0) total,
              MIN(data_emissao) mais_antiga
       FROM notas_fiscais
@@ -78,7 +78,7 @@ router.get('/preview', (req, res) => {
   // Conta vinculada com saldo baixo (< 10% do valor mensal do contrato)
   let contasVinculadasAlerta = [];
   try {
-    contasVinculadasAlerta = req.db.prepare(`
+    contasVinculadasAlerta = await req.db.prepare(`
       SELECT cv.convenente, cv.conta_vinculada, cv.saldo, cv.data_referencia,
              c.valor_mensal_bruto
       FROM conta_vinculada_saldos cv
@@ -119,10 +119,10 @@ router.post('/enviar', async (req, res) => {
   const em5  = new Date(Date.now() +  5 * 86400000).toISOString().split('T')[0];
   const ha30 = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
 
-  const certidoes  = req.db.prepare(`SELECT tipo,numero,data_validade FROM certidoes WHERE data_validade<=@em15 AND data_validade>=@hoje`).all({ em15, hoje });
-  const contratos  = req.db.prepare(`SELECT numContrato,contrato,vigencia_fim FROM contratos WHERE vigencia_fim<=@em30 AND vigencia_fim>=@hoje`).all({ em30, hoje });
-  const pagAtras   = req.db.prepare(`SELECT COUNT(*) n FROM despesas WHERE status='PENDENTE' AND data_iso<=@ha30`).get({ ha30 });
-  const licitacoes = req.db.prepare(`SELECT orgao,numero_edital,data_abertura FROM licitacoes WHERE data_abertura>=@hoje AND data_abertura<=@em5 AND status IN ('em análise','proposta enviada')`).all({ hoje, em5 });
+  const certidoes  = await req.db.prepare(`SELECT tipo,numero,data_validade FROM certidoes WHERE data_validade<=@em15 AND data_validade>=@hoje`).all({ em15, hoje });
+  const contratos  = await req.db.prepare(`SELECT numContrato,contrato,vigencia_fim FROM contratos WHERE vigencia_fim<=@em30 AND vigencia_fim>=@hoje`).all({ em30, hoje });
+  const pagAtras   = await req.db.prepare(`SELECT COUNT(*) n FROM despesas WHERE status='PENDENTE' AND data_iso<=@ha30`).get({ ha30 });
+  const licitacoes = await req.db.prepare(`SELECT orgao,numero_edital,data_abertura FROM licitacoes WHERE data_abertura>=@hoje AND data_abertura<=@em5 AND status IN ('em análise','proposta enviada')`).all({ hoje, em5 });
 
   const totalAlertas = certidoes.length + contratos.length + pagAtras.n + licitacoes.length;
   if (totalAlertas === 0) {
@@ -188,7 +188,7 @@ router.post('/enviar', async (req, res) => {
     });
 
     // Log sucesso
-    req.db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('email',@to,@assunto,@corpo,'enviado')`).run({
+    await req.db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('email',@to,@assunto,@corpo,'enviado')`).run({
       to: smtp.to || smtp.user, assunto, corpo
     });
 
@@ -200,7 +200,7 @@ router.post('/enviar', async (req, res) => {
   } catch (err) {
     // Log erro
     try {
-      req.db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status,erro) VALUES ('email',@to,@assunto,'','erro',@erro)`).run({
+      await req.db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status,erro) VALUES ('email',@to,@assunto,'','erro',@erro)`).run({
         to: smtp.to || smtp.user, assunto, erro: err.message
       });
     } catch(e2) {}
@@ -229,14 +229,14 @@ async function enviarAlertasEmpresa(db, company) {
 
   const ha60 = new Date(Date.now() - 60 * 86400000).toISOString().split('T')[0];
 
-  const certidoes  = db.prepare(`SELECT tipo,numero,data_validade FROM certidoes WHERE data_validade<=? AND data_validade>=? ORDER BY data_validade`).all(em15, hoje);
-  const contratos  = db.prepare(`SELECT numContrato,contrato,vigencia_fim FROM contratos WHERE vigencia_fim<=? AND vigencia_fim>=? ORDER BY vigencia_fim`).all(em30, hoje);
-  const pagAtras   = db.prepare(`SELECT COUNT(*) n FROM despesas WHERE status='PENDENTE' AND data_iso<=?`).get(ha30);
-  const licitacoes = db.prepare(`SELECT orgao,numero_edital,data_abertura FROM licitacoes WHERE data_abertura>=? AND data_abertura<=? AND status IN ('em análise','proposta enviada') ORDER BY data_abertura`).all(hoje, em5);
+  const certidoes  = await db.prepare(`SELECT tipo,numero,data_validade FROM certidoes WHERE data_validade<=? AND data_validade>=? ORDER BY data_validade`).all(em15, hoje);
+  const contratos  = await db.prepare(`SELECT numContrato,contrato,vigencia_fim FROM contratos WHERE vigencia_fim<=? AND vigencia_fim>=? ORDER BY vigencia_fim`).all(em30, hoje);
+  const pagAtras   = await db.prepare(`SELECT COUNT(*) n FROM despesas WHERE status='PENDENTE' AND data_iso<=?`).get(ha30);
+  const licitacoes = await db.prepare(`SELECT orgao,numero_edital,data_abertura FROM licitacoes WHERE data_abertura>=? AND data_abertura<=? AND status IN ('em análise','proposta enviada') ORDER BY data_abertura`).all(hoje, em5);
 
   let nfsSemPagamento = [];
   try {
-    nfsSemPagamento = db.prepare(`
+    nfsSemPagamento = await db.prepare(`
       SELECT tomador, COUNT(*) cnt, COALESCE(SUM(valor_liquido),0) total, MIN(data_emissao) mais_antiga
       FROM notas_fiscais
       WHERE status_conciliacao='PENDENTE' AND data_emissao<=? AND data_emissao!='' AND data_emissao>='2024-01-01'
@@ -289,7 +289,7 @@ async function enviarAlertasEmpresa(db, company) {
   let reajusteAlertas = [];
   try {
     const em60 = new Date(Date.now() + 60 * 86400000).toISOString().split('T')[0];
-    reajusteAlertas = db.prepare(`
+    reajusteAlertas = await db.prepare(`
       SELECT numContrato, contrato, data_proximo_reajuste, indice_reajuste,
              pct_reajuste_ultimo, valor_mensal_bruto,
              CAST((julianday(data_proximo_reajuste) - julianday('now')) AS INTEGER) as dias_faltam
@@ -337,12 +337,12 @@ async function enviarAlertasEmpresa(db, company) {
     });
     await transporter.sendMail({ from: smtp.from || smtp.user, to: smtp.to, subject: assunto, html: corpo });
     try {
-      db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('email',?,?,?,'enviado')`).run(smtp.to, assunto, corpo);
+      await db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('email',?,?,?,'enviado')`).run(smtp.to, assunto, corpo);
     } catch(_) {}
     return { enviado: true, total };
   } catch (e) {
     try {
-      db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status,erro) VALUES ('email',?,?,'','erro',?)`).run(smtp.to||'', assunto, e.message);
+      await db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status,erro) VALUES ('email',?,?,'','erro',?)`).run(smtp.to||'', assunto, e.message);
     } catch(_) {}
     return { enviado: false, total, motivo: e.message };
   }
@@ -357,7 +357,7 @@ router.post('/alertar-reajustes', async (req, res) => {
     const hoje = new Date().toISOString().split('T')[0];
     const em60 = new Date(Date.now() + 60 * 86400000).toISOString().split('T')[0];
 
-    const reajustes = req.db.prepare(`
+    const reajustes = await req.db.prepare(`
       SELECT numContrato, contrato, data_proximo_reajuste, indice_reajuste,
              pct_reajuste_ultimo, valor_mensal_bruto,
              CAST((julianday(data_proximo_reajuste) - julianday('now')) AS INTEGER) as dias_faltam
@@ -413,7 +413,7 @@ router.post('/alertar-reajustes', async (req, res) => {
     await transporter.sendMail({ from: smtp.from||smtp.user, to: smtp.to, subject: assunto, html: corpo });
 
     try {
-      req.db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('email',?,?,?,'enviado')`).run(smtp.to, assunto, corpo);
+      await req.db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('email',?,?,?,'enviado')`).run(smtp.to, assunto, corpo);
     } catch(_) {}
 
     res.json({ ok: true, enviado: true, total: reajustes.length, message: `E-mail enviado para ${smtp.to}` });
@@ -427,14 +427,14 @@ router.post('/alertar-reajustes', async (req, res) => {
  * Escaneia o banco em busca de registros duplicados nas tabelas críticas.
  * Retorna objeto com listas de duplicatas encontradas por tabela.
  */
-function verificarDuplicatas(db, companyKey) {
+async function verificarDuplicatas(db, companyKey) {
   const resultado = { temDuplicatas: false, extratos: [], notas: [], despesas: [] };
 
   // ── extratos: mesmo data_iso + historico + valor + tipo sem bb_hash (legados) ──
   // Ignora linhas informativas sem valor (saldo, bloqueio judicial, etc. — val=0)
   // que aparecem múltiplas vezes no extrato BB e não são duplicatas reais.
   try {
-    const dupExt = db.prepare(`
+    const dupExt = await db.prepare(`
       SELECT data_iso, historico, COALESCE(debito,0) debito, COALESCE(credito,0) credito,
              tipo, COUNT(*) cnt
       FROM extratos
@@ -450,7 +450,7 @@ function verificarDuplicatas(db, companyKey) {
 
   // ── extratos: bb_hash duplicado (mesma hash em dois registros distintos) ──
   try {
-    const dupHash = db.prepare(`
+    const dupHash = await db.prepare(`
       SELECT bb_hash, COUNT(*) cnt FROM extratos
       WHERE bb_hash != '' AND bb_hash NOT LIKE '%_dup%'
       GROUP BY bb_hash HAVING cnt > 1 LIMIT 20
@@ -463,7 +463,7 @@ function verificarDuplicatas(db, companyKey) {
 
   // ── notas_fiscais: numero duplicado (ignora 0 e vazio) ──
   try {
-    const dupNfs = db.prepare(`
+    const dupNfs = await db.prepare(`
       SELECT numero, COUNT(*) cnt, MIN(data_emissao) data_emissao,
              GROUP_CONCAT(tomador, ' / ') tomadores
       FROM notas_fiscais
@@ -477,7 +477,7 @@ function verificarDuplicatas(db, companyKey) {
 
   // ── despesas: dedup_hash duplicado ──
   try {
-    const dupDesp = db.prepare(`
+    const dupDesp = await db.prepare(`
       SELECT dedup_hash, COUNT(*) cnt,
              MIN(data_iso) data_iso, MIN(fornecedor) fornecedor,
              MIN(valor_bruto) valor_bruto
@@ -580,12 +580,12 @@ async function enviarAlertaDedup(db, company, relatorio) {
     });
     await transporter.sendMail({ from: smtp.from||smtp.user, to: smtp.to, subject: assunto, html: corpo });
     try {
-      db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('email',?,?,?,'enviado')`).run(smtp.to, assunto, corpo);
+      await db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status) VALUES ('email',?,?,?,'enviado')`).run(smtp.to, assunto, corpo);
     } catch(_) {}
     return { enviado: true, totalItens };
   } catch(e) {
     try {
-      db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status,erro) VALUES ('email',?,?,'','erro',?)`).run(smtp.to||'', assunto, e.message);
+      await db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status,erro) VALUES ('email',?,?,'','erro',?)`).run(smtp.to||'', assunto, e.message);
     } catch(_) {}
     return { enviado: false, motivo: e.message };
   }

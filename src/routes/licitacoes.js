@@ -9,7 +9,7 @@ const router = express.Router();
 router.use(companyMw);
 
 // GET /api/licitacoes
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const { status, modalidade, orgao } = req.query;
   let where = '1=1';
   const p = {};
@@ -17,23 +17,23 @@ router.get('/', (req, res) => {
   if (modalidade){ where += ' AND modalidade=@modalidade';  p.modalidade= modalidade; }
   if (orgao)     { where += ' AND orgao LIKE @orgao';       p.orgao     = '%'+orgao+'%'; }
 
-  const rows = req.db.prepare(`SELECT * FROM licitacoes WHERE ${where} ORDER BY data_abertura DESC`).all(p);
+  const rows = await req.db.prepare(`SELECT * FROM licitacoes WHERE ${where} ORDER BY data_abertura DESC`).all(p);
   res.json({ data: rows, total: rows.length });
 });
 
 // GET /api/licitacoes/kpis
-router.get('/kpis', (req, res) => {
-  const total    = req.db.prepare(`SELECT COUNT(*) n, COALESCE(SUM(valor_proposta),0) v FROM licitacoes`).get();
-  const ganhou   = req.db.prepare(`SELECT COUNT(*) n, COALESCE(SUM(valor_proposta),0) v FROM licitacoes WHERE status='ganhou'`).get();
-  const perdeu   = req.db.prepare(`SELECT COUNT(*) n FROM licitacoes WHERE status='perdeu'`).get();
-  const desistiu = req.db.prepare(`SELECT COUNT(*) n FROM licitacoes WHERE status='desistiu'`).get();
-  const disputa  = req.db.prepare(`SELECT COUNT(*) n, COALESCE(SUM(valor_estimado),0) v FROM licitacoes WHERE status IN ('em análise','proposta enviada','recurso')`).get();
-  const proximas = req.db.prepare(`
+router.get('/kpis', async (req, res) => {
+  const total    = await req.db.prepare(`SELECT COUNT(*) n, COALESCE(SUM(valor_proposta),0) v FROM licitacoes`).get();
+  const ganhou   = await req.db.prepare(`SELECT COUNT(*) n, COALESCE(SUM(valor_proposta),0) v FROM licitacoes WHERE status='ganhou'`).get();
+  const perdeu   = await req.db.prepare(`SELECT COUNT(*) n FROM licitacoes WHERE status='perdeu'`).get();
+  const desistiu = await req.db.prepare(`SELECT COUNT(*) n FROM licitacoes WHERE status='desistiu'`).get();
+  const disputa  = await req.db.prepare(`SELECT COUNT(*) n, COALESCE(SUM(valor_estimado),0) v FROM licitacoes WHERE status IN ('em análise','proposta enviada','recurso')`).get();
+  const proximas = await req.db.prepare(`
     SELECT * FROM licitacoes
     WHERE data_abertura >= date('now') AND status IN ('em análise','proposta enviada')
     ORDER BY data_abertura ASC LIMIT 5
   `).all();
-  const porStatus = req.db.prepare(`SELECT status, COUNT(*) n FROM licitacoes GROUP BY status`).all();
+  const porStatus = await req.db.prepare(`SELECT status, COUNT(*) n FROM licitacoes GROUP BY status`).all();
 
   const finalizadas = ganhou.n + perdeu.n + desistiu.n;
   const taxa = finalizadas > 0 ? +((ganhou.n / finalizadas) * 100).toFixed(1) : 0;
@@ -50,9 +50,9 @@ router.get('/kpis', (req, res) => {
 });
 
 // POST /api/licitacoes
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { orgao, numero_edital, modalidade, objeto, data_abertura, data_encerramento, valor_estimado, valor_proposta, status, resultado, observacoes } = req.body;
-  const r = req.db.prepare(`
+  const r = await req.db.prepare(`
     INSERT INTO licitacoes (orgao,numero_edital,modalidade,objeto,data_abertura,data_encerramento,valor_estimado,valor_proposta,status,resultado,observacoes)
     VALUES (@orgao,@numero_edital,@modalidade,@objeto,@data_abertura,@data_encerramento,@valor_estimado,@valor_proposta,@status,@resultado,@observacoes)
   `).run({
@@ -65,13 +65,13 @@ router.post('/', (req, res) => {
 });
 
 // PUT /api/licitacoes/:id
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   const { orgao, numero_edital, modalidade, objeto, data_abertura, data_encerramento, valor_estimado, valor_proposta, status, resultado, observacoes } = req.body;
-  req.db.prepare(`
+  await req.db.prepare(`
     UPDATE licitacoes SET orgao=@orgao,numero_edital=@numero_edital,modalidade=@modalidade,
     objeto=@objeto,data_abertura=@data_abertura,data_encerramento=@data_encerramento,
     valor_estimado=@valor_estimado,valor_proposta=@valor_proposta,status=@status,
-    resultado=@resultado,observacoes=@observacoes,updated_at=datetime('now')
+    resultado=@resultado,observacoes=@observacoes,updated_at=NOW()
     WHERE id=@id
   `).run({
     orgao:orgao||'', numero_edital:numero_edital||'', modalidade:modalidade||'pregão',
@@ -84,8 +84,8 @@ router.put('/:id', (req, res) => {
 });
 
 // DELETE /api/licitacoes/:id
-router.delete('/:id', (req, res) => {
-  req.db.prepare('DELETE FROM licitacoes WHERE id=?').run(req.params.id);
+router.delete('/:id', async (req, res) => {
+  await req.db.prepare('DELETE FROM licitacoes WHERE id=?').run(req.params.id);
   res.json({ ok: true });
 });
 

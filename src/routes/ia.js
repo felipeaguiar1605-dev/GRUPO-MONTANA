@@ -6,7 +6,7 @@
  */
 
 const express    = require('express');
-const { getDb, COMPANIES } = require('../db');
+const { getDb, COMPANIES } = require('../db_pg');
 const companyMw  = require('../companyMiddleware');
 
 const router = express.Router();
@@ -22,18 +22,18 @@ function getClient() {
   return new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
 }
 
-function buildContexto(db, company) {
+async function buildContexto(db, company) {
   try {
     const ano  = new Date().getFullYear();
     const mes  = String(new Date().getMonth() + 1).padStart(2, '0');
     const from = `${ano}-${mes}-01`;
     const to   = `${ano}-${mes}-31`;
 
-    const fat  = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) v FROM notas_fiscais WHERE (data_emissao>=? AND data_emissao<=?)`).get(from, to);
-    const desp = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) v FROM despesas WHERE data_iso>=? AND data_iso<=?`).get(from, to);
-    const pend = db.prepare(`SELECT COUNT(*) n FROM extratos WHERE status_conciliacao='PENDENTE'`).get();
-    const ctrs = db.prepare(`SELECT numContrato, contrato, valor_mensal_bruto FROM contratos WHERE LOWER(COALESCE(status,'')) NOT LIKE '%encerrad%' AND LOWER(COALESCE(numContrato,'')) NOT LIKE '%encerrad%' LIMIT 5`).all();
-    const certs= db.prepare(`SELECT tipo, data_validade FROM certidoes WHERE data_validade <= date('now','+30 days') AND data_validade >= date('now') LIMIT 5`).all().catch?.() ?? [];
+    const fat  = await db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) v FROM notas_fiscais WHERE (data_emissao>=? AND data_emissao<=?)`).get(from, to);
+    const desp = await db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) v FROM despesas WHERE data_iso>=? AND data_iso<=?`).get(from, to);
+    const pend = await db.prepare(`SELECT COUNT(*) n FROM extratos WHERE status_conciliacao='PENDENTE'`).get();
+    const ctrs = await db.prepare(`SELECT numContrato, contrato, valor_mensal_bruto FROM contratos WHERE LOWER(COALESCE(status,'')) NOT LIKE '%encerrad%' AND LOWER(COALESCE(numContrato,'')) NOT LIKE '%encerrad%' LIMIT 5`).all();
+    const certs= await db.prepare(`SELECT tipo, data_validade FROM certidoes WHERE data_validade <= date('now','+30 days') AND data_validade >= date('now') LIMIT 5`).all().catch?.() ?? [];
 
     const fmt = v => `R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
 
@@ -49,7 +49,7 @@ function buildContexto(db, company) {
     }
 
     try {
-      const certsRows = db.prepare(`SELECT tipo, data_validade FROM certidoes WHERE data_validade <= date('now','+30 days') AND data_validade >= date('now') LIMIT 5`).all();
+      const certsRows = await db.prepare(`SELECT tipo, data_validade FROM certidoes WHERE data_validade <= date('now','+30 days') AND data_validade >= date('now') LIMIT 5`).all();
       if (certsRows.length) {
         ctx += `\nCertidões vencendo em 30 dias:\n`;
         certsRows.forEach(c => { ctx += `  - ${c.tipo}: vence ${c.data_validade}\n`; });
@@ -64,7 +64,7 @@ function buildContexto(db, company) {
 
 // ─── GET /status ──────────────────────────────────────────────────────────────
 
-router.get('/status', (req, res) => {
+router.get('/status', async (req, res) => {
   const configurado = !!process.env.ANTHROPIC_API_KEY;
   res.json({
     ok: true,

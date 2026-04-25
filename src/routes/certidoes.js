@@ -36,45 +36,45 @@ function calcStatus(data_validade) {
   return 'válida';
 }
 
-function atualizarStatus(db, rows) {
-  const upd = db.prepare(`UPDATE certidoes SET status=@status, updated_at=datetime('now') WHERE id=@id`);
-  const trans = db.transaction(() => {
+async function await atualizarStatus(db, rows) {
+  const upd = db.prepare(`UPDATE certidoes SET status=@status, updated_at=NOW() WHERE id=@id`);
+  const trans = db.transaction(async () => {
     for (const r of rows) {
       const novo = calcStatus(r.data_validade);
       if (novo !== r.status) { upd.run({ status: novo, id: r.id }); r.status = novo; }
     }
   });
-  trans();
+  await trans();
 }
 
 // GET /api/certidoes
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const { status, tipo } = req.query;
   let where = '1=1';
   const p = {};
   if (status) { where += ' AND status=@status'; p.status = status; }
   if (tipo)   { where += ' AND tipo=@tipo';     p.tipo   = tipo; }
 
-  const rows = req.db.prepare(`SELECT * FROM certidoes WHERE ${where} ORDER BY data_validade ASC`).all(p);
-  atualizarStatus(req.db, rows);
+  const rows = await req.db.prepare(`SELECT * FROM certidoes WHERE ${where} ORDER BY data_validade ASC`).all(p);
+  await atualizarStatus(req.db, rows);
   res.json({ data: rows, total: rows.length });
 });
 
 // GET /api/certidoes/alertas
-router.get('/alertas', (req, res) => {
+router.get('/alertas', async (req, res) => {
   const hoje  = new Date().toISOString().split('T')[0];
   const em15  = new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0];
   const em30  = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
 
-  const vencidas = req.db.prepare(`SELECT * FROM certidoes WHERE data_validade < @hoje ORDER BY data_validade`).all({ hoje });
-  const em15d    = req.db.prepare(`SELECT * FROM certidoes WHERE data_validade >= @hoje AND data_validade <= @em15 ORDER BY data_validade`).all({ hoje, em15 });
-  const em30d    = req.db.prepare(`SELECT * FROM certidoes WHERE data_validade > @em15 AND data_validade <= @em30 ORDER BY data_validade`).all({ em15, em30 });
+  const vencidas = await req.db.prepare(`SELECT * FROM certidoes WHERE data_validade < @hoje ORDER BY data_validade`).all({ hoje });
+  const em15d    = await req.db.prepare(`SELECT * FROM certidoes WHERE data_validade >= @hoje AND data_validade <= @em15 ORDER BY data_validade`).all({ hoje, em15 });
+  const em30d    = await req.db.prepare(`SELECT * FROM certidoes WHERE data_validade > @em15 AND data_validade <= @em30 ORDER BY data_validade`).all({ em15, em30 });
 
   res.json({ vencidas, proximas_15: em15d, proximas_30: em30d, total_alertas: vencidas.length + em15d.length });
 });
 
 // POST /api/certidoes
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const upload = getUpload(req);
   upload.single('arquivo_pdf')(req, res, err => {
     if (err) return res.status(400).json({ error: err.message });
@@ -82,7 +82,7 @@ router.post('/', (req, res) => {
     if (!tipo) return res.status(400).json({ error: 'Tipo é obrigatório' });
     const arquivo_pdf = req.file ? req.file.filename : '';
     const status = calcStatus(data_validade);
-    const r = req.db.prepare(`
+    const r = await req.db.prepare(`
       INSERT INTO certidoes (tipo,numero,data_emissao,data_validade,arquivo_pdf,status,observacoes)
       VALUES (@tipo,@numero,@data_emissao,@data_validade,@arquivo_pdf,@status,@observacoes)
     `).run({ tipo, numero:numero||'', data_emissao:data_emissao||'', data_validade:data_validade||'', arquivo_pdf, status, observacoes:observacoes||'' });
@@ -91,29 +91,29 @@ router.post('/', (req, res) => {
 });
 
 // PUT /api/certidoes/:id
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   const upload = getUpload(req);
   upload.single('arquivo_pdf')(req, res, err => {
     if (err) return res.status(400).json({ error: err.message });
     const { tipo, numero, data_emissao, data_validade, observacoes } = req.body;
     const status = calcStatus(data_validade);
-    let sql = `UPDATE certidoes SET tipo=@tipo,numero=@numero,data_emissao=@data_emissao,data_validade=@data_validade,status=@status,observacoes=@observacoes,updated_at=datetime('now')`;
+    let sql = `UPDATE certidoes SET tipo=@tipo,numero=@numero,data_emissao=@data_emissao,data_validade=@data_validade,status=@status,observacoes=@observacoes,updated_at=NOW()`;
     const p = { tipo:tipo||'', numero:numero||'', data_emissao:data_emissao||'', data_validade:data_validade||'', status, observacoes:observacoes||'', id:req.params.id };
     if (req.file) { sql += ',arquivo_pdf=@arquivo_pdf'; p.arquivo_pdf = req.file.filename; }
     sql += ' WHERE id=@id';
-    req.db.prepare(sql).run(p);
+    await req.db.prepare(sql).run(p);
     res.json({ ok: true });
   });
 });
 
 // DELETE /api/certidoes/:id
-router.delete('/:id', (req, res) => {
-  req.db.prepare('DELETE FROM certidoes WHERE id=?').run(req.params.id);
+router.delete('/:id', async (req, res) => {
+  await req.db.prepare('DELETE FROM certidoes WHERE id=?').run(req.params.id);
   res.json({ ok: true });
 });
 
 // GET /api/certidoes/arquivo/:filename — serve PDF
-router.get('/arquivo/:filename', (req, res) => {
+router.get('/arquivo/:filename', async (req, res) => {
   const filePath = path.join(__dirname, '..', '..', req.company.uploadsPath, 'certidoes', req.params.filename);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Arquivo não encontrado' });
   res.setHeader('Content-Type', 'application/pdf');

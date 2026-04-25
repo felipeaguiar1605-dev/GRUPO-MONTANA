@@ -11,24 +11,24 @@
  */
 'use strict';
 const express = require('express');
-const { getDb, COMPANIES } = require('../db');
+const { getDb, COMPANIES } = require('../db_pg');
 const router = express.Router();
 
 function num(v) { return Math.round((v || 0) * 100) / 100; }
 
 // Lê colunas de uma tabela (suporta schemas que podem variar entre local/prod)
-function cols(db, table) {
-  try { return db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name); }
+async function cols(db, table) {
+  try { return await db.prepare(`SELECT column_name as name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='${' + 'table' + '}' ORDER BY ordinal_position`).all().map(c => c.name); }
   catch { return []; }
 }
-function hasTable(db, name) {
-  return !!db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name=?`).get(name);
+async function hasTable(db, name) {
+  return !!await db.prepare(`SELECT 1 FROM information_schema.tables WHERE table_schema=current_schema() AND table_name=$1`).get(name);
 }
 
 // ─── GET /api/consolidado ─────────────────────────────────────────
 // Visão original — cartões das 4 empresas para o ANO corrente.
 // Mantido aqui (antes estava em server.js inline) para centralizar.
-router.get('/consolidado', (req, res) => {
+router.get('/consolidado', async (req, res) => {
   try {
     const resultado = {};
     const ano = parseInt(req.query.ano, 10) || new Date().getFullYear();
@@ -39,24 +39,24 @@ router.get('/consolidado', (req, res) => {
     for (const [key, company] of Object.entries(COMPANIES)) {
       try {
         const db = getDb(key);
-        const extratos = db.prepare(`
+        const extratos = await db.prepare(`
           SELECT COUNT(*) cnt,
                  COALESCE(SUM(credito),0) entradas,
                  COALESCE(SUM(debito),0) saidas
             FROM extratos WHERE data_iso >= ? AND data_iso <= ?
         `).get(from, to);
-        const nfs = db.prepare(`
+        const nfs = await db.prepare(`
           SELECT COUNT(*) cnt, COALESCE(SUM(valor_bruto),0) bruto
             FROM notas_fiscais
            WHERE (data_emissao >= ? AND data_emissao <= ?)
               OR (data_emissao = '' AND created_at >= ? AND created_at <= ?)
         `).get(from, to, from, to);
-        const desp = db.prepare(`
+        const desp = await db.prepare(`
           SELECT COALESCE(SUM(valor_bruto),0) total
             FROM despesas WHERE data_iso >= ? AND data_iso <= ?
         `).get(from, to);
-        const pend = db.prepare(`SELECT COUNT(*) cnt FROM extratos WHERE status_conciliacao='PENDENTE'`).get();
-        const funcs = db.prepare(`SELECT COUNT(*) cnt FROM rh_funcionarios WHERE status='ATIVO'`).get();
+        const pend = await db.prepare(`SELECT COUNT(*) cnt FROM extratos WHERE status_conciliacao='PENDENTE'`).get();
+        const funcs = await db.prepare(`SELECT COUNT(*) cnt FROM rh_funcionarios WHERE status='ATIVO'`).get();
 
         resultado[key] = {
           nome: company.nome, nomeAbrev: company.nomeAbrev, cnpj: company.cnpj,
@@ -84,7 +84,7 @@ router.get('/consolidado', (req, res) => {
 // Tabela detalhada com receita bruta/líquida, retenções, despesas,
 // resultado e margem — das 4 empresas + total do grupo.
 // Aceita ?from=YYYY-MM-DD&to=YYYY-MM-DD (default: ano corrente)
-router.get('/consolidado/resumo', (req, res) => {
+router.get('/consolidado/resumo', async (req, res) => {
   try {
     const hoje = new Date();
     const anoC = hoje.getFullYear();
@@ -112,7 +112,7 @@ router.get('/consolidado/resumo', (req, res) => {
         const deletedFilter = nfCols.has('deleted_at') ? `AND COALESCE(deleted_at,'') = ''` : '';
 
         // Receita — notas_fiscais no período (por data_emissao; fallback created_at)
-        const nfs = db.prepare(`
+        const nfs = await db.prepare(`
           SELECT COUNT(*) qtd,
                  COALESCE(SUM(valor_bruto),   0) bruto,
                  COALESCE(SUM(valor_liquido), 0) liquido,
@@ -146,7 +146,7 @@ router.get('/consolidado/resumo', (req, res) => {
             OR UPPER(COALESCE(${campoDesc},'')) LIKE '%CH.AVULSO ENTRE AG%'
             OR UPPER(COALESCE(${campoDesc},'')) LIKE '%TED MESMA TITUL%'
              )` : '';
-          const desp = db.prepare(`
+          const desp = await db.prepare(`
             SELECT COALESCE(SUM(valor_bruto),0) total
               FROM despesas
              WHERE data_iso >= ? AND data_iso <= ?
@@ -156,7 +156,7 @@ router.get('/consolidado/resumo', (req, res) => {
         }
 
         // Contratos ativos — vigência_fim futura OU nula/vazia
-        const ca = hasTable(db,'contratos') ? db.prepare(`
+        const ca = hasTable(db,'contratos') ? await db.prepare(`
           SELECT COUNT(*) cnt FROM contratos
            WHERE COALESCE(vigencia_fim,'') = ''
               OR vigencia_fim >= DATE('now')
