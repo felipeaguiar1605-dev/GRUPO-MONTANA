@@ -491,7 +491,7 @@ router.get('/dashboard', async (req, res) => {
   )`;
 
   // 1. Totais gerais dos extratos
-  const totais = await req.db.prepare(`
+  const totais = req.db.prepare(`
     SELECT
       COUNT(*) as total,
       COALESCE(SUM(credito), 0) as total_creditos,
@@ -571,7 +571,7 @@ router.get('/dashboard', async (req, res) => {
         GROUP BY substr(data_iso, 1, 7)
         ORDER BY mes ASC
       `).all(params)
-    : await req.db.prepare(`
+    : (await req.db.prepare(`
         SELECT
           substr(data_iso, 1, 7) as mes,
           COALESCE(SUM(CASE WHEN credito>0 ${EXCLUIR_FLUXO} THEN credito END), 0) as creditos,
@@ -581,7 +581,7 @@ router.get('/dashboard', async (req, res) => {
         GROUP BY substr(data_iso, 1, 7)
         ORDER BY mes DESC
         LIMIT 6
-      `).all().reverse();
+      `).all()).reverse();
 
   // 8. Top 5 contratos por valor
   const topContratos = await req.db.prepare(`
@@ -613,7 +613,7 @@ router.get('/dashboard', async (req, res) => {
   const despPendentes = await req.db.prepare(`SELECT COUNT(*) as n FROM despesas WHERE status = 'PENDENTE'`).get();
   if (despPendentes.n > 0) alertas.push({ tipo: 'warning', msg: `${despPendentes.n} despesas pendentes de pagamento`, icon: '💸' });
 
-  const contratosVencidos = await req.db.prepare(`SELECT COUNT(*) as n FROM contratos WHERE vigencia_fim IS NOT NULL AND vigencia_fim != '' AND safe_date(vigencia_fim) < CURRENT_DATE`).get();
+  const contratosVencidos = await req.db.prepare(`SELECT COUNT(*) as n FROM contratos WHERE vigencia_fim != '' AND vigencia_fim < date('now')`).get();
   if (contratosVencidos.n > 0) alertas.push({ tipo: 'danger', msg: `${contratosVencidos.n} contratos com vigência vencida`, icon: '🔴' });
 
   // 11. Conciliação por status (para gráfico donut)
@@ -653,7 +653,7 @@ router.get('/dashboard/apuracao-caixa', async (req, res) => {
     if (!from || !to) return res.status(400).json({ error: 'from e to obrigatórios (YYYY-MM-DD)' });
 
     // Usa COALESCE: prefere data_pagamento; cai em data_iso do extrato vinculado se faltar
-    const rows = await req.db.prepare(`
+    const rows = req.db.prepare(`
       SELECT
         COALESCE(NULLIF(nf.contrato_ref,''), '(sem contrato)') as contrato_ref,
         COALESCE(NULLIF(nf.tomador,''),      '—')              as tomador,
@@ -753,7 +753,7 @@ router.get('/dashboard/exposicao-intragrupo', (_req, res) => {
       let dbEmp;
       try { dbEmp = getDb(empKey); } catch { continue; }
       // Verifica se tabela despesas existe e tem linhas
-      const hasTab = dbEmp.prepare(`SELECT table_name as name FROM information_schema.tables WHERE table_schema=current_schema() AND name='despesas'`).get();
+      const hasTab = dbEmp.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='despesas'`).get();
       if (!hasTab) continue;
 
       const selfName = (empMeta.nomeAbrev || '').toUpperCase();
@@ -865,7 +865,7 @@ router.get('/extratos', async (req, res) => {
   params.limit = parseInt(limit);
   params.offset = offset;
 
-  const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM extratos WHERE ${where}`).get(params).cnt;
+  const total = (await req.db.prepare(`SELECT COUNT(*) as cnt FROM extratos WHERE ${where}`).get(params)).cnt;
   const rows = await req.db.prepare(`SELECT * FROM extratos WHERE ${where} ORDER BY data_iso DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
 
   res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
@@ -1163,7 +1163,7 @@ router.post('/contratos/:num/parcelas', async (req, res) => {
              COALESCE(SUM(CASE WHEN valor_pago=0 OR valor_pago IS NULL THEN valor_liquido ELSE 0 END),0) as total_aberto
       FROM parcelas WHERE contrato_num = ?
     `).get(num);
-    await req.db.prepare(`UPDATE contratos SET total_pago=?, total_aberto=?, updated_at=NOW() WHERE numContrato=?`)
+    req.db.prepare(`UPDATE contratos SET total_pago=?, total_aberto=?, updated_at=NOW() WHERE numContrato=?`)
       .run(totals.total_pago, totals.total_aberto, num);
 
     audit(req, 'INSERT', 'parcelas', result.lastInsertRowid, `${num} ${competencia}`);
@@ -1184,7 +1184,7 @@ router.delete('/parcelas/:id', async (req, res) => {
              COALESCE(SUM(CASE WHEN valor_pago=0 OR valor_pago IS NULL THEN valor_liquido ELSE 0 END),0) as total_aberto
       FROM parcelas WHERE contrato_num = ?
     `).get(parcela.contrato_num);
-    await req.db.prepare(`UPDATE contratos SET total_pago=?, total_aberto=?, updated_at=NOW() WHERE numContrato=?`)
+    req.db.prepare(`UPDATE contratos SET total_pago=?, total_aberto=?, updated_at=NOW() WHERE numContrato=?`)
       .run(totals.total_pago, totals.total_aberto, parcela.contrato_num);
 
     audit(req, 'DELETE', 'parcelas', req.params.id, `${parcela.contrato_num} ${parcela.competencia}`);
@@ -1309,7 +1309,7 @@ router.get('/nfs', async (req, res) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit); params.offset = offset;
 
-  const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM notas_fiscais WHERE ${where}`).get(params).cnt;
+  const total = (await req.db.prepare(`SELECT COUNT(*) as cnt FROM notas_fiscais WHERE ${where}`).get(params)).cnt;
   const rows = await req.db.prepare(`SELECT * FROM notas_fiscais WHERE ${where} ORDER BY data_emissao DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
   // Soma total (útil p/ KPI independente do paginado)
   const soma = await req.db.prepare(`SELECT COALESCE(SUM(valor_liquido),0) as soma_liq, COALESCE(SUM(valor_bruto),0) as soma_bruto FROM notas_fiscais WHERE ${where}`).get(params);
@@ -1389,7 +1389,7 @@ router.post('/nfs/corrigir-lote', async (req, res) => {
       WHERE id = @id
     `);
 
-    const tx = req.db.transaction((lista) => {
+    const tx = req.db.transaction(async (lista) => {
       let ok = 0;
       lista.forEach(item => {
         if (!item.id) return;
@@ -1501,7 +1501,7 @@ router.get('/liquidacoes', async (req, res) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit); params.offset = offset;
 
-  const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM liquidacoes WHERE ${where}`).get(params).cnt;
+  const total = (await req.db.prepare(`SELECT COUNT(*) as cnt FROM liquidacoes WHERE ${where}`).get(params)).cnt;
   const rows = await req.db.prepare(`SELECT * FROM liquidacoes WHERE ${where} ORDER BY data_liquidacao_iso DESC LIMIT @limit OFFSET @offset`).all(params);
   res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
 });
@@ -1517,7 +1517,7 @@ router.get('/pagamentos', async (req, res) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit); params.offset = offset;
 
-  const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM pagamentos WHERE ${where}`).get(params).cnt;
+  const total = (await req.db.prepare(`SELECT COUNT(*) as cnt FROM pagamentos WHERE ${where}`).get(params)).cnt;
   const rows = await req.db.prepare(`SELECT * FROM pagamentos WHERE ${where} ORDER BY data_pagamento_iso DESC LIMIT @limit OFFSET @offset`).all(params);
   res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
 });
@@ -1537,11 +1537,11 @@ router.post('/vinculacoes', async (req, res) => {
   const { extrato_id, contrato_num, tipo, valor } = req.body;
   if (!extrato_id || !contrato_num) return res.status(400).json({ error: 'extrato_id e contrato_num obrigatórios' });
 
-  const stmt = await req.db.prepare(`
+  const stmt = req.db.prepare(`
     INSERT INTO vinculacoes (extrato_id, contrato_num, tipo, valor)
     VALUES (@extrato_id, @contrato_num, @tipo, @valor)
   `);
-  stmt.run({ extrato_id, contrato_num, tipo: tipo || '', valor: valor || 0 });
+  await stmt.run({ extrato_id, contrato_num, tipo: tipo || '', valor: valor || 0 });
 
   // Update extrato status
   await req.db.prepare(`UPDATE extratos SET contrato_vinculado = @contrato_num, status_conciliacao = 'CONCILIADO', updated_at=NOW() WHERE id = @id`)
@@ -1557,17 +1557,17 @@ router.post('/vinculacoes/batch', async (req, res) => {
   const insertVinc = req.db.prepare(`INSERT INTO vinculacoes (extrato_id, contrato_num, tipo, valor) VALUES (@extrato_id, @contrato_num, @tipo, @valor)`);
   const updateExt = req.db.prepare(`UPDATE extratos SET contrato_vinculado = @contrato_num, status_conciliacao = 'CONCILIADO', updated_at=NOW() WHERE id = @id`);
 
-  const batch = req.db.transaction((items) => {
+  const batch = req.db.transaction(async (items) => {
     let count = 0;
     for (const v of items) {
-      insertVinc.run({ extrato_id: v.extrato_id, contrato_num: v.contrato_num, tipo: v.tipo || '', valor: v.valor || 0 });
-      updateExt.run({ contrato_num: v.contrato_num, id: v.extrato_id });
+      await insertVinc.run({ extrato_id: v.extrato_id, contrato_num: v.contrato_num, tipo: v.tipo || '', valor: v.valor || 0 });
+      await updateExt.run({ contrato_num: v.contrato_num, id: v.extrato_id });
       count++;
     }
     return count;
   });
 
-  const count = batch(vinculacoes);
+  const count = await batch(vinculacoes);
   dashCacheInvalidate(req.companyKey);
   res.json({ ok: true, message: `${count} vinculações salvas` });
 });
@@ -1581,7 +1581,7 @@ router.delete('/vinculacoes/:extrato_id', async (req, res) => {
 });
 
 // ─── IMPORTAÇÃO DE CSVs ──────────────────────────────────────────
-router.post('/import/extratos', (req, res, next) => getUpload(req).single("file")(req, res, next), async (req, res) => {
+router.post('/import/extratos', (req, res, next) => getUpload(req).single('file')(req, res, next), async (req, res) => {
   try {
     const extErr = validarExtensao(req.file.originalname, ['csv', 'txt']);
     if (extErr) { fs.unlinkSync(req.file.path); return res.status(400).json({ error: extErr }); }
@@ -1635,7 +1635,7 @@ router.post('/import/extratos', (req, res, next) => getUpload(req).single("file"
     dashCacheInvalidate(req.companyKey);
 
     // Log import
-    await req.db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('extratos', @arquivo, @registros)`)
+    req.db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('extratos', @arquivo, @registros)`)
       .run({ arquivo: req.file.originalname, registros: imported });
 
     fs.unlinkSync(req.file.path);
@@ -1648,7 +1648,7 @@ router.post('/import/extratos', (req, res, next) => getUpload(req).single("file"
   }
 });
 
-router.post('/import/pagamentos', (req, res, next) => getUpload(req).single("file")(req, res, next), async (req, res) => {
+router.post('/import/pagamentos', (req, res, next) => getUpload(req).single('file')(req, res, next), async (req, res) => {
   try {
     const extErr = validarExtensao(req.file.originalname, ['csv', 'txt']);
     if (extErr) { fs.unlinkSync(req.file.path); return res.status(400).json({ error: extErr }); }
@@ -1692,7 +1692,7 @@ router.post('/import/pagamentos', (req, res, next) => getUpload(req).single("fil
     });
     await batch();
 
-    await req.db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('pagamentos', @arquivo, @registros)`)
+    req.db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('pagamentos', @arquivo, @registros)`)
       .run({ arquivo: req.file.originalname, registros: imported });
     dashCacheInvalidate(req.companyKey);
     fs.unlinkSync(req.file.path);
@@ -1703,7 +1703,7 @@ router.post('/import/pagamentos', (req, res, next) => getUpload(req).single("fil
   }
 });
 
-router.post('/import/liquidacoes', (req, res, next) => getUpload(req).single("file")(req, res, next), async (req, res) => {
+router.post('/import/liquidacoes', (req, res, next) => getUpload(req).single('file')(req, res, next), async (req, res) => {
   try {
     const extErr = validarExtensao(req.file.originalname, ['csv', 'txt']);
     if (extErr) { fs.unlinkSync(req.file.path); return res.status(400).json({ error: extErr }); }
@@ -1746,7 +1746,7 @@ router.post('/import/liquidacoes', (req, res, next) => getUpload(req).single("fi
     });
     await batch();
 
-    await req.db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('liquidacoes', @arquivo, @registros)`)
+    req.db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('liquidacoes', @arquivo, @registros)`)
       .run({ arquivo: req.file.originalname, registros: imported });
     dashCacheInvalidate(req.companyKey);
     fs.unlinkSync(req.file.path);
@@ -1789,17 +1789,32 @@ router.get('/relatorios/conciliacao', async (req, res) => {
 });
 
 router.get('/relatorios/por-contrato', async (req, res) => {
-  const rows = await req.db.prepare(`
-    SELECT c.numContrato, c.contrato, c.status, c.valor_mensal_liquido,
-      COALESCE(SUM(CASE WHEN e.credito > 0 THEN e.credito END), 0) as total_creditos,
-      COALESCE(SUM(CASE WHEN e.debito > 0 THEN e.debito END), 0) as total_debitos,
-      COUNT(v.id) as vinculacoes
-    FROM contratos c
-    LEFT JOIN vinculacoes v ON v.contrato_num = c.numContrato
+  // Query simplificada: agrupa vinculacoes e soma nos extratos separadamente
+  // para evitar JOIN pesado de 3 tabelas grandes sem filtro
+  const contratos = await req.db.prepare(`SELECT id, numContrato, contrato, status, valor_mensal_liquido FROM contratos ORDER BY contrato`).all();
+  const vincSums = await req.db.prepare(`
+    SELECT v.contrato_num,
+           COUNT(v.id) as vinculacoes,
+           COALESCE(SUM(CASE WHEN e.credito > 0 THEN e.credito ELSE 0 END), 0) as total_creditos,
+           COALESCE(SUM(CASE WHEN e.debito  > 0 THEN e.debito  ELSE 0 END), 0) as total_debitos
+    FROM vinculacoes v
     LEFT JOIN extratos e ON e.id = v.extrato_id
-    GROUP BY c.numContrato
-    ORDER BY c.contrato
+    GROUP BY v.contrato_num
   `).all();
+  const vincMap = {};
+  for (const v of vincSums) vincMap[v.contrato_num] = v;
+  const rows = contratos.map(c => {
+    const v = vincMap[c.numContrato] || {};
+    return {
+      numContrato: c.numContrato,
+      contrato: c.contrato,
+      status: c.status,
+      valor_mensal_liquido: Number(c.valor_mensal_liquido || 0),
+      total_creditos: Number(v.total_creditos || 0),
+      total_debitos: Number(v.total_debitos || 0),
+      vinculacoes: Number(v.vinculacoes || 0),
+    };
+  });
   res.json({ data: rows });
 });
 
@@ -1841,7 +1856,7 @@ router.get('/relatorios/lucro-por-contrato', async (req, res) => {
   recBanc.forEach(r => { recBancMap[r.contrato_num] = r; });
 
   // Despesas alocadas ao contrato no período
-  const despesas = req.db.prepare(`
+  const despesas = await req.db.prepare(`
     SELECT d.contrato_ref,
            COALESCE(SUM(d.valor_bruto),0) as total_despesas,
            COALESCE(SUM(CASE WHEN UPPER(d.categoria) LIKE 'FOLHA%' THEN d.valor_bruto ELSE 0 END),0) as desp_folha,
@@ -1859,14 +1874,14 @@ router.get('/relatorios/lucro-por-contrato', async (req, res) => {
     SELECT n.contrato_ref, substr(n.data_emissao,1,7) as mes,
            COALESCE(SUM(n.valor_bruto),0) as receita,
            0 as despesa
-    FROM notas_fiscais n WHERE n.data_emissao >= CURRENT_DATE + INTERVAL '-6 months' AND n.contrato_ref != ''
+    FROM notas_fiscais n WHERE n.data_emissao >= (CURRENT_DATE - INTERVAL '6 months')::text AND n.contrato_ref != ''
     GROUP BY n.contrato_ref, substr(n.data_emissao,1,7)
     ORDER BY mes
   `).all();
   const despMensal = await req.db.prepare(`
     SELECT d.contrato_ref, substr(d.data_iso,1,7) as mes,
            COALESCE(SUM(d.valor_bruto),0) as despesa
-    FROM despesas d WHERE d.data_iso >= CURRENT_DATE + INTERVAL '-6 months' AND d.contrato_ref != ''
+    FROM despesas d WHERE d.data_iso >= (CURRENT_DATE - INTERVAL '6 months')::text AND d.contrato_ref != ''
     GROUP BY d.contrato_ref, substr(d.data_iso,1,7)
   `).all();
 
@@ -1894,26 +1909,26 @@ router.get('/relatorios/lucro-por-contrato', async (req, res) => {
         margem: v.receita > 0 ? +((v.receita - v.despesa) / v.receita * 100).toFixed(1) : 0 }));
 
     // Receita de referência: NFs do período; fallback total_pago
-    const receita = nf.receita_bruta || banc.creditos_bancarios || c.total_pago || 0;
-    const lucro   = +(receita - desp.total_despesas).toFixed(2);
+    const receita = Number(nf.receita_bruta || 0) || Number(banc.creditos_bancarios || 0) || Number(c.total_pago || 0) || 0;
+    const lucro   = +(receita - Number(desp.total_despesas || 0)).toFixed(2);
     const margem  = receita > 0 ? +((lucro / receita) * 100).toFixed(1) : 0;
     totalReceita  += receita;
-    totalDespesa  += desp.total_despesas;
-    totalRetencao += nf.total_retencao;
+    totalDespesa  += Number(desp.total_despesas || 0);
+    totalRetencao += Number(nf.total_retencao || 0);
 
     return {
       numContrato: c.numContrato, contrato: c.contrato, orgao: c.orgao,
       status: c.status, valor_mensal_bruto: c.valor_mensal_bruto,
       vigencia_inicio: c.vigencia_inicio, vigencia_fim: c.vigencia_fim,
       receita_bruta: +receita.toFixed(2),
-      receita_liquida: +nf.receita_liquida.toFixed(2),
-      total_retencao: +nf.total_retencao.toFixed(2),
-      creditos_bancarios: +banc.creditos_bancarios.toFixed(2),
+      receita_liquida: +Number(nf.receita_liquida || 0).toFixed(2),
+      total_retencao: +Number(nf.total_retencao || 0).toFixed(2),
+      creditos_bancarios: +Number(banc.creditos_bancarios || 0).toFixed(2),
       qtd_nfs: nf.qtd_nfs,
-      despesas: +desp.total_despesas.toFixed(2),
-      desp_folha: +desp.desp_folha.toFixed(2),
-      desp_fornecedor: +desp.desp_fornecedor.toFixed(2),
-      desp_outras: +desp.desp_outras.toFixed(2),
+      despesas: +Number(desp.total_despesas || 0).toFixed(2),
+      desp_folha: +Number(desp.desp_folha || 0).toFixed(2),
+      desp_fornecedor: +Number(desp.desp_fornecedor || 0).toFixed(2),
+      desp_outras: +Number(desp.desp_outras || 0).toFixed(2),
       qtd_despesas: desp.qtd_despesas,
       lucro_bruto: lucro, margem_pct: margem,
       evolucao: evolArray,
@@ -2405,7 +2420,7 @@ router.get('/despesas', async (req, res) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit); params.offset = offset;
 
-  const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM despesas WHERE ${where}`).get(params).cnt;
+  const total = (await req.db.prepare(`SELECT COUNT(*) as cnt FROM despesas WHERE ${where}`).get(params)).cnt;
   const rows  = await req.db.prepare(`SELECT * FROM despesas WHERE ${where} ORDER BY data_iso DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
   res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
 });
@@ -2494,15 +2509,15 @@ router.get('/despesas/rateio', async (req, res) => {
     ORDER BY valor_mensal_bruto DESC
   `).all();
 
-  const somaBase = contratos.reduce((s, c) => s + (Number(c.valor_mensal_bruto) || 0), 0);
+  const somaBase = contratos.reduce((s, c) => s + c.valor_mensal_bruto, 0);
 
   const rateio = contratos.map(c => {
-    const proporcao = somaBase > 0 ? (Number(c.valor_mensal_bruto) || 0) / somaBase : 0;
+    const proporcao = somaBase > 0 ? c.valor_mensal_bruto / somaBase : 0;
     return {
       numContrato:       c.numContrato,
       contrato:          c.contrato,
       orgao:             c.orgao,
-      valor_mensal:      +(Number(c.valor_mensal_bruto) || 0).toFixed(2),
+      valor_mensal:      +c.valor_mensal_bruto.toFixed(2),
       proporcao_pct:     +(proporcao * 100).toFixed(2),
       overhead_rateado:  +(proporcao * totalOverhead).toFixed(2),
     };
@@ -2778,7 +2793,7 @@ router.delete('/despesas/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-router.post('/import/despesas', (req, res, next) => getUpload(req).single("file")(req, res, next), async (req, res) => {
+router.post('/import/despesas', (req, res, next) => getUpload(req).single('file')(req, res, next), async (req, res) => {
   try {
     const extErr = validarExtensao(req.file.originalname, ['csv', 'txt']);
     if (extErr) { fs.unlinkSync(req.file.path); return res.status(400).json({ error: extErr }); }
@@ -2838,7 +2853,7 @@ router.post('/import/despesas', (req, res, next) => getUpload(req).single("file"
     });
     await batch();
 
-    await req.db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('despesas', @arquivo, @registros)`)
+    req.db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('despesas', @arquivo, @registros)`)
       .run({ arquivo: req.file.originalname, registros: imported });
     dashCacheInvalidate(req.companyKey);
     fs.unlinkSync(req.file.path);
@@ -2891,7 +2906,7 @@ function parseOFX(text) {
   return transactions;
 }
 
-router.post('/import/ofx', (req, res, next) => getUpload(req).single("file")(req, res, next), async (req, res) => {
+router.post('/import/ofx', (req, res, next) => getUpload(req).single('file')(req, res, next), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Arquivo OFX não enviado' });
     // Validação de extensão (P-6)
@@ -3272,21 +3287,21 @@ router.get('/fluxo-projetado', async (req, res) => {
     const contratos = req.db.prepare(
       "SELECT valor_mensal_liquido FROM contratos " +
       "WHERE status NOT LIKE '%ENCERRADO%' AND status NOT LIKE '%RESCINDIDO%' " +
-      "AND (vigencia_fim IS NULL OR vigencia_fim = '' OR safe_date(vigencia_fim) >= CURRENT_DATE)"
+      "AND (vigencia_fim = '' OR vigencia_fim >= date('now'))"
     ).all();
-    const receitaMensal = contratos.reduce((s, c) => s + (Number(c.valor_mensal_liquido) || 0), 0);
+    const receitaMensal = contratos.reduce((s, c) => s + (c.valor_mensal_liquido || 0), 0);
     const totalContratos = contratos.length;
 
     const despMedia = req.db.prepare(
       "SELECT COALESCE(AVG(mensal),0) as media FROM (" +
-        "SELECT to_char(safe_date(data_iso), 'YYYY-MM') as mes, SUM(valor_bruto) as mensal " +
-        "FROM despesas WHERE data_iso >= CURRENT_DATE + INTERVAL '-3 months' AND data_iso != '' " +
-        "GROUP BY to_char(safe_date(data_iso), 'YYYY-MM') ORDER BY mes DESC LIMIT 3)"
+        "SELECT strftime('%Y-%m', data_iso) as mes, SUM(valor_bruto) as mensal " +
+        "FROM despesas WHERE data_iso >= date('now', '-3 months') AND data_iso != '' " +
+        "GROUP BY strftime('%Y-%m', data_iso) ORDER BY mes DESC LIMIT 3)"
     ).get().media || 0;
 
     const extR = req.db.prepare(
       "SELECT COUNT(CASE WHEN credito > 0 AND status_conciliacao IN ('PENDENTE','A_IDENTIFICAR','') THEN 1 END) as pendentes, " +
-      "COUNT(CASE WHEN credito > 0 THEN 1 END) as total FROM extratos WHERE data_iso >= CURRENT_DATE + INTERVAL '-3 months'"
+      "COUNT(CASE WHEN credito > 0 THEN 1 END) as total FROM extratos WHERE data_iso >= date('now', '-3 months')"
     ).get();
     const pctInadimplencia = extR.total > 0 ? +((extR.pendentes / extR.total) * 100).toFixed(1) : 0;
 
@@ -3350,8 +3365,8 @@ router.get('/fluxo-parcelas', async (req, res) => {
     const despMedia = await req.db.prepare(`
       SELECT COALESCE(AVG(mensal), 0) as media FROM (
         SELECT SUM(valor_bruto) as mensal FROM despesas
-        WHERE data_iso >= CURRENT_DATE + INTERVAL '-3 months' AND data_iso != ''
-        GROUP BY to_char(safe_date(data_iso), 'YYYY-MM') ORDER BY 1 DESC LIMIT 3
+        WHERE data_iso >= date('now','-3 months') AND data_iso != ''
+        GROUP BY strftime('%Y-%m', data_iso) ORDER BY 1 DESC LIMIT 3
       )
     `).get().media || 0;
 
@@ -3778,9 +3793,9 @@ router.get('/export/margem', async (req, res) => {
 
     const contratos = await req.db.prepare(`SELECT numContrato, contrato, orgao, status, valor_mensal_bruto, vigencia_inicio, vigencia_fim, total_pago FROM contratos ORDER BY contrato`).all();
     const nfMap  = {};
-    await req.db.prepare(`SELECT n.contrato_ref, SUM(n.valor_bruto) as receita_bruta, SUM(n.valor_liquido) as receita_liquida, SUM(n.retencao) as total_retencao, COUNT(*) as qtd_nfs FROM notas_fiscais n WHERE ${nfFilter} GROUP BY n.contrato_ref`).all(params).forEach(r => { nfMap[r.contrato_ref] = r; });
+    (await req.db.prepare(`SELECT n.contrato_ref, SUM(n.valor_bruto) as receita_bruta, SUM(n.valor_liquido) as receita_liquida, SUM(n.retencao) as total_retencao, COUNT(*) as qtd_nfs FROM notas_fiscais n WHERE ${nfFilter} GROUP BY n.contrato_ref`).all(params)).forEach(r => { nfMap[r.contrato_ref] = r; });
     const despMap = {};
-    await req.db.prepare(`SELECT d.contrato_ref, SUM(d.valor_bruto) as total_despesas, SUM(CASE WHEN d.categoria='FOLHA' THEN d.valor_bruto ELSE 0 END) as desp_folha, SUM(CASE WHEN d.categoria='FORNECEDOR' THEN d.valor_bruto ELSE 0 END) as desp_fornecedor, SUM(CASE WHEN d.categoria NOT IN ('FOLHA','FORNECEDOR') THEN d.valor_bruto ELSE 0 END) as desp_outras FROM despesas d WHERE ${despFilter} GROUP BY d.contrato_ref`).all(params).forEach(r => { despMap[r.contrato_ref] = r; });
+    (await req.db.prepare(`SELECT d.contrato_ref, SUM(d.valor_bruto) as total_despesas, SUM(CASE WHEN d.categoria='FOLHA' THEN d.valor_bruto ELSE 0 END) as desp_folha, SUM(CASE WHEN d.categoria='FORNECEDOR' THEN d.valor_bruto ELSE 0 END) as desp_fornecedor, SUM(CASE WHEN d.categoria NOT IN ('FOLHA','FORNECEDOR') THEN d.valor_bruto ELSE 0 END) as desp_outras FROM despesas d WHERE ${despFilter} GROUP BY d.contrato_ref`).all(params)).forEach(r => { despMap[r.contrato_ref] = r; });
 
     const ExcelJS = require('exceljs');
     const wb = new ExcelJS.Workbook(); wb.creator = 'Montana';
@@ -4034,7 +4049,7 @@ router.get('/conciliacao/tres-vias', async (req, res) => {
     //   - marcador "⚠️ CONTAMINADA" (NFs pertencentes a outra empresa)
     //   - labels técnicos não-contrato (JUROS, SALDO, TRANSFERÊNCIA, PIX REJEITADO, Montana Segurança/Assessoria)
     const contratosCanon = new Set(
-      await req.db.prepare('SELECT numContrato FROM contratos').all().map(r => r.numContrato)
+      (await req.db.prepare('SELECT numContrato FROM contratos').all()).map(r => r.numContrato)
     );
     // Mapeamento de labels históricos → numContrato atual (mesma empresa).
     // Preenchido manualmente conforme contaminação identificada nos bancos.
@@ -4127,12 +4142,12 @@ router.get('/contratos/:num/detalhe', async (req, res) => {
     const baseCalculo   = totalRecebido > 0 ? totalRecebido : (c.total_pago || 0);
     const margem        = baseCalculo > 0 ? +((baseCalculo - totalDespesas) / baseCalculo * 100).toFixed(1) : 0;
 
-    const fluxoMensal = await req.db.prepare(`
+    const fluxoMensal = (await req.db.prepare(`
       SELECT substr(data_iso,1,7) as mes, SUM(credito) as recebido, COUNT(*) as qtd
       FROM extratos
       WHERE (contrato_vinculado = ? OR contrato_vinculado LIKE ?) AND data_iso != ''
       GROUP BY substr(data_iso,1,7) ORDER BY mes DESC LIMIT 12
-    `).all(num, orgLike).reverse();
+    `).all(num, orgLike)).reverse();
 
     res.json({ contrato: c, parcelas, nfs, extratos, despesas, fluxoMensal,
       resumo: { totalRecebido: +totalRecebido.toFixed(2), totalNFs: +totalNFs.toFixed(2),
@@ -4180,8 +4195,8 @@ router.post('/extratos/classificar-interno', async (req, res) => {
          AND (${buildWhere(PALAVRAS_INVESTIMENTO)})`
     );
 
-    const resInt = stmtInt.run(...buildParams(PALAVRAS_INTERNO));
-    const resInv = stmtInv.run(...buildParams(PALAVRAS_INVESTIMENTO));
+    const resInt = await stmtInt.run(...buildParams(PALAVRAS_INTERNO));
+    const resInv = await stmtInv.run(...buildParams(PALAVRAS_INVESTIMENTO));
 
     // Contagem de cada tipo após classificação
     const contagens = await db.prepare(`
@@ -4586,9 +4601,10 @@ router.get('/conciliacao/dashboard', async (req, res) => {
     const db = req.db;
     const { ano } = req.query;
     const anoFiltro = ano || new Date().getFullYear().toString();
+    const anoLike = anoFiltro + '%';
 
     // Progresso por mês (créditos)
-    const porMes = db.prepare(`
+    const porMes = await db.prepare(`
       SELECT
         substr(data_iso,1,7) as mes,
         COUNT(*) as total_lancamentos,
@@ -4597,13 +4613,13 @@ router.get('/conciliacao/dashboard', async (req, res) => {
         SUM(CASE WHEN status_conciliacao NOT IN ('PENDENTE','') AND status_conciliacao IS NOT NULL THEN credito ELSE 0 END) as valor_conciliado,
         SUM(CASE WHEN status_conciliacao IN ('PENDENTE','') OR status_conciliacao IS NULL THEN credito ELSE 0 END) as valor_pendente
       FROM extratos
-      WHERE credito > 0 AND data_iso LIKE @ano || '%'
+      WHERE credito > 0 AND data_iso LIKE @anolike
       GROUP BY substr(data_iso,1,7)
       ORDER BY mes
-    `).all({ ano: anoFiltro });
+    `).all({ anolike: anoLike });
 
     // Progresso por contrato (somente extratos vinculados)
-    const porContrato = db.prepare(`
+    const porContrato = await db.prepare(`
       SELECT
         contrato_vinculado,
         COUNT(*) as qtd_lancamentos,
@@ -4614,10 +4630,10 @@ router.get('/conciliacao/dashboard', async (req, res) => {
       FROM extratos
       WHERE credito > 0
         AND contrato_vinculado IS NOT NULL AND contrato_vinculado != ''
-        AND data_iso LIKE @ano || '%'
+        AND data_iso LIKE @anolike
       GROUP BY contrato_vinculado
       ORDER BY total_recebido DESC
-    `).all({ ano: anoFiltro });
+    `).all({ anolike: anoLike });
 
     // Totais gerais do ano
     const totais = await db.prepare(`
@@ -4627,8 +4643,8 @@ router.get('/conciliacao/dashboard', async (req, res) => {
         SUM(CASE WHEN status_conciliacao NOT IN ('PENDENTE','') AND status_conciliacao IS NOT NULL THEN 1 ELSE 0 END) as conciliados,
         SUM(CASE WHEN status_conciliacao NOT IN ('PENDENTE','') AND status_conciliacao IS NOT NULL THEN credito ELSE 0 END) as credito_conciliado
       FROM extratos
-      WHERE credito > 0 AND data_iso LIKE @ano || '%'
-    `).get({ ano: anoFiltro });
+      WHERE credito > 0 AND data_iso LIKE @anolike
+    `).get({ anolike: anoLike });
 
     // Créditos sem histórico ainda pendentes (problema de conciliação manual)
     const semHistorico = await db.prepare(`
@@ -4637,8 +4653,8 @@ router.get('/conciliacao/dashboard', async (req, res) => {
       WHERE credito > 0
         AND (status_conciliacao IS NULL OR status_conciliacao IN ('PENDENTE',''))
         AND (historico IS NULL OR TRIM(historico) = '' OR LENGTH(TRIM(historico)) < 5)
-        AND data_iso LIKE @ano || '%'
-    `).get({ ano: anoFiltro });
+        AND data_iso LIKE @anolike
+    `).get({ anolike: anoLike });
 
     // Resumo por categoria (todo o banco)
     const porCategoria = await db.prepare(`
@@ -4647,13 +4663,13 @@ router.get('/conciliacao/dashboard', async (req, res) => {
         COUNT(*) as qtd,
         SUM(credito) as total
       FROM extratos
-      WHERE credito > 0 AND data_iso LIKE @ano || '%'
+      WHERE credito > 0 AND data_iso LIKE @anolike
       GROUP BY COALESCE(status_conciliacao,'PENDENTE')
       ORDER BY total DESC
-    `).all({ ano: anoFiltro });
+    `).all({ anolike: anoLike });
 
-    const pctConciliado = totais.total_credito > 0
-      ? +((totais.credito_conciliado / totais.total_credito) * 100).toFixed(1)
+    const pctConciliado = Number(totais.total_credito || 0) > 0
+      ? +((Number(totais.credito_conciliado || 0) / Number(totais.total_credito || 0)) * 100).toFixed(1)
       : 0;
 
     res.json({
@@ -4661,27 +4677,27 @@ router.get('/conciliacao/dashboard', async (req, res) => {
       ano: anoFiltro,
       resumo: {
         total_lancamentos: totais.total,
-        total_credito: +totais.total_credito.toFixed(2),
+        total_credito: +Number(totais.total_credito || 0).toFixed(2),
         conciliados: totais.conciliados,
-        credito_conciliado: +totais.credito_conciliado.toFixed(2),
+        credito_conciliado: +Number(totais.credito_conciliado || 0).toFixed(2),
         pct_conciliado: pctConciliado,
         sem_historico_pendente: semHistorico.qtd,
-        valor_sem_historico_pendente: +semHistorico.total.toFixed(2),
+        valor_sem_historico_pendente: +Number(semHistorico.total || 0).toFixed(2),
       },
       por_mes: porMes.map(m => ({
         ...m,
-        total_credito: +m.total_credito.toFixed(2),
-        valor_conciliado: +m.valor_conciliado.toFixed(2),
-        valor_pendente: +m.valor_pendente.toFixed(2),
-        pct_conciliado: m.total_credito > 0
-          ? +((m.valor_conciliado / m.total_credito) * 100).toFixed(1) : 0,
+        total_credito: +Number(m.total_credito || 0).toFixed(2),
+        valor_conciliado: +Number(m.valor_conciliado || 0).toFixed(2),
+        valor_pendente: +Number(m.valor_pendente || 0).toFixed(2),
+        pct_conciliado: Number(m.total_credito || 0) > 0
+          ? +((Number(m.valor_conciliado || 0) / Number(m.total_credito || 0)) * 100).toFixed(1) : 0,
       })),
       por_contrato: porContrato.map(c => ({
         ...c,
-        total_recebido: +c.total_recebido.toFixed(2),
-        valor_conciliado: +c.valor_conciliado.toFixed(2),
-        pct_conciliado: c.total_recebido > 0
-          ? +((c.valor_conciliado / c.total_recebido) * 100).toFixed(1) : 0,
+        total_recebido: +Number(c.total_recebido || 0).toFixed(2),
+        valor_conciliado: +Number(c.valor_conciliado || 0).toFixed(2),
+        pct_conciliado: Number(c.total_recebido || 0) > 0
+          ? +((Number(c.valor_conciliado || 0) / Number(c.total_recebido || 0)) * 100).toFixed(1) : 0,
       })),
       por_categoria: porCategoria.map(c => ({
         ...c,

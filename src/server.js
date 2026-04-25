@@ -455,6 +455,120 @@ try {
   });
   console.log('  ⏰ Cron apuração mensal configurado: dia 1 às 05:00 (America/Araguaina)');
 
+  // ── Geração mensal automática de boletins — dia 1° às 05:30 ──
+  // Roda 30min após a apuração mensal para garantir que os dados do mês estejam fechados.
+  // Chama POST /api/boletins/gerar-mes para cada empresa, criando rascunhos do mês atual.
+  cron.schedule('30 5 1 * *', async () => {
+    const http = require('http');
+    const jwt  = require('jsonwebtoken');
+
+    const now  = new Date();
+    const ano  = now.getFullYear();
+    const mes  = String(now.getMonth() + 1).padStart(2, '0');
+    const competencia = `${ano}-${mes}`;
+
+    console.log(`[CRON] Geração mensal de boletins — competência ${competencia}`);
+
+    for (const key of Object.keys(COMPANIES)) {
+      try {
+        const body  = JSON.stringify({ mes: competencia });
+        const token = jwt.sign(
+          { id: 0, username: 'cron', role: 'admin' },
+          process.env.JWT_SECRET || 'montana_seg_secret_2026_!xK9#',
+          { expiresIn: '5m' }
+        );
+
+        await new Promise((resolve) => {
+          const req = http.request({
+            hostname: '127.0.0.1', port: PORT, path: '/api/boletins/gerar-mes',
+            method: 'POST',
+            headers: {
+              'Content-Type':   'application/json',
+              'Content-Length': Buffer.byteLength(body),
+              'X-Company':      key,
+              'Authorization':  'Bearer ' + token,
+            },
+          }, (resp) => {
+            let data = '';
+            resp.on('data', c => data += c);
+            resp.on('end', () => {
+              try {
+                const r = JSON.parse(data);
+                if (r.ok) {
+                  console.log(`  📋 Boletins [${key}] ${competencia}: ${r.criados} criados, ${r.existentes} já existiam`);
+                } else {
+                  console.warn(`  ⚠ Boletins gerar-mes [${key}]:`, r.error);
+                }
+              } catch (_) {}
+              resolve();
+            });
+          });
+          req.on('error', (e) => { console.warn(`  ⚠ Boletins cron [${key}]:`, e.message); resolve(); });
+          req.write(body);
+          req.end();
+        });
+      } catch (e) {
+        console.error(`  ⚠ Boletins cron [${key}]:`, e.message);
+      }
+    }
+  }, { timezone: 'America/Araguaina' });
+  console.log('  ⏰ Cron boletins mensais configurado: dia 1 às 05:30 (America/Araguaina)');
+
+  // ── Alertas Operacionais (PG) — todo dia às 08:00 ────────────
+  // Chama o endpoint /api/alertas-operacionais/enviar-email via HTTP para cada empresa.
+  // Complementa o cron de alertas SQLite acima, cobrindo empresas no PostgreSQL.
+  cron.schedule('0 8 * * *', async () => {
+    const http = require('http');
+    const jwt  = require('jsonwebtoken');
+    console.log('[CRON] Alertas operacionais (PG) — disparando por empresa...');
+
+    for (const key of Object.keys(COMPANIES)) {
+      try {
+        const body  = JSON.stringify({});
+        const token = jwt.sign(
+          { id: 0, username: 'cron', role: 'admin' },
+          process.env.JWT_SECRET || 'montana_seg_secret_2026_!xK9#',
+          { expiresIn: '5m' }
+        );
+
+        await new Promise((resolve) => {
+          const req = http.request({
+            hostname: '127.0.0.1', port: PORT, path: '/api/alertas-operacionais/enviar-email',
+            method: 'POST',
+            headers: {
+              'Content-Type':   'application/json',
+              'Content-Length': Buffer.byteLength(body),
+              'X-Company':      key,
+              'Authorization':  'Bearer ' + token,
+            },
+          }, (resp) => {
+            let data = '';
+            resp.on('data', c => data += c);
+            resp.on('end', () => {
+              try {
+                const r = JSON.parse(data);
+                if (r.enviado) {
+                  console.log(`  ⚠ Alertas op. PG enviados [${key}]: ${r.total} alerta(s) → ${r.destino}`);
+                } else if (r.ok) {
+                  console.log(`  ✅ Alertas op. PG [${key}]: ${r.motivo || 'nenhuma pendência'}`);
+                } else {
+                  console.warn(`  ⚠ Alertas op. PG [${key}]: ${r.erro || 'erro desconhecido'}`);
+                }
+              } catch (_) {}
+              resolve();
+            });
+          });
+          req.on('error', (e) => { console.warn(`  ⚠ Alertas op. cron PG [${key}]:`, e.message); resolve(); });
+          req.write(body);
+          req.end();
+        });
+      } catch (e) {
+        console.error(`  ⚠ Alertas op. cron PG [${key}]:`, e.message);
+      }
+    }
+  }, { timezone: 'America/Araguaina' });
+  console.log('  ⏰ Cron alertas operacionais PG configurado: todo dia 08:00 (America/Araguaina)');
+
   // ── Verificação de Duplicatas (Fase 3) — todo dia às 02:00 ───
   cron.schedule('0 2 * * *', async () => {
     console.log('[CRON] Iniciando verificação anti-duplicatas (Fase 3)...');

@@ -102,7 +102,7 @@ async function buscarDRE(db, dateFrom, dateTo) {
   despMes.forEach(m => { despMesMap[m.mes_ano] = m.saidas; });
   porMes.forEach(m => { m.saidas = despMesMap[m.mes_ano] || 0; });
 
-  const r = v => +v.toFixed(2);
+  const r = v => +Number(v || 0).toFixed(2);
 
   const recBruta    = receita.bruta;
   const totalRet    = ret.total_ret;
@@ -186,7 +186,7 @@ async function buscarDRE(db, dateFrom, dateTo) {
 // GET /api/dre
 router.get('/', async (req, res) => {
   const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
-  const dados = buscarDRE(req.db, dateFrom, dateTo);
+  const dados = await buscarDRE(req.db, dateFrom, dateTo);
   res.json({ periodo, ...dados });
 });
 
@@ -195,7 +195,7 @@ router.get('/excel', async (req, res) => {
   try {
     const ExcelJS = require('exceljs');
     const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
-    const { dre, despesas_detalhe } = buscarDRE(req.db, dateFrom, dateTo);
+    const { dre, despesas_detalhe } = await buscarDRE(req.db, dateFrom, dateTo);
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'Montana';
@@ -355,7 +355,7 @@ router.get('/pdf', async (req, res) => {
 // GET /api/dre — DRE principal
 router.get('/', async (req, res) => {
   const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
-  const dados = buscarDRE(req.db, dateFrom, dateTo);
+  const dados = await buscarDRE(req.db, dateFrom, dateTo);
   res.json({ periodo, ...dados });
 });
 
@@ -388,8 +388,8 @@ router.post('/apurar-agora', async (req, res) => {
     const to   = `${A}-${M}-31`;
     const comp = `${A}-${M}`;
 
-    db.prepare(`CREATE TABLE IF NOT EXISTS apuracao_mensal (
-      id BIGSERIAL PRIMARY KEY,
+    await db.prepare(`CREATE TABLE IF NOT EXISTS apuracao_mensal (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       competencia TEXT UNIQUE,
       receita_bruta REAL DEFAULT 0,
       retencoes REAL DEFAULT 0,
@@ -401,7 +401,7 @@ router.post('/apurar-agora', async (req, res) => {
       cofins_a_pagar REAL DEFAULT 0,
       irpj_estimado REAL DEFAULT 0,
       csll_estimado REAL DEFAULT 0,
-      gerado_em TIMESTAMP DEFAULT NOW(),
+      gerado_em TEXT DEFAULT (datetime('now','localtime')),
       obs TEXT
     )`).run();
 

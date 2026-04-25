@@ -95,7 +95,7 @@ router.delete('/cargos/:id', (req, res) => {
 
 // ─── FUNCIONÁRIOS ────────────────────────────────────────────────────────────
 
-router.get('/funcionarios', async (req, res) => {
+router.get('/funcionarios', (req, res) => {
   const { status, contrato_ref } = req.query;
   let sql = `
     SELECT f.*, c.nome as cargo_nome, c.cbo
@@ -108,7 +108,7 @@ router.get('/funcionarios', async (req, res) => {
   if (contrato_ref) { where.push('f.contrato_ref = ?'); params.push(contrato_ref); }
   if (where.length) sql += ' WHERE ' + where.join(' AND ');
   sql += ' ORDER BY f.nome';
-  res.json(await req.db.prepare(sql).all(params));
+  res.json(req.db.prepare(sql).all(...params));
 });
 
 router.get('/funcionarios/:id', (req, res) => {
@@ -162,7 +162,7 @@ router.patch('/funcionarios/:id', (req, res) => {
 router.delete('/funcionarios/:id', (req, res) => {
   // Soft delete — registra demissão
   req.db.prepare(`
-    UPDATE rh_funcionarios SET status='DEMITIDO', data_demissao=CURRENT_DATE, updated_at=datetime('now')
+    UPDATE rh_funcionarios SET status='DEMITIDO', data_demissao=date('now'), updated_at=datetime('now')
     WHERE id=?
   `).run(req.params.id);
   res.json({ ok: true });
@@ -291,7 +291,7 @@ router.patch('/folha/itens/:id', (req, res) => {
 
 // ─── FÉRIAS ──────────────────────────────────────────────────────────────────
 
-router.get('/ferias', async (req, res) => {
+router.get('/ferias', (req, res) => {
   const { funcionario_id } = req.query;
   let sql = `
     SELECT fe.*, f.nome as funcionario_nome
@@ -300,7 +300,7 @@ router.get('/ferias', async (req, res) => {
   const params = [];
   if (funcionario_id) { sql += ' WHERE fe.funcionario_id=?'; params.push(funcionario_id); }
   sql += ' ORDER BY fe.data_inicio DESC';
-  res.json(await req.db.prepare(sql).all(params));
+  res.json(req.db.prepare(sql).all(...params));
 });
 
 router.post('/ferias', (req, res) => {
@@ -323,7 +323,7 @@ router.patch('/ferias/:id', (req, res) => {
 
 // ─── AFASTAMENTOS ────────────────────────────────────────────────────────────
 
-router.get('/afastamentos', async (req, res) => {
+router.get('/afastamentos', (req, res) => {
   const { funcionario_id } = req.query;
   let sql = `
     SELECT a.*, f.nome as funcionario_nome
@@ -332,7 +332,7 @@ router.get('/afastamentos', async (req, res) => {
   const params = [];
   if (funcionario_id) { sql += ' WHERE a.funcionario_id=?'; params.push(funcionario_id); }
   sql += ' ORDER BY a.data_inicio DESC';
-  res.json(await req.db.prepare(sql).all(params));
+  res.json(req.db.prepare(sql).all(...params));
 });
 
 router.post('/afastamentos', (req, res) => {

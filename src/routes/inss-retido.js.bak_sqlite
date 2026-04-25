@@ -46,7 +46,7 @@ async function calcNFs(db, p) {
     FROM notas_fiscais
     WHERE competencia = ? OR competencia = ?
     ORDER BY tomador, data_emissao, numero
-  `).all([p.novo, p.antigo]);
+  `).all(p.novo, p.antigo);
 
   let total_bruto = 0, total_inss = 0, total_esperado = 0;
   const tomadoresMap = {};
@@ -144,7 +144,7 @@ router.get('/apuracao', async (req, res) => {
     const cfgRow            = await db.prepare(`SELECT valor FROM configuracoes WHERE chave = ?`).get(cfgKey);
     const dctfweb_declarado = cfgRow ? parseFloat(cfgRow.valor) || 0 : 0;
 
-    const { nfs, por_tomador, total_bruto, total_inss, total_esperado } = await calcNFs(db, p);
+    const { nfs, por_tomador, total_bruto, total_inss, total_esperado } = calcNFs(db, p);
 
     const gap = +Number(total_inss - dctfweb_declarado).toFixed(2);
 
@@ -181,7 +181,7 @@ router.post('/dctfweb', async (req, res) => {
 
     await db.prepare(`
       INSERT INTO configuracoes (chave, valor, updated_at)
-      VALUES (?, ?, NOW())
+      VALUES (?, ?, datetime('now','localtime'))
     `).run(`inss_dctfweb_${p.novo}`, String(v));
 
     res.json({ ok: true, competencia: p.novo, valor: v });
