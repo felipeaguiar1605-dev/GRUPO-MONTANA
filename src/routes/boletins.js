@@ -14,7 +14,7 @@ router.use(companyMw);
 
 // ─── INIT: Adicionar colunas extras nas tabelas de boletins ────
 
-router.use((req, res, next) => {
+router.use(async (req, res, next) => {
   const db = req.db;
   if (!db) return next();
 
@@ -1167,7 +1167,7 @@ router.get('/painel-faturamento', async (req, res) => {
       ORDER BY bc.nome
     `).all();
 
-    const resultado = contratos.map(bc => {
+    const resultado = await Promise.all(contratos.map(async bc => {
       // FIX1: COALESCE(valor_total, total_geral)
       const boletim = await db.prepare(`
         SELECT *, COALESCE(valor_total, total_geral, 0) AS valor_efetivo
@@ -1203,7 +1203,7 @@ router.get('/painel-faturamento', async (req, res) => {
           nfse_erro:   boletim.nfse_erro   || null,
         } : null,
       };
-    });
+    }));
 
     // FIX: aviso se algum contrato tem CNPJ não resolvido
     const semCnpj = resultado.filter(r => !r.insc_municipal && !r.cnpj_tomador_contrato);

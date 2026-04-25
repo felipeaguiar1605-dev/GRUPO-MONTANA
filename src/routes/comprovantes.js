@@ -124,7 +124,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // UPLOAD (multipart) — cria comprovante
-router.post('/upload', upload.single('arquivo'), (req, res) => {
+router.post('/upload', upload.single('arquivo'), async (req, res) => {
   try {
     const body = req.body || {};
     const {

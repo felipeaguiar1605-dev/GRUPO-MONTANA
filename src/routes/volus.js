@@ -37,7 +37,7 @@ const DEPT_CONTRATO = {
 
 // ─── Ensure tables ─────────────────────────────────────────────────────────
 
-async function await ensureTables(db) {
+async function ensureTables(db) {
   await db.prepare(`CREATE TABLE IF NOT EXISTS volus_pedidos (
     id              BIGSERIAL PRIMARY KEY,
     departamento    TEXT NOT NULL,

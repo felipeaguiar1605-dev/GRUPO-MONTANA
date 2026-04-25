@@ -5,7 +5,7 @@ router.use(companyMw);
 
 // ─── MIGRATIONS ──────────────────────────────────────────────────────────────
 
-async function await ensureTables(db) {
+async function ensureTables(db) {
   db.prepare(`CREATE TABLE IF NOT EXISTS jur_oficios (
     id BIGSERIAL PRIMARY KEY,
     numero TEXT,

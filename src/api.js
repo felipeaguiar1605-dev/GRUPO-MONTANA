@@ -1581,7 +1581,7 @@ router.delete('/vinculacoes/:extrato_id', async (req, res) => {
 });
 
 // ─── IMPORTAÇÃO DE CSVs ──────────────────────────────────────────
-router.post('/import/extratos', (req, res, next) => getUpload(req).single('file')(req, res, next), (req, res) => {
+router.post('/import/extratos', (req, res, next) => getUpload(req).single("file")(req, res, next), async (req, res) => {
   try {
     const extErr = validarExtensao(req.file.originalname, ['csv', 'txt']);
     if (extErr) { fs.unlinkSync(req.file.path); return res.status(400).json({ error: extErr }); }
@@ -1648,7 +1648,7 @@ router.post('/import/extratos', (req, res, next) => getUpload(req).single('file'
   }
 });
 
-router.post('/import/pagamentos', (req, res, next) => getUpload(req).single('file')(req, res, next), (req, res) => {
+router.post('/import/pagamentos', (req, res, next) => getUpload(req).single("file")(req, res, next), async (req, res) => {
   try {
     const extErr = validarExtensao(req.file.originalname, ['csv', 'txt']);
     if (extErr) { fs.unlinkSync(req.file.path); return res.status(400).json({ error: extErr }); }
@@ -1703,7 +1703,7 @@ router.post('/import/pagamentos', (req, res, next) => getUpload(req).single('fil
   }
 });
 
-router.post('/import/liquidacoes', (req, res, next) => getUpload(req).single('file')(req, res, next), (req, res) => {
+router.post('/import/liquidacoes', (req, res, next) => getUpload(req).single("file")(req, res, next), async (req, res) => {
   try {
     const extErr = validarExtensao(req.file.originalname, ['csv', 'txt']);
     if (extErr) { fs.unlinkSync(req.file.path); return res.status(400).json({ error: extErr }); }
@@ -2778,7 +2778,7 @@ router.delete('/despesas/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-router.post('/import/despesas', (req, res, next) => getUpload(req).single('file')(req, res, next), (req, res) => {
+router.post('/import/despesas', (req, res, next) => getUpload(req).single("file")(req, res, next), async (req, res) => {
   try {
     const extErr = validarExtensao(req.file.originalname, ['csv', 'txt']);
     if (extErr) { fs.unlinkSync(req.file.path); return res.status(400).json({ error: extErr }); }
@@ -2891,7 +2891,7 @@ function parseOFX(text) {
   return transactions;
 }
 
-router.post('/import/ofx', (req, res, next) => getUpload(req).single('file')(req, res, next), (req, res) => {
+router.post('/import/ofx', (req, res, next) => getUpload(req).single("file")(req, res, next), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Arquivo OFX não enviado' });
     // Validação de extensão (P-6)
@@ -3428,7 +3428,7 @@ router.get('/conta-vinculada/estimativa', async (req, res) => {
       return res.json({ contratos: [], mensagem: 'Nenhum contrato federal com conta vinculada encontrado' });
     }
 
-    const resultado = contratos.map(contrato => {
+    const resultado = await Promise.all(contratos.map(async contrato => {
       // NFs do contrato (buscar por tomador UFT/UFNT)
       let nfsQuery;
       if (contrato.numContrato.includes('UFT')) {
@@ -3584,7 +3584,7 @@ router.get('/conta-vinculada/estimativa', async (req, res) => {
           'Lei 8.036/90 (FGTS), LC 110/2001 (Contribuição Social)'
         ]
       };
-    });
+    }));
 
     res.json({ contratos: resultado, fatorRemuneracao: FATOR_REMUNERACAO_PADRAO });
   } catch (e) {

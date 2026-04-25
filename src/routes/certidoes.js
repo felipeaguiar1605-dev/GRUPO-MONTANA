@@ -36,7 +36,7 @@ function calcStatus(data_validade) {
   return 'válida';
 }
 
-async function await atualizarStatus(db, rows) {
+async function atualizarStatus(db, rows) {
   const upd = db.prepare(`UPDATE certidoes SET status=@status, updated_at=NOW() WHERE id=@id`);
   const trans = db.transaction(async () => {
     for (const r of rows) {
@@ -76,7 +76,7 @@ router.get('/alertas', async (req, res) => {
 // POST /api/certidoes
 router.post('/', async (req, res) => {
   const upload = getUpload(req);
-  upload.single('arquivo_pdf')(req, res, err => {
+  upload.single('arquivo_pdf')(req, res, async err => {
     if (err) return res.status(400).json({ error: err.message });
     const { tipo, numero, data_emissao, data_validade, observacoes } = req.body;
     if (!tipo) return res.status(400).json({ error: 'Tipo é obrigatório' });
@@ -93,7 +93,7 @@ router.post('/', async (req, res) => {
 // PUT /api/certidoes/:id
 router.put('/:id', async (req, res) => {
   const upload = getUpload(req);
-  upload.single('arquivo_pdf')(req, res, err => {
+  upload.single('arquivo_pdf')(req, res, async err => {
     if (err) return res.status(400).json({ error: err.message });
     const { tipo, numero, data_emissao, data_validade, observacoes } = req.body;
     const status = calcStatus(data_validade);

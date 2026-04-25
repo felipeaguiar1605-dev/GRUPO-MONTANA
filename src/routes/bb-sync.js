@@ -505,7 +505,7 @@ router.delete('/config', async (req, res) => {
   ['bb_client_id','bb_client_secret','bb_app_key','bb_agencia','bb_conta',
    'bb_ambiente','bb_scope','bb_ultimo_sync','bb_cert_path','bb_key_path',
    'bb_pfx_path','bb_pfx_passphrase','bb_contas_extra']
-    .forEach(k => await db.prepare(`DELETE FROM configuracoes WHERE chave=?`).run(k));
+    .forEach(async k => await db.prepare(`DELETE FROM configuracoes WHERE chave=?`).run(k));
   res.json({ ok: true });
 });
 

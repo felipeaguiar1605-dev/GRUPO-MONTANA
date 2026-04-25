@@ -108,7 +108,7 @@ function parsearOFX(texto) {
 
 // ── POST /api/ofx/importar ────────────────────────────────────────
 router.post('/importar', async (req, res) => {
-  upload.single('arquivo')(req, res, (err) => {
+  upload.single('arquivo')(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado. Use o campo "arquivo".' });
 

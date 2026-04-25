@@ -6,7 +6,7 @@ router.use(companyMw);
 const CATS = ['EQUIPAMENTO','MAQUINARIO','EPI','UNIFORME','CONSUMIVEL','MATERIAL'];
 
 // Garante tabela ficha_epi existe
-async function await ensureFichaTable(db) {
+async function ensureFichaTable(db) {
   db.prepare(`CREATE TABLE IF NOT EXISTS estoque_ficha_epi (
     id BIGSERIAL PRIMARY KEY,
     funcionario_id INTEGER,

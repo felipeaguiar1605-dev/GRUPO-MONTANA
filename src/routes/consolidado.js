@@ -18,7 +18,7 @@ function num(v) { return Math.round((v || 0) * 100) / 100; }
 
 // Lê colunas de uma tabela (suporta schemas que podem variar entre local/prod)
 async function cols(db, table) {
-  try { return await db.prepare(`SELECT column_name as name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='${' + 'table' + '}' ORDER BY ordinal_position`).all().map(c => c.name); }
+  try { return await db.prepare(`SELECT column_name as name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='${table}' ORDER BY ordinal_position`).all().map(c => c.name); }
   catch { return []; }
 }
 async function hasTable(db, name) {

@@ -338,7 +338,7 @@ router.get('/detalhe', async (req, res) => {
 
     const usadosExt = new Set();
 
-    const nfDetalhe = nfs.map(nf => {
+    const nfDetalhe = await Promise.all(nfs.map(async nf => {
       let match = null;
       if (nf.extrato_id) {
         const ext = await db.prepare(`SELECT id, data_iso, historico, credito FROM extratos WHERE id=?`).get(nf.extrato_id);
@@ -365,7 +365,7 @@ router.get('/detalhe', async (req, res) => {
         data_pagamento:  match?.data_iso || null,
         historico_pgto:  match?.historico || null,
       };
-    });
+    }));
 
     const creditosNaoAlocados = creditos.filter(c => !usadosExt.has(c.id));
 
