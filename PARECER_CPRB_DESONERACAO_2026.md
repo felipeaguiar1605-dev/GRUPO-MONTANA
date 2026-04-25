@@ -74,9 +74,13 @@ Não há risco de glosa por atividade incompatível. A totalidade da receita é 
 
 **Alíquota aplicável:** 3,0% sobre receita bruta (vigilância).
 
-### 3.2. Montana Assessoria Empresarial Ltda — ⚠️ ELEGÍVEL CONDICIONADA
+### 3.2. Montana Assessoria Empresarial Ltda — ✅ ELEGÍVEL (confirmado em 25/04/2026)
 
-Esta empresa apresenta **risco jurídico material** que deve ser verificado **antes de qualquer recolhimento ou decisão**.
+> **Cartão CNPJ verificado em 25/04/2026** (emissão Receita Federal 06/03/2026):
+> **CNAE Principal: 81.21-4-00 — Limpeza em prédios e em domicílios**
+> Elegibilidade confirmada. Nenhuma ação corretiva necessária.
+
+O receio inicial (nome "Assessoria Empresarial" → risco de CNAE 7020-4/00) era infundado. O CNAE primário é **8121-4/00 (Limpeza)**, exatamente o listado no art. 7º, IV da Lei 12.546/2011. O CNAE 70.20-4-00 (consultoria em gestão empresarial) consta apenas como **secundário** e não interfere na elegibilidade — a Receita Federal analisa o CNAE primário para fins de CPRB.
 
 #### Serviços prestados × elegibilidade
 
@@ -90,31 +94,11 @@ Esta empresa apresenta **risco jurídico material** que deve ser verificado **an
 | SESAU (178/2022) | Limpeza e conservação | 8121-4/00 | ✅ art. 7º, IV |
 | SEDUC (016/2023) | Limpeza, copeiragem | 8121-4/00 | ✅ art. 7º, IV |
 | PREVI PALMAS | Serviços de apoio | 8121-4/00 | ✅ art. 7º, IV |
-| UFT Motorista (05/2025) | Locação de motoristas | **7020-4/00 (?)** | ⚠️ **VERIFICAR** |
+| UFT Motorista (05/2025) | Locação de motoristas c/ condutor | 49.23-0-02 (secundário) | ✅ art. 7º, IV (locação MO) |
 
-#### Risco crítico: CNAE primário vs. nome empresarial
+> **Nota UFT Motorista:** O cartão CNPJ confirma o CNAE secundário **49.23-0-02** (serviço de transporte de passageiros / locação de automóveis com motorista), enquadrável na Lei 12.546/2011 como locação de mão-de-obra. Confirmar com a contabilidade o tratamento atual na EFD-Reinf.
 
-O nome **"Assessoria Empresarial"** pode indicar CNAE primário **7020-4/00** (consultoria de gestão empresarial) — atividade **não listada** no art. 7º da Lei 12.546/2011, portanto **inelegível à CPRB**.
-
-Se o CNPJ tiver CNAE primário 7020-4/00, a Receita Federal pode:
-1. Glosar toda a CPRB recolhida (exigindo a diferença + multa 75% + juros SELIC).
-2. Considerar a empresa inelegível mesmo que os serviços prestados sejam de limpeza.
-
-**A jurisprudência do CARF e da Receita Federal é firmada no CNAE registrado no cartão CNPJ, não no serviço efetivamente prestado.** A retificação do CNAE é possível, mas demanda tempo e documentação.
-
-#### Ação obrigatória — verificar cartão CNPJ
-
-```
-Acesso: https://cnpj.receita.fazenda.gov.br/
-CNPJ: 14.092.519/0001-51
-Verificar: campo "Atividade Econômica Principal" (CNAE primário)
-Cenário bom:  8121-4/00 → prosseguir com CPRB sem ressalva
-Cenário ruim: qualquer outro → avaliar retificação antes de optar
-```
-
-Esta verificação leva menos de 5 minutos e é **o item mais urgente deste parecer**.
-
-**Alíquota aplicável (se elegível):** 4,5% sobre receita bruta (limpeza/conservação).
+**Alíquota aplicável:** 4,5% sobre a receita bruta total (limpeza/conservação + motoristas).
 
 ---
 
@@ -224,25 +208,24 @@ A elegibilidade é incontestável (vigilância, CNAE 80.11/80.12) e os números 
 
 **Ação:** confirmar que o DARF 2985 foi recolhido em fev/2026 (ref. jan/2026). Para 2027: recolher DARF 2985 em fevereiro/2027.
 
-### 6.2. Montana Assessoria — Recomendação: **CONDICIONAL — VERIFICAR CNAE ANTES**
+### 6.2. Montana Assessoria — Recomendação: **ADERIR / MANTER CPRB**
 
-A análise financeira favorece claramente a CPRB: R$3.2M/ano em 2026, ainda positivo em 2027. No entanto, **o risco jurídico do CNAE pode inviabilizar tudo**.
+A análise financeira é fortemente favorável (R$3.17M/ano em 2026, ainda positivo em 2027) e a elegibilidade jurídica está **confirmada** pelo cartão CNPJ verificado em 25/04/2026: CNAE primário **8121-4/00 (Limpeza)**.
 
-**Intuição do gestor ("impressão que não") está parcialmente fundamentada:** se o CNAE primário for 7020-4/00 (consultoria), não apenas a adesão seria indevida como poderia gerar passivo tributário. A decisão certa é:
+**A intuição do gestor ("impressão que não") estava equivocada** — o CNAE primário é exatamente o necessário. O nome "Assessoria Empresarial" é apenas o nome comercial; o que vale para a Receita Federal é o CNAE registrado, que está correto. A decisão é simples:
 
-1. **AGORA (urgente):** acessar `https://cnpj.receita.fazenda.gov.br/` com CNPJ `14.092.519/0001-51` e verificar o CNAE primário.
-2. **Se CNAE = 8121-4/00:** CPRB é elegível → verificar se jan/2026 foi recolhido no código correto; planejar jan/2027.
-3. **Se CNAE ≠ 8121-4/00:** NÃO aderir. Avaliar com advogado tributarista se é viável retificar o CNAE (mudança cadastral na Receita Federal) antes de jan/2027.
+1. Confirmar se o DARF 2985 foi recolhido em fev/2026 (ref. jan/2026). Se sim: 2026 já está na CPRB corretamente.
+2. Para 2027: recolher DARF 2985 em fevereiro/2027 (ref. jan/2027) — irretratável para o ano.
 
 ### 6.3. Resumo executivo
 
 | | Assessoria | Segurança | Grupo |
 |---|:---:|:---:|:---:|
-| Elegibilidade jurídica | ⚠️ Verificar CNAE | ✅ Confirmada | — |
+| Elegibilidade jurídica | ✅ Confirmada (CNAE 8121-4/00) | ✅ Confirmada (CNAE 8011/8012) | — |
 | Caixa em jogo 2026 | R$ 3.166.900 | R$ 2.164.541 | **R$ 5.331.441** |
 | Caixa estimado 2027 | ≈ R$ 704.000 | ≈ R$ 537.000 | **≈ R$ 1.241.000** |
 | 2028 | — sem CPRB — | — sem CPRB — | — |
-| **Recomendação** | **Verificar CNAE → aderir se elegível** | **Aderir / manter** | — |
+| **Recomendação** | **✅ ADERIR / MANTER** | **✅ ADERIR / MANTER** | — |
 
 ---
 
@@ -250,8 +233,8 @@ A análise financeira favorece claramente a CPRB: R$3.2M/ano em 2026, ainda posi
 
 | Prioridade | Ação | Responsável | Prazo |
 |:---:|---|:---:|:---:|
-| 🔴 **1** | Verificar CNAE primário da Assessoria no cartão CNPJ (Receita Federal) | Diretoria / Contabilidade | **Imediato** |
-| 🔴 **2** | Confirmar DARF 2985 jan/2026 — Segurança e Assessoria (se CNAE ok) | Contabilidade | **Imediato** |
+| ✅ ~~**1**~~ | ~~Verificar CNAE primário da Assessoria~~ — **CONCLUÍDO** (CNAE 8121-4/00 confirmado em 25/04/2026) | Diretoria | **Feito** |
+| 🔴 **1** | Confirmar DARF 2985 jan/2026 — Segurança e Assessoria | Contabilidade | **Imediato** |
 | 🟡 **3** | Exportar eSocial "Resumo Remunerações por Competência" abr/2025–mar/2026 para ambos os CNPJs e re-rodar script com folha real | Dpto. Pessoal | Até 30/05/2026 |
 | 🟡 **4** | Se CNAE Assessoria divergir: consultar advogado tributarista sobre viabilidade de retificação | Diretoria | Até 30/06/2026 |
 | 🟢 **5** | Decisão formal sobre CPRB 2027 — reunião com contabilidade | Diretoria | **Até dez/2026** |
