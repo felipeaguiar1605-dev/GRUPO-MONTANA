@@ -239,6 +239,8 @@ class PgDb {
 }
 
 function _logQueryError(e, sql, values) {
+  // Suprime erros de migração (ALTER TABLE ADD COLUMN já existente)
+  if (e.code === "42701" || (e.message && e.message.includes("already exists"))) return;
   console.error('[db_pg] Erro na query:', e.message);
   console.error('  SQL:', sql.substring(0, 200));
   if (values?.length) console.error('  Params:', values);

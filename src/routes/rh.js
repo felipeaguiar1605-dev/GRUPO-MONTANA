@@ -162,7 +162,7 @@ router.patch('/funcionarios/:id', (req, res) => {
 router.delete('/funcionarios/:id', (req, res) => {
   // Soft delete — registra demissão
   req.db.prepare(`
-    UPDATE rh_funcionarios SET status='DEMITIDO', data_demissao=date('now'), updated_at=datetime('now')
+    UPDATE rh_funcionarios SET status='DEMITIDO', data_demissao=CURRENT_DATE, updated_at=datetime('now')
     WHERE id=?
   `).run(req.params.id);
   res.json({ ok: true });

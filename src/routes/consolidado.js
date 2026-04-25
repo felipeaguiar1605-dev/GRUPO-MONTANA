@@ -159,7 +159,7 @@ router.get('/consolidado/resumo', async (req, res) => {
         const ca = hasTable(db,'contratos') ? await db.prepare(`
           SELECT COUNT(*) cnt FROM contratos
            WHERE COALESCE(vigencia_fim,'') = ''
-              OR vigencia_fim >= DATE('now')
+              OR vigencia_fim >= CURRENT_DATE
         `).get() : { cnt: 0 };
 
         const resultado = num(receita_liquida - despesas);

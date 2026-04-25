@@ -30,7 +30,7 @@ router.get('/kpis', async (req, res) => {
   const disputa  = await req.db.prepare(`SELECT COUNT(*) n, COALESCE(SUM(valor_estimado),0) v FROM licitacoes WHERE status IN ('em análise','proposta enviada','recurso')`).get();
   const proximas = await req.db.prepare(`
     SELECT * FROM licitacoes
-    WHERE data_abertura >= date('now') AND status IN ('em análise','proposta enviada')
+    WHERE safe_date(data_abertura) >= CURRENT_DATE AND status IN ('em análise','proposta enviada')
     ORDER BY data_abertura ASC LIMIT 5
   `).all();
   const porStatus = await req.db.prepare(`SELECT status, COUNT(*) n FROM licitacoes GROUP BY status`).all();

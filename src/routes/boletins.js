@@ -329,7 +329,7 @@ router.post('/gerar-boletim', async (req, res) => {
 
     const stmt = db.prepare(`INSERT INTO bol_boletins
       (contrato_id, competencia, data_emissao, valor_base, valor_total, glosas, acrescimos, discriminacao, status, nfse_status)
-      VALUES (?, ?, date('now'), ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')`);
+      VALUES (?, ?, CURRENT_DATE, ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')`);
     const info = stmt.run(contrato_id, competencia, valor_base, valor_base, discriminacao);
     const novo = await db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(info.lastInsertRowid);
     res.json({ data: novo, novo: true });
@@ -1252,7 +1252,7 @@ router.post('/gerar-mes', async (req, res) => {
 
     const ins = db.prepare(`INSERT INTO bol_boletins
       (contrato_id, competencia, data_emissao, valor_base, valor_total, glosas, acrescimos, discriminacao, status, nfse_status)
-      VALUES (?, ?, date('now'), ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')`);
+      VALUES (?, ?, CURRENT_DATE, ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')`);
 
     let criados = 0, existentes = 0;
 

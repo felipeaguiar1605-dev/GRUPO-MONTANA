@@ -75,7 +75,7 @@ router.get('/', async (req, res) => {
              valor_bruto, valor_liquido, status_conciliacao, extrato_id,
              inss, ir, iss, csll, pis, cofins, COALESCE(retencao, 0) AS retencao
       FROM notas_fiscais
-      WHERE to_char((data_emissao)::date, 'YYYY-MM') = ?
+      WHERE to_char(safe_date(data_emissao), 'YYYY-MM') = ?
         AND COALESCE(valor_bruto, 0) > 0
         AND COALESCE(status_conciliacao,'') NOT IN ('ASSESSORIA','IGNORAR','CANCELADA')
     `).all(competencia);

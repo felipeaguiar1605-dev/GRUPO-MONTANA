@@ -271,7 +271,7 @@ router.get('/sugestoes', companyMw, async (req, res) => {
     try {
       const ctrs = await db.prepare(`SELECT numContrato, contrato FROM contratos WHERE LOWER(COALESCE(status,'')) NOT LIKE '%encerrad%' AND LOWER(COALESCE(numContrato,'')) NOT LIKE '%encerrad%' LIMIT 10`).all();
       erpCtx = `Contratos ativos: ${ctrs.map(c => c.numContrato).join(', ')}\n`;
-      const nfsMes = await db.prepare(`SELECT COUNT(*) n FROM notas_fiscais WHERE to_char((data_emissao)::date, 'YYYY-MM')=?`).get(`${ano}-${mes}`);
+      const nfsMes = await db.prepare(`SELECT COUNT(*) n FROM notas_fiscais WHERE to_char(safe_date(data_emissao), 'YYYY-MM')=?`).get(`${ano}-${mes}`);
       erpCtx += `NFs emitidas em ${mes}/${ano}: ${nfsMes?.n || 0}\n`;
     } catch (_) {}
 

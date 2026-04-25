@@ -613,7 +613,7 @@ router.get('/dashboard', async (req, res) => {
   const despPendentes = await req.db.prepare(`SELECT COUNT(*) as n FROM despesas WHERE status = 'PENDENTE'`).get();
   if (despPendentes.n > 0) alertas.push({ tipo: 'warning', msg: `${despPendentes.n} despesas pendentes de pagamento`, icon: '💸' });
 
-  const contratosVencidos = await req.db.prepare(`SELECT COUNT(*) as n FROM contratos WHERE vigencia_fim != '' AND vigencia_fim < date('now')`).get();
+  const contratosVencidos = await req.db.prepare(`SELECT COUNT(*) as n FROM contratos WHERE vigencia_fim IS NOT NULL AND vigencia_fim != '' AND safe_date(vigencia_fim) < CURRENT_DATE`).get();
   if (contratosVencidos.n > 0) alertas.push({ tipo: 'danger', msg: `${contratosVencidos.n} contratos com vigência vencida`, icon: '🔴' });
 
   // 11. Conciliação por status (para gráfico donut)
@@ -1859,14 +1859,14 @@ router.get('/relatorios/lucro-por-contrato', async (req, res) => {
     SELECT n.contrato_ref, substr(n.data_emissao,1,7) as mes,
            COALESCE(SUM(n.valor_bruto),0) as receita,
            0 as despesa
-    FROM notas_fiscais n WHERE n.data_emissao >= date('now','-6 months') AND n.contrato_ref != ''
+    FROM notas_fiscais n WHERE n.data_emissao >= CURRENT_DATE + INTERVAL '-6 months' AND n.contrato_ref != ''
     GROUP BY n.contrato_ref, substr(n.data_emissao,1,7)
     ORDER BY mes
   `).all();
   const despMensal = await req.db.prepare(`
     SELECT d.contrato_ref, substr(d.data_iso,1,7) as mes,
            COALESCE(SUM(d.valor_bruto),0) as despesa
-    FROM despesas d WHERE d.data_iso >= date('now','-6 months') AND d.contrato_ref != ''
+    FROM despesas d WHERE d.data_iso >= CURRENT_DATE + INTERVAL '-6 months' AND d.contrato_ref != ''
     GROUP BY d.contrato_ref, substr(d.data_iso,1,7)
   `).all();
 
@@ -3272,21 +3272,21 @@ router.get('/fluxo-projetado', async (req, res) => {
     const contratos = req.db.prepare(
       "SELECT valor_mensal_liquido FROM contratos " +
       "WHERE status NOT LIKE '%ENCERRADO%' AND status NOT LIKE '%RESCINDIDO%' " +
-      "AND (vigencia_fim = '' OR vigencia_fim >= date('now'))"
+      "AND (vigencia_fim IS NULL OR vigencia_fim = '' OR safe_date(vigencia_fim) >= CURRENT_DATE)"
     ).all();
     const receitaMensal = contratos.reduce((s, c) => s + (c.valor_mensal_liquido || 0), 0);
     const totalContratos = contratos.length;
 
     const despMedia = req.db.prepare(
       "SELECT COALESCE(AVG(mensal),0) as media FROM (" +
-        "SELECT to_char((data_iso)::date, 'YYYY-MM') as mes, SUM(valor_bruto) as mensal " +
-        "FROM despesas WHERE data_iso >= date('now', '-3 months') AND data_iso != '' " +
-        "GROUP BY to_char((data_iso)::date, 'YYYY-MM') ORDER BY mes DESC LIMIT 3)"
+        "SELECT to_char(safe_date(data_iso), 'YYYY-MM') as mes, SUM(valor_bruto) as mensal " +
+        "FROM despesas WHERE data_iso >= CURRENT_DATE + INTERVAL '-3 months' AND data_iso != '' " +
+        "GROUP BY to_char(safe_date(data_iso), 'YYYY-MM') ORDER BY mes DESC LIMIT 3)"
     ).get().media || 0;
 
     const extR = req.db.prepare(
       "SELECT COUNT(CASE WHEN credito > 0 AND status_conciliacao IN ('PENDENTE','A_IDENTIFICAR','') THEN 1 END) as pendentes, " +
-      "COUNT(CASE WHEN credito > 0 THEN 1 END) as total FROM extratos WHERE data_iso >= date('now', '-3 months')"
+      "COUNT(CASE WHEN credito > 0 THEN 1 END) as total FROM extratos WHERE data_iso >= CURRENT_DATE + INTERVAL '-3 months'"
     ).get();
     const pctInadimplencia = extR.total > 0 ? +((extR.pendentes / extR.total) * 100).toFixed(1) : 0;
 
@@ -3350,8 +3350,8 @@ router.get('/fluxo-parcelas', async (req, res) => {
     const despMedia = await req.db.prepare(`
       SELECT COALESCE(AVG(mensal), 0) as media FROM (
         SELECT SUM(valor_bruto) as mensal FROM despesas
-        WHERE data_iso >= date('now','-3 months') AND data_iso != ''
-        GROUP BY to_char((data_iso)::date, 'YYYY-MM') ORDER BY 1 DESC LIMIT 3
+        WHERE data_iso >= CURRENT_DATE + INTERVAL '-3 months' AND data_iso != ''
+        GROUP BY to_char(safe_date(data_iso), 'YYYY-MM') ORDER BY 1 DESC LIMIT 3
       )
     `).get().media || 0;
 

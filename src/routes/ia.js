@@ -33,7 +33,7 @@ async function buildContexto(db, company) {
     const desp = await db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) v FROM despesas WHERE data_iso>=? AND data_iso<=?`).get(from, to);
     const pend = await db.prepare(`SELECT COUNT(*) n FROM extratos WHERE status_conciliacao='PENDENTE'`).get();
     const ctrs = await db.prepare(`SELECT numContrato, contrato, valor_mensal_bruto FROM contratos WHERE LOWER(COALESCE(status,'')) NOT LIKE '%encerrad%' AND LOWER(COALESCE(numContrato,'')) NOT LIKE '%encerrad%' LIMIT 5`).all();
-    const certs= await db.prepare(`SELECT tipo, data_validade FROM certidoes WHERE data_validade <= date('now','+30 days') AND data_validade >= date('now') LIMIT 5`).all().catch?.() ?? [];
+    const certs= await db.prepare(`SELECT tipo, data_validade FROM certidoes WHERE safe_date(data_validade) <= CURRENT_DATE + INTERVAL '+30 days' AND safe_date(data_validade) >= CURRENT_DATE LIMIT 5`).all().catch?.() ?? [];
 
     const fmt = v => `R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
 
@@ -49,7 +49,7 @@ async function buildContexto(db, company) {
     }
 
     try {
-      const certsRows = await db.prepare(`SELECT tipo, data_validade FROM certidoes WHERE data_validade <= date('now','+30 days') AND data_validade >= date('now') LIMIT 5`).all();
+      const certsRows = await db.prepare(`SELECT tipo, data_validade FROM certidoes WHERE safe_date(data_validade) <= CURRENT_DATE + INTERVAL '+30 days' AND safe_date(data_validade) >= CURRENT_DATE LIMIT 5`).all();
       if (certsRows.length) {
         ctx += `\nCertidões vencendo em 30 dias:\n`;
         certsRows.forEach(c => { ctx += `  - ${c.tipo}: vence ${c.data_validade}\n`; });
