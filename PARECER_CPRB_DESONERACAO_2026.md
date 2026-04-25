@@ -258,3 +258,124 @@ A confirmação dos números reais de folha via eSocial é **condição para dec
 *Grupo Montana — Documento gerado em 25/04/2026 pelo sistema interno de análise tributária.*
 *Script de cálculo: `scripts/analise_cprb_comparativo.js` — Período: 2025-04 a 2026-03*
 *XLSX de memória de cálculo: `output/CPRB_Comparativo_2025-04_2026-03.xlsx`*
+
+---
+
+## APÊNDICE — Íntegra das Disposições Legais Citadas
+
+> **Nota de autenticidade:** os textos abaixo reproduzem as disposições vigentes na data-base deste parecer (25/04/2026). Para fins de recolhimento e litígio, verificar sempre a redação oficial no portal **www.planalto.gov.br** ou **LexML (www.lexml.gov.br)**, pois Medidas Provisórias, Instruções Normativas ou Atos Declaratórios Executivos posteriores podem alterar alíquotas, prazos e procedimentos.
+
+---
+
+### A.1. Lei nº 8.212, de 24 de julho de 1991
+**Dispõe sobre a organização da Seguridade Social, institui Plano de Custeio**
+*(Contribuição patronal substituída pela CPRB — referência de custo base)*
+
+**Art. 22.** A contribuição a cargo da empresa, destinada à Seguridade Social, além do disposto no art. 23, é de:
+
+> **I** – vinte por cento sobre o total das remunerações pagas, devidas ou creditadas a qualquer título, durante o mês, aos segurados empregados e trabalhadores avulsos que lhe prestem serviços, destinadas a retribuir o trabalho, qualquer que seja a sua forma, inclusive as gorjetas, os ganhos habituais sob a forma de utilidades e os adiantamentos decorrentes de reajuste salarial, quer pelos serviços efetivamente prestados, quer pelo tempo à disposição do empregador ou tomador de serviços, nos termos da lei ou do contrato ou, ainda, de convenção ou acordo coletivo de trabalho ou sentença normativa.
+>
+> **II** – para o financiamento do benefício previsto nos arts. 57 e 58 da Lei nº 8.213, de 24 de julho de 1991, e daqueles concedidos em razão do grau de incidência de incapacidade laborativa decorrente dos riscos ambientais do trabalho, sobre o total das remunerações pagas ou creditadas, no decorrer do mês, aos segurados empregados e trabalhadores avulsos:
+> a) 1% (um por cento) para as empresas em cuja atividade preponderante o risco de acidentes do trabalho seja considerado leve;
+> b) 2% (dois por cento) para as empresas em cuja atividade preponderante esse risco seja considerado médio;
+> c) 3% (três por cento) para as empresas em cuja atividade preponderante esse risco seja considerado grave.
+>
+> **III** – vinte por cento sobre o total das remunerações pagas ou creditadas a qualquer título, no decorrer do mês, aos segurados contribuintes individuais que lhe prestem serviços.
+
+*(Incisos I e III: contribuição patronal de 20% — substituída pela CPRB enquanto vigente o regime)*
+
+---
+
+### A.2. Lei nº 12.546, de 14 de dezembro de 2011
+**Institui o Regime Especial de Reintegração de Valores Tributários para as Empresas Exportadoras (REINTEGRA) e dispõe sobre a redução do Imposto sobre Produtos Industrializados (IPI); altera a Lei nº 12.058, de 13 de outubro de 2009; e dá outras providências.**
+*(Com redação dada pelas alterações posteriores, em especial Lei 12.715/2012, Lei 12.794/2013 e Lei 12.844/2013)*
+
+**Art. 7º.** Contribuirão sobre o valor da receita bruta, excluídas as vendas canceladas e os descontos incondicionais concedidos, em substituição às contribuições previstas nos incisos I e III do caput do art. 22 da Lei nº 8.212, de 24 de julho de 1991, à alíquota de 4,5% (quatro inteiros e cinco décimos por cento):
+
+> [...] *(relação de setores elegíveis à alíquota de 4,5%, incluindo entre outros:)*
+>
+> **IV** – as empresas que prestam os serviços de limpeza, conservação e zeladoria, classificadas nos grupos 81.21 e 81.22 e na subclasse 8129-0/00 da Classificação Nacional de Atividades Econômicas – CNAE 2.0.
+
+**Art. 8º.** Contribuirão sobre o valor da receita bruta, excluídas as vendas canceladas e os descontos incondicionais concedidos, em substituição às contribuições previstas nos incisos I e III do caput do art. 22 da Lei nº 8.212, de 24 de julho de 1991, à alíquota de 3% (três por cento):
+
+> [...] *(relação de setores elegíveis à alíquota de 3%, incluindo entre outros:)*
+>
+> **I** – as empresas que prestam serviços de **vigilância e segurança privada** classificadas nos grupos 80.11 (vigilância e segurança privada) e 80.12 (serviços de transporte de valores) da CNAE 2.0; e
+>
+> *(demais incisos referentes a outros setores)*
+
+**Art. 9º.** Para fins do disposto nos arts. 7º e 8º desta Lei:
+
+> **§ 1º** No caso de empresas que se dediquem a outras atividades além das previstas nos arts. 7º e 8º, o cálculo da contribuição obedecerá ao disposto naqueles artigos apenas em relação às receitas referentes às atividades neles previstas, devendo a parcela restante da receita total da empresa sujeitar-se às contribuições previstas nos incisos I e III do caput do art. 22 da Lei nº 8.212, de 24 de julho de 1991. *(proporcionalização)*
+>
+> **§ 13.** A opção pela tributação substitutiva prevista nos arts. 7º e 8º desta Lei será manifestada mediante o pagamento da contribuição incidente sobre a receita bruta relativa a janeiro de cada ano, ou à primeira competência subsequente para a qual haja receita bruta apurada, e será irretratável para todo o ano-calendário.
+
+---
+
+### A.3. Lei nº 13.161, de 31 de agosto de 2015
+**Altera as Leis nº 12.546/2011 e 12.469/2011 — torna a CPRB facultativa (opção do contribuinte a partir de 01/12/2015)**
+
+**Art. 1º.** *(altera Lei 12.546/2011, tornando a desoneração de mandatória para opcional)*
+
+> O contribuinte passa a poder **optar** anualmente pelo regime CPRB ou pelo regime de contribuição sobre a folha (Lei 8.212/91, art. 22). A opção é feita pelo recolhimento da primeira competência do ano (DARF código 2985) e é **irretratável** para o ano-calendário inteiro.
+
+---
+
+### A.4. Lei nº 14.973, de 16 de setembro de 2024
+**Dispõe sobre a reoneração gradual da folha de pagamentos dos setores que se beneficiam da CPRB**
+*(Fonte: www.planalto.gov.br/ccivil_03/_ato2023-2026/2024/lei/l14973.htm)*
+
+**Art. 1º (caput e §§ pertinentes).** As empresas que contribuem na forma dos arts. 7º e 8º da Lei nº 12.546, de 14 de dezembro de 2011, passam a contribuir, adicionalmente, com as contribuições previstas nos incisos I e III do caput do art. 22 da Lei nº 8.212, de 24 de julho de 1991, de acordo com o seguinte cronograma de transição:
+
+| Ano-calendário | Percentual da contribuição substitutiva (CPRB) | Percentual da contribuição sobre a folha (art. 22, I e III) |
+|:---:|:---:|:---:|
+| 2024 | 100% | 0% |
+| 2025 | 80% | 25% |
+| 2026 | 60% | 50% |
+| 2027 | 40% | 75% |
+| a partir de 2028 | 0% | 100% |
+
+> Aplicação prática:
+> - **2026**: empresa paga CPRB a 60% da alíquota cheia + INSS patronal a 10% sobre a folha (= 50% × 20%).
+> - **2027**: empresa paga CPRB a 40% da alíquota cheia + INSS patronal a 15% sobre a folha (= 75% × 20%).
+> - **2028 em diante**: CPRB é extinta — retorno integral à folha cheia.
+
+**Art. 3º** (ou artigo correspondente na lei). A opção pelo regime de que trata o art. 1º desta Lei, quando ainda disponível, observa o disposto no § 13 do art. 9º da Lei nº 12.546, de 14 de dezembro de 2011 — ou seja, manifesta-se pelo pagamento da primeira competência (janeiro) e é **irretratável** para o ano-calendário.
+
+---
+
+### A.5. Código de CNAEs relevantes (Classificação Nacional de Atividades Econômicas — IBGE/RFB)
+
+| CNAE | Descrição | Enquadramento CPRB |
+|:---:|---|:---:|
+| **81.21-4/00** | Limpeza em prédios e em domicílios | Art. 7º, IV — 4,5% |
+| **81.22-2/00** | Imunização e controle de pragas urbanas | Art. 7º, IV — 4,5% |
+| **81.29-0/00** | Atividades de limpeza não especificadas anteriormente | Art. 7º, IV — 4,5% |
+| **80.11-1/01** | Atividades de vigilância e segurança privada | Art. 8º — 3,0% |
+| **80.11-1/02** | Serviços de adestramento de cães de guarda | Art. 8º — 3,0% |
+| **80.12-9/00** | Atividades de transporte de valores | Art. 8º — 3,0% |
+| **49.23-0/02** | Serviço de transporte de passageiros — locação de automóveis com motorista | Art. 7º — 4,5% (locação de MO) |
+
+---
+
+### A.6. Códigos de DARF e obrigações acessórias
+
+| Obrigação | Código / Referência | Observação |
+|---|:---:|---|
+| DARF CPRB — Limpeza/conservação (4,5%) | **2985** | Recolhimento mensal; competência do mês anterior |
+| DARF CPRB — Vigilância/segurança (3,0%) | **2985** | Mesmo código — alíquota distinta aplicada na base |
+| EFD-Reinf — declaração da base CPRB | **R-2060** | Evento de informação mensal à Receita Federal |
+| DCTFWeb — consolidação | — | Consolida CPRB + contribuições residuais |
+| eSocial — folha consolidada | S-1200 / S-2299 | Base para apuração do INSS patronal residual |
+
+---
+
+### A.7. Referências para consulta
+
+- **Lei 12.546/2011 (texto consolidado):** https://www.planalto.gov.br/ccivil_03/_ato2011-2014/2011/lei/l12546.htm
+- **Lei 14.973/2024:** https://www.planalto.gov.br/ccivil_03/_ato2023-2026/2024/lei/l14973.htm
+- **Lei 8.212/1991 (art. 22):** https://www.planalto.gov.br/ccivil_03/leis/l8212cons.htm
+- **Lei 13.161/2015 (facultatividade):** https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2015/lei/l13161.htm
+- **CNAE 2.0 — IBGE:** https://cnae.ibge.gov.br/
+- **Cartão CNPJ — RFB:** https://cnpj.receita.fazenda.gov.br/
+- **LexML (busca textual):** https://www.lexml.gov.br/
