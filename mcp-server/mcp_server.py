@@ -465,11 +465,346 @@ def verificar_duplicata(
 
 
 # ══════════════════════════════════════════════════════════════════════
+# TOOLS — Boletins de Medição e Faturamento (adicionados 2026-04-25)
+# ══════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def boletins_mes(
+    empresa: str = "assessoria",
+    mes_ref: str = "",
+    contrato: str = "",
+    limite: int = 50,
+) -> str:
+    """
+    Lista boletins de medicao do ERP cloud.
+    Parametros:
+      empresa: assessoria ou seguranca
+      mes_ref: YYYY-MM (vazio = todos)
+      contrato: filtrar por nome de contrato (parcial, ex: 'DETRAN', 'UFT')
+      limite: max registros (default 50)
+    Retorna: id, contrato, mes, valor, status, nfse_status
+    """
+    conn = _get_conn(empresa)
+    cur = conn.cursor()
+
+    query = """
+        SELECT b.id,
+               bc.nome AS contrato,
+               b.mes_referencia,
+               COALESCE(b.valor_total, b.total_geral, 0) AS valor,
+               b.status,
+               COALESCE(b.nfse_status, 'nao_emitido') AS nfse_status,
+               b.nfse_numero,
+               b.observacoes
+        FROM bol_boletins b
+        JOIN bol_contratos bc ON b.contrato_id = bc.id
+        WHERE 1=1
+    """
+    params: list = []
+
+    if mes_ref:
+        query += " AND b.mes_referencia = ?"
+        params.append(mes_ref)
+    if contrato:
+        query += " AND upper(bc.nome) LIKE ?"
+        params.append(f"%{contrato.upper()}%")
+
+    query += " ORDER BY b.mes_referencia DESC, bc.nome LIMIT ?"
+    params.append(limite)
+
+    try:
+        cur.execute(query, params)
+        rows = cur.fetchall()
+    except Exception as e:
+        conn.close()
+        return f"ERRO ao consultar boletins: {e}"
+
+    conn.close()
+
+    if not rows:
+        return f"Nenhum boletim encontrado (empresa={empresa}, mes={mes_ref or 'todos'})."
+
+    lines = [f"BOLETINS — {empresa.upper()} ({len(rows)} registros):"]
+    lines.append(f"{'ID':>5}  {'Contrato':<38}  {'Mês':>7}  {'Valor':>14}  {'Status':>12}  {'NFS-e':>14}")
+    lines.append("─" * 100)
+    for r in rows:
+        nf_info = f"#{r[6]}" if r[6] else r[5]
+        lines.append(
+            f"{r[0]:>5}  {(r[1] or '')[:38]:<38}  {(r[2] or ''):>7}  "
+            f"R$ {(r[3] or 0):>11,.2f}  {(r[4] or 'pendente'):>12}  {nf_info:>14}"
+        )
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def painel_faturamento(
+    empresa: str = "assessoria",
+    mes_ref: str = "",
+) -> str:
+    """
+    Painel resumido de faturamento: quantos boletins pendentes/aprovados/emitidos
+    e valor total por contrato. Mostra contratos sem CNPJ configurado.
+    Parametros:
+      empresa: assessoria ou seguranca
+      mes_ref: YYYY-MM (vazio = mes atual do sistema)
+    """
+    conn = _get_conn(empresa)
+    cur = conn.cursor()
+
+    # Tenta determinar mes_ref automaticamente se nao fornecido
+    if not mes_ref:
+        cur.execute("SELECT MAX(mes_referencia) FROM bol_boletins")
+        row = cur.fetchone()
+        mes_ref = (row[0] or "") if row else ""
+
+    query = """
+        SELECT bc.nome AS contrato,
+               bc.insc_municipal AS cnpj_tomador,
+               COUNT(*) AS total,
+               SUM(CASE WHEN b.status='pendente' THEN 1 ELSE 0 END) AS pendentes,
+               SUM(CASE WHEN b.status='aprovado' THEN 1 ELSE 0 END) AS aprovados,
+               SUM(CASE WHEN b.status='emitido'  THEN 1 ELSE 0 END) AS emitidos,
+               SUM(COALESCE(b.valor_total, b.total_geral, 0)) AS valor_total
+        FROM bol_boletins b
+        JOIN bol_contratos bc ON b.contrato_id = bc.id
+        WHERE b.mes_referencia = ?
+        GROUP BY bc.id
+        ORDER BY valor_total DESC
+    """
+    try:
+        cur.execute(query, (mes_ref,))
+        rows = cur.fetchall()
+    except Exception as e:
+        conn.close()
+        return f"ERRO: {e}"
+
+    conn.close()
+
+    if not rows:
+        return f"Sem boletins para {mes_ref} ({empresa})."
+
+    total_val = sum(r[6] or 0 for r in rows)
+    sem_cnpj  = sum(1 for r in rows if not r[1])
+
+    lines = [
+        f"PAINEL FATURAMENTO — {empresa.upper()} — {mes_ref}",
+        f"{'Contrato':<38}  {'CNPJ':>20}  {'Pend':>5} {'Apr':>5} {'Emit':>5}  {'Valor':>14}",
+        "─" * 95,
+    ]
+    for r in rows:
+        cnpj_flag = (r[1] or "❌ SEM CNPJ")
+        lines.append(
+            f"{(r[0] or '')[:38]:<38}  {cnpj_flag:>20}  "
+            f"{r[3]:>5} {r[4]:>5} {r[5]:>5}  R$ {(r[6] or 0):>11,.2f}"
+        )
+    lines.append("─" * 95)
+    lines.append(f"{'TOTAL':<61}  R$ {total_val:>11,.2f}")
+    if sem_cnpj:
+        lines.append(f"\n⚠️  {sem_cnpj} contrato(s) sem CNPJ — NFS-e bloqueada.")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def certidoes_status(empresa: str = "assessoria") -> str:
+    """
+    Lista certidoes negativas cadastradas com status de validade.
+    Indica VENCIDA, VENCE_EM_7D, VENCE_EM_30D ou VALIDA.
+    """
+    conn = _get_conn(empresa)
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT orgao, tipo, numero,
+                   data_validade,
+                   CAST(JULIANDAY(data_validade) - JULIANDAY('now') AS INTEGER) AS dias_restantes,
+                   status, arquivo
+            FROM certidoes
+            ORDER BY dias_restantes ASC
+        """)
+        rows = cur.fetchall()
+    except Exception as e:
+        conn.close()
+        return f"Tabela certidoes nao encontrada ou erro: {e}"
+
+    conn.close()
+
+    if not rows:
+        return f"Nenhuma certidao cadastrada ({empresa})."
+
+    lines = [f"CERTIDOES — {empresa.upper()} ({len(rows)} registros):"]
+    lines.append(f"{'Órgão/Tipo':<35}  {'Nº':>15}  {'Validade':>12}  {'Dias':>5}  Status")
+    lines.append("─" * 85)
+    for r in rows:
+        dias = r[4] if r[4] is not None else 999
+        if dias < 0:
+            alerta = "🔴 VENCIDA"
+        elif dias <= 7:
+            alerta = "🔴 VENCE_EM_7D"
+        elif dias <= 30:
+            alerta = "🟠 VENCE_EM_30D"
+        else:
+            alerta = "🟢 VÁLIDA"
+        nome = f"{r[0] or ''} / {r[1] or ''}"
+        lines.append(
+            f"{nome[:35]:<35}  {(r[2] or ''):>15}  {(r[3] or ''):>12}  {dias:>5}  {alerta}"
+        )
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def aging_recebiveis(
+    empresa: str = "assessoria",
+    ano: str = "2026",
+) -> str:
+    """
+    Aging de recebiveis (NFs pendentes): agrupa por faixa de dias em aberto.
+    Buckets: 0-30d, 31-60d, 61-90d, +90d.
+    Parametros:
+      empresa: assessoria ou seguranca
+      ano: ex: 2026 (filtra por data_emissao)
+    """
+    conn = _get_conn(empresa)
+    cur = conn.cursor()
+
+    try:
+        cur.execute(f"""
+            SELECT
+                contrato_ref,
+                tomador,
+                numero,
+                data_emissao,
+                valor_liquido,
+                CAST(JULIANDAY('now') - JULIANDAY(data_emissao) AS INTEGER) AS dias
+            FROM notas_fiscais
+            WHERE status_conciliacao = 'PENDENTE'
+              AND substr(data_emissao, 1, 4) = ?
+            ORDER BY dias DESC
+        """, (ano,))
+        rows = cur.fetchall()
+    except Exception as e:
+        conn.close()
+        return f"ERRO: {e}"
+
+    conn.close()
+
+    buckets = {
+        "0-30d":   {"count": 0, "valor": 0.0, "contratos": {}},
+        "31-60d":  {"count": 0, "valor": 0.0, "contratos": {}},
+        "61-90d":  {"count": 0, "valor": 0.0, "contratos": {}},
+        "+90d":    {"count": 0, "valor": 0.0, "contratos": {}},
+    }
+    for r in rows:
+        dias  = r[5] if r[5] is not None else 0
+        valor = r[4] or 0.0
+        ctref = r[0] or r[1] or "?"
+        if dias <= 30:   bk = "0-30d"
+        elif dias <= 60: bk = "31-60d"
+        elif dias <= 90: bk = "61-90d"
+        else:            bk = "+90d"
+        buckets[bk]["count"] += 1
+        buckets[bk]["valor"] += valor
+        buckets[bk]["contratos"][ctref] = buckets[bk]["contratos"].get(ctref, 0) + valor
+
+    total_count = sum(b["count"] for b in buckets.values())
+    total_valor = sum(b["valor"] for b in buckets.values())
+
+    lines = [
+        f"AGING RECEBIVEIS — {empresa.upper()} — {ano}",
+        f"Total: {total_count} NFs pendentes | R$ {total_valor:,.2f}",
+        "",
+        f"{'Faixa':<10}  {'NFs':>5}  {'Valor':>16}  Principais contratos",
+        "─" * 80,
+    ]
+    for faixa, b in buckets.items():
+        top = sorted(b["contratos"].items(), key=lambda x: -x[1])[:3]
+        top_str = " | ".join(f"{c[0][:20]} R${c[1]:,.0f}" for c in top)
+        lines.append(
+            f"{faixa:<10}  {b['count']:>5}  R$ {b['valor']:>13,.2f}  {top_str}"
+        )
+    lines.append("─" * 80)
+    lines.append(f"{'TOTAL':<10}  {total_count:>5}  R$ {total_valor:>13,.2f}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def nfs_pendentes_resumo(
+    empresa: str = "assessoria",
+    ano: str = "2026",
+    limite_critico: int = 60,
+) -> str:
+    """
+    Resumo de NFs pendentes agrupado por contrato, com prioridade de cobrança.
+    Similar ao Relatorio de Cobrança Excel, mas direto no MCP.
+    Parametros:
+      empresa: assessoria ou seguranca
+      ano: ex: 2026
+      limite_critico: dias a partir dos quais a NF e CRITICA (default 60)
+    """
+    conn = _get_conn(empresa)
+    cur = conn.cursor()
+
+    try:
+        cur.execute(f"""
+            SELECT
+                COALESCE(contrato_ref, tomador, '?') AS contrato,
+                COUNT(*) AS qtd,
+                SUM(valor_bruto)  AS bruto,
+                SUM(valor_liquido) AS liquido,
+                MIN(data_emissao) AS mais_antiga,
+                MAX(CAST(JULIANDAY('now') - JULIANDAY(data_emissao) AS INTEGER)) AS max_dias
+            FROM notas_fiscais
+            WHERE status_conciliacao = 'PENDENTE'
+              AND substr(data_emissao, 1, 4) = ?
+            GROUP BY contrato
+            ORDER BY liquido DESC
+        """, (ano,))
+        rows = cur.fetchall()
+    except Exception as e:
+        conn.close()
+        return f"ERRO: {e}"
+
+    conn.close()
+
+    if not rows:
+        return f"Nenhuma NF pendente ({empresa}, {ano})."
+
+    total_q = sum(r[1] for r in rows)
+    total_l = sum(r[3] or 0 for r in rows)
+
+    def prior(dias):
+        if dias is None: return "⬜ S/D"
+        if dias > limite_critico:  return "🔴 CRÍTICO"
+        if dias > 30:              return "🟠 ATRASADO"
+        if dias > 0:               return "🟡 VENCIDO"
+        return "🟢 NO PRAZO"
+
+    lines = [
+        f"NFS PENDENTES — {empresa.upper()} — {ano}",
+        f"{'Contrato':<35}  {'NFs':>4}  {'Mais antiga':>12}  {'Max dias':>8}  {'Valor Líq':>14}  Prioridade",
+        "─" * 95,
+    ]
+    for r in rows:
+        lines.append(
+            f"{r[0][:35]:<35}  {r[1]:>4}  {(r[4] or ''):>12}  "
+            f"{(r[5] or 0):>8}  R$ {(r[3] or 0):>11,.2f}  {prior(r[5])}"
+        )
+    lines.append("─" * 95)
+    lines.append(f"{'TOTAL':<35}  {total_q:>4}  {'':>12}  {'':>8}  R$ {total_l:>11,.2f}")
+
+    return "\n".join(lines)
+
+
+# ══════════════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     print(f"Montana Cloud MCP Server starting on port {MCP_PORT}...")
     print(f"App dir: {APP_DIR}")
     print(f"DBs: {_find_db()}")
-    print(f"Connect via: claude mcp add montana-cloud --transport sse --url http://104.196.22.170:{MCP_PORT}/sse")
+    print(f"Connect via: claude mcp add montana-cloud --transport sse --url http://35.247.236.181:{MCP_PORT}/sse")
     mcp.run(transport="sse")
