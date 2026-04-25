@@ -1332,4 +1332,124 @@ router.get('/historico-mes', async (req, res) => {
   }
 });
 
+// ─── APROVAR LOTE ──────────────────────────────────────────────
+// POST /api/boletins/aprovar-lote  { mes: "YYYY-MM" }
+// Aprova automaticamente boletins em rascunho que tenham valor > 0
+// e pelo menos insc_municipal OU cnpj_tomador_contrato preenchidos.
+router.post('/aprovar-lote', async (req, res) => {
+  try {
+    const { mes } = req.body;
+    if (!mes || !/^\d{4}-\d{2}$/.test(mes)) {
+      return res.status(400).json({ error: 'Campo mes obrigatório (YYYY-MM)' });
+    }
+    const db = req.db;
+
+    // Busca rascunhos do mês com dados necessários para qualificar aprovação
+    const rascunhos = await db.prepare(`
+      SELECT b.id,
+             COALESCE(b.valor_total, b.total_geral, 0) AS valor_efetivo,
+             bc.insc_municipal,
+             COALESCE(
+               (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+               (SELECT c2.orgao FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1),
+               ''
+             ) AS cnpj_tomador_contrato
+      FROM bol_boletins b
+      JOIN bol_contratos bc ON b.contrato_id = bc.id
+      WHERE b.status = 'rascunho'
+        AND b.competencia = ?
+    `).all(mes);
+
+    let aprovados = 0;
+    const pulados = [];
+
+    for (const bol of rascunhos) {
+      // Critério 1: valor_total > 0
+      if (!bol.valor_efetivo || bol.valor_efetivo <= 0) {
+        pulados.push({ id: bol.id, motivo: 'valor_total zerado ou nulo' });
+        continue;
+      }
+      // Critério 2: pelo menos um CNPJ de tomador resolvido
+      const temCnpj = (bol.insc_municipal && bol.insc_municipal.trim()) ||
+                      (bol.cnpj_tomador_contrato && bol.cnpj_tomador_contrato.trim());
+      if (!temCnpj) {
+        pulados.push({ id: bol.id, motivo: 'insc_municipal e cnpj_tomador_contrato ambos vazios' });
+        continue;
+      }
+
+      await db.prepare(`UPDATE bol_boletins SET status='aprovado', updated_at=NOW() WHERE id=?`).run(bol.id);
+      aprovados++;
+    }
+
+    res.json({ ok: true, mes, total_rascunhos: rascunhos.length, aprovados, pulados });
+  } catch (err) {
+    console.error('Erro aprovar-lote:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── EMITIR NFS-e EM LOTE ─────────────────────────────────────
+// POST /api/boletins/emitir-lote  { mes: "YYYY-MM" }
+// Emite NFS-e para todos os boletins aprovados com nfse_status PENDENTE ou ERRO
+// Limite de 30 por execução para não sobrecarregar o WebISS.
+router.post('/emitir-lote', async (req, res) => {
+  try {
+    const { mes } = req.body;
+    if (!mes || !/^\d{4}-\d{2}$/.test(mes)) {
+      return res.status(400).json({ error: 'Campo mes obrigatório (YYYY-MM)' });
+    }
+    const db = req.db;
+    const companyKey = req.companyKey;
+    const LIMITE = 30;
+
+    // Busca candidatos à emissão
+    const candidatos = await db.prepare(`
+      SELECT b.id
+      FROM bol_boletins b
+      WHERE b.status = 'aprovado'
+        AND b.nfse_status IN ('PENDENTE', 'ERRO')
+        AND b.competencia = ?
+      ORDER BY b.id
+      LIMIT ?
+    `).all(mes, LIMITE);
+
+    if (candidatos.length === 0) {
+      return res.json({ ok: true, mes, total: 0, emitidos: 0, erros: [] });
+    }
+
+    const port  = process.env.PORT || 3002;
+    const token = req.headers.authorization || '';
+
+    let emitidos = 0;
+    const erros = [];
+
+    for (const { id } of candidatos) {
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/api/boletins/${id}/emitir-nfse`, {
+          method: 'POST',
+          headers: {
+            'Content-Type':  'application/json',
+            'Authorization': token,
+            'X-Company':     companyKey,
+          },
+          signal: AbortSignal.timeout(90000),
+        });
+        const result = await response.json();
+        if (result.ok) {
+          emitidos++;
+        } else {
+          erros.push({ id, erro: result.error || 'Erro desconhecido' });
+        }
+      } catch (eItem) {
+        erros.push({ id, erro: eItem.message });
+      }
+    }
+
+    res.json({ ok: true, mes, total: candidatos.length, emitidos, erros });
+  } catch (err) {
+    console.error('Erro emitir-lote:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

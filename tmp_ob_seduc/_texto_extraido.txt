@@ -1,0 +1,3730 @@
+
+====================================================================================================
+  ARQUIVO: OB- MA- DIVERSAS-2025
+====================================================================================================
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032234 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Cento e trinta e seis mil e seiscentos e sete reais e cinquenta e oito centavos 136.607,58
+Detalhamento
+Nota Liquidação 2025NL025012
+Nota de Empenho 2025NE012683
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 01/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 136.607,58
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento da NF n° 202500000000143, referente aos
+serviços prestados no mês de Janeiro de 2025.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Envio Processado e Pago Data de retorno 09/05/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD030421 Emissão 05/05/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032233 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Duzentos e setenta e seis mil e novecentos e sessenta e oito reais e sessenta centavos 276.968,60
+Detalhamento
+Nota Liquidação 2025NL024709
+Nota de Empenho 2025NE012683
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 03/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 276.968,60
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento das NF's n° 202500000000286 e
+202500000000287, referente aos serviços prestados nos meses de Fevereiro e Março de 2025, respectivamente.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Envio Processado e Pago Data de retorno 09/05/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD030090 Emissão 28/04/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 38
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032232 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Dezessete mil e novecentos e oitenta e quatro reais e noventa e oito centavos 17.984,98
+Detalhamento
+Tipo de Retenção INSS
+Credor da Retenção MINISTERIO DA FAZENDA
+Competência 04/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CODBARRAS
+Processo 202327000000120
+Itens
+Número da NL 2025NL024709 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 4 - Abril
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 17.984,98
+Pagamentos
+Código de Barras Código de Autenticação Valor
+85840000089-2 92490385251-3 39071625125-0 40621583434-2 300C8191CC8B09C0 8.992,49
+85800000089-5 92490385251-3 39071625125-0 40457490025-8 FA686BDCD3FF0210 8.992,49
+Total 17.984,98
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento das NF's n° 202500000000286 e
+202500000000287, referente aos serviços prestados nos meses de Fevereiro e Março de 2025, respectivamente.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Processado e Pago Data de retorno 09/05/25
+Envio
+Tipo de Normal Retorno Os códigos de barras da ordem bancária foram
+Pagamento pagos com sucesso.
+Programação de Desembolso
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/2
+Documento 2025PD030449 Emissão 05/05/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/2
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 32
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032231 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Sete mil e oitocentos e quarenta e sete reais e noventa e nove centavos 7.847,99
+Detalhamento
+Tipo de Retenção IRRF PJ Conta D NL e PODERES
+Credor da Retenção TOCANTINS GOVERNO DO ESTADO
+Competência 02/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CONTAUNICA
+Processo 202327000000120
+Itens
+Número da NL 2025NL025012 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 2 - Fevereiro
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 7.847,99
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento da NF n° 202500000000143, referente aos
+serviços prestados no mês de Janeiro de 2025.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Envio Processado e Pago Data de retorno 09/05/25
+Tipo de Normal Retorno Ordem bancária paga e liberada com
+Pagamento sucesso.
+Programação de Desembolso
+Documento 2025PD030424 Emissão 05/05/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 38
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032230 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Oito mil e cento e setenta e quatro reais e noventa e nove centavos 8.174,99
+Detalhamento
+Tipo de Retenção ISS
+Credor da Retenção PREFEITURA DE PALMAS - TO
+Competência 02/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CODBARRAS
+Processo 202327000000120
+Itens
+Número da NL 2025NL025012 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 2 - Fevereiro
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 8.174,99
+Pagamentos
+Código de Barras Código de Autenticação Valor
+81670000081-2 74993066202-0 50530555525-0 00007928350-3 FA1801D9D1A80A90 8.174,99
+Total 8.174,99
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento da NF n° 202500000000143, referente aos
+serviços prestados no mês de Janeiro de 2025.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Processado e Pago Data de retorno 09/05/25
+Envio
+Tipo de Normal Retorno Os códigos de barras da ordem bancária foram
+Pagamento pagos com sucesso.
+Programação de Desembolso
+Documento 2025PD030423 Emissão 05/05/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/2
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/2
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 38
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032229 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Dez mil e oitocentos e sessenta e nove reais e vinte e um centavos 10.869,21
+Detalhamento
+Tipo de Retenção INSS
+Credor da Retenção MINISTERIO DA FAZENDA
+Competência 02/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CODBARRAS
+Processo 202327000000120
+Itens
+Número da NL 2025NL025012 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 2 - Fevereiro
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 10.869,21
+Pagamentos
+Código de Barras Código de Autenticação Valor
+85860000108-6 69210385251-4 36071625125-9 42535188620-7 65EE7FC7AEFD8E3D 10.869,21
+Total 10.869,21
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento da NF n° 202500000000143, referente aos
+serviços prestados no mês de Janeiro de 2025.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Processado e Pago Data de retorno 09/05/25
+Envio
+Tipo de Normal Retorno Os códigos de barras da ordem bancária foram
+Pagamento pagos com sucesso.
+Programação de Desembolso
+Documento 2025PD030422 Emissão 05/05/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/2
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/2
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 38
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032228 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Dezesseis mil e trezentos e quarenta e nove reais e noventa e oito centavos 16.349,98
+Detalhamento
+Tipo de Retenção ISS
+Credor da Retenção PREFEITURA DE PALMAS - TO
+Competência 04/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CODBARRAS
+Processo 202327000000120
+Itens
+Número da NL 2025NL024709 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 4 - Abril
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 16.349,98
+Pagamentos
+Código de Barras Código de Autenticação Valor
+81600000163-5 49983066202-3 50530555525-0 00007928360-2 26148C1F491CDA80 16.349,98
+Total 16.349,98
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento das NF's n° 202500000000286 e
+202500000000287, referente aos serviços prestados nos meses de Fevereiro e Março de 2025, respectivamente.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Processado e Pago Data de retorno 09/05/25
+Envio
+Tipo de Normal Retorno Os códigos de barras da ordem bancária foram
+Pagamento pagos com sucesso.
+Programação de Desembolso
+Documento 2025PD030095 Emissão 28/04/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/2
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/2
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 32
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032227 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Quinze mil e seiscentos e noventa e cinco reais e noventa e oito centavos 15.695,98
+Detalhamento
+Tipo de Retenção IRRF PJ Conta D NL e PODERES
+Credor da Retenção TOCANTINS GOVERNO DO ESTADO
+Competência 04/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CONTAUNICA
+Processo 202327000000120
+Itens
+Número da NL 2025NL024709 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 4 - Abril
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 15.695,98
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento das NF's n° 202500000000286 e
+202500000000287, referente aos serviços prestados nos meses de Fevereiro e Março de 2025, respectivamente.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Envio Processado e Pago Data de retorno 09/05/25
+Tipo de Normal Retorno Ordem bancária paga e liberada com
+Pagamento sucesso.
+Programação de Desembolso
+Documento 2025PD030094 Emissão 28/04/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+
+====================================================================================================
+  ARQUIVO: OB-MA- DIVERSAS-JAN-2025 A MAR-2025
+====================================================================================================
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032234 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Cento e trinta e seis mil e seiscentos e sete reais e cinquenta e oito centavos 136.607,58
+Detalhamento
+Nota Liquidação 2025NL025012
+Nota de Empenho 2025NE012683
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 01/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 136.607,58
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento da NF n° 202500000000143, referente aos
+serviços prestados no mês de Janeiro de 2025.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Envio Processado e Pago Data de retorno 09/05/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD030421 Emissão 05/05/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032233 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Duzentos e setenta e seis mil e novecentos e sessenta e oito reais e sessenta centavos 276.968,60
+Detalhamento
+Nota Liquidação 2025NL024709
+Nota de Empenho 2025NE012683
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 03/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 276.968,60
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento das NF's n° 202500000000286 e
+202500000000287, referente aos serviços prestados nos meses de Fevereiro e Março de 2025, respectivamente.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Envio Processado e Pago Data de retorno 09/05/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD030090 Emissão 28/04/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 38
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032232 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Dezessete mil e novecentos e oitenta e quatro reais e noventa e oito centavos 17.984,98
+Detalhamento
+Tipo de Retenção INSS
+Credor da Retenção MINISTERIO DA FAZENDA
+Competência 04/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CODBARRAS
+Processo 202327000000120
+Itens
+Número da NL 2025NL024709 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 4 - Abril
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 17.984,98
+Pagamentos
+Código de Barras Código de Autenticação Valor
+85840000089-2 92490385251-3 39071625125-0 40621583434-2 300C8191CC8B09C0 8.992,49
+85800000089-5 92490385251-3 39071625125-0 40457490025-8 FA686BDCD3FF0210 8.992,49
+Total 17.984,98
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento das NF's n° 202500000000286 e
+202500000000287, referente aos serviços prestados nos meses de Fevereiro e Março de 2025, respectivamente.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Processado e Pago Data de retorno 09/05/25
+Envio
+Tipo de Normal Retorno Os códigos de barras da ordem bancária foram
+Pagamento pagos com sucesso.
+Programação de Desembolso
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/2
+Documento 2025PD030449 Emissão 05/05/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/2
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 32
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032231 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Sete mil e oitocentos e quarenta e sete reais e noventa e nove centavos 7.847,99
+Detalhamento
+Tipo de Retenção IRRF PJ Conta D NL e PODERES
+Credor da Retenção TOCANTINS GOVERNO DO ESTADO
+Competência 02/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CONTAUNICA
+Processo 202327000000120
+Itens
+Número da NL 2025NL025012 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 2 - Fevereiro
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 7.847,99
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento da NF n° 202500000000143, referente aos
+serviços prestados no mês de Janeiro de 2025.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Envio Processado e Pago Data de retorno 09/05/25
+Tipo de Normal Retorno Ordem bancária paga e liberada com
+Pagamento sucesso.
+Programação de Desembolso
+Documento 2025PD030424 Emissão 05/05/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 38
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032230 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Oito mil e cento e setenta e quatro reais e noventa e nove centavos 8.174,99
+Detalhamento
+Tipo de Retenção ISS
+Credor da Retenção PREFEITURA DE PALMAS - TO
+Competência 02/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CODBARRAS
+Processo 202327000000120
+Itens
+Número da NL 2025NL025012 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 2 - Fevereiro
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 8.174,99
+Pagamentos
+Código de Barras Código de Autenticação Valor
+81670000081-2 74993066202-0 50530555525-0 00007928350-3 FA1801D9D1A80A90 8.174,99
+Total 8.174,99
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento da NF n° 202500000000143, referente aos
+serviços prestados no mês de Janeiro de 2025.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Processado e Pago Data de retorno 09/05/25
+Envio
+Tipo de Normal Retorno Os códigos de barras da ordem bancária foram
+Pagamento pagos com sucesso.
+Programação de Desembolso
+Documento 2025PD030423 Emissão 05/05/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/2
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/2
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 38
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032229 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Dez mil e oitocentos e sessenta e nove reais e vinte e um centavos 10.869,21
+Detalhamento
+Tipo de Retenção INSS
+Credor da Retenção MINISTERIO DA FAZENDA
+Competência 02/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CODBARRAS
+Processo 202327000000120
+Itens
+Número da NL 2025NL025012 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 2 - Fevereiro
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 10.869,21
+Pagamentos
+Código de Barras Código de Autenticação Valor
+85860000108-6 69210385251-4 36071625125-9 42535188620-7 65EE7FC7AEFD8E3D 10.869,21
+Total 10.869,21
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento da NF n° 202500000000143, referente aos
+serviços prestados no mês de Janeiro de 2025.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Processado e Pago Data de retorno 09/05/25
+Envio
+Tipo de Normal Retorno Os códigos de barras da ordem bancária foram
+Pagamento pagos com sucesso.
+Programação de Desembolso
+Documento 2025PD030422 Emissão 05/05/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/2
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/2
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 38
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032228 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Dezesseis mil e trezentos e quarenta e nove reais e noventa e oito centavos 16.349,98
+Detalhamento
+Tipo de Retenção ISS
+Credor da Retenção PREFEITURA DE PALMAS - TO
+Competência 04/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CODBARRAS
+Processo 202327000000120
+Itens
+Número da NL 2025NL024709 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 4 - Abril
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 16.349,98
+Pagamentos
+Código de Barras Código de Autenticação Valor
+81600000163-5 49983066202-3 50530555525-0 00007928360-2 26148C1F491CDA80 16.349,98
+Total 16.349,98
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento das NF's n° 202500000000286 e
+202500000000287, referente aos serviços prestados nos meses de Fevereiro e Março de 2025, respectivamente.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Processado e Pago Data de retorno 09/05/25
+Envio
+Tipo de Normal Retorno Os códigos de barras da ordem bancária foram
+Pagamento pagos com sucesso.
+Programação de Desembolso
+Documento 2025PD030095 Emissão 28/04/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/2
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/2
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 32
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032227 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Quinze mil e seiscentos e noventa e cinco reais e noventa e oito centavos 15.695,98
+Detalhamento
+Tipo de Retenção IRRF PJ Conta D NL e PODERES
+Credor da Retenção TOCANTINS GOVERNO DO ESTADO
+Competência 04/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CONTAUNICA
+Processo 202327000000120
+Itens
+Número da NL 2025NL024709 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 4 - Abril
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 15.695,98
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento das NF's n° 202500000000286 e
+202500000000287, referente aos serviços prestados nos meses de Fevereiro e Março de 2025, respectivamente.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Envio Processado e Pago Data de retorno 09/05/25
+Tipo de Normal Retorno Ordem bancária paga e liberada com
+Pagamento sucesso.
+Programação de Desembolso
+Documento 2025PD030094 Emissão 28/04/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+
+====================================================================================================
+  ARQUIVO: OB-MA- NF 750 NF 751 NF 752 NF 753 NF 754
+====================================================================================================
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072118 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Duzentos e trinta e cinco mil e quatrocentos e sete reais e cinquenta e nove centavos 235.407,59
+Detalhamento
+Nota Liquidação 2025NL068878
+Nota de Empenho 2025NE054675
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 235.407,59
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077848 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072117 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Quarenta e quatro mil e noventa e dois reais e sessenta e oito centavos 44.092,68
+Detalhamento
+Nota Liquidação 2025NL068902
+Nota de Empenho 2025NE054676
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 44.092,68
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077847 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072116 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Cento e trinta e três mil e seiscentos e vinte e um reais e quatorze centavos 133.621,14
+Detalhamento
+Nota Liquidação 2025NL068901
+Nota de Empenho 2025NE070581
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 133.621,14
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077846 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072115 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Cento e trinta e oito mil e quatrocentos e oitenta e quatro reais e trinta centavos 138.484,30
+Detalhamento
+Nota Liquidação 2025NL068876
+Nota de Empenho 2025NE070581
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 138.484,30
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077845 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072114 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Sessenta e oito mil e seiscentos e oitenta e três reais e cinquenta e três centavos 68.683,53
+Detalhamento
+Nota Liquidação 2025NL068877
+Nota de Empenho 2025NE070581
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 68.683,53
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077844 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072113 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Sessenta e nove mil e oitocentos reais e setenta e sete centavos 69.800,77
+Detalhamento
+Nota Liquidação 2025NL068903
+Nota de Empenho 2025NE024938
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 69.800,77
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Destinado atender despesas referentes ao 2° Termo Aditivo de Prorrogação de Prazo ao Contrato nº 016/2023 concernente à contratação
+de empresa especializada na prestação de serviços contínuos de copeiragem, limpeza, conservação, higienização e jardinagem prestados
+nas dependências internas e externas desta Pasta e Anexos. Pagamento Parcial referente a Nota Fiscal nº00000751.
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077843 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072112 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Vinte e dois mil e quinhentos e trinta e sete reais e noventa e nove centavos 22.537,99
+Detalhamento
+Nota Liquidação 2025NL068844
+Nota de Empenho 2025NE024938
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 22.537,99
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Destinado atender despesas referentes ao 2° Termo Aditivo de Prorrogação de Prazo ao Contrato nº 016/2023 concernente à contratação
+de empresa especializada na prestação de serviços contínuos de copeiragem, limpeza, conservação, higienização e jardinagem prestados
+nas dependências internas e externas desta Pasta e Anexos. Referente ao pagamento restante da Nota Fiscal nº00000750.
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077842 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072111 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Quinhentos e quarenta e dois reais e setenta e três centavos 542,73
+Detalhamento
+Nota Liquidação 2025NL068843
+Nota de Empenho 2025NE012683
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 542,73
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077841 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 38
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072110 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Quarenta e dois mil e noventa e nove reais e oitenta e um centavos 42.099,81
+Detalhamento
+Tipo de Retenção ISS
+Credor da Retenção PREFEITURA DE PALMAS - TO
+Competência 08/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CODBARRAS
+Processo 202327000000120
+Itens
+Número da NL 2025NL068844 - 270100
+Número da NE 2025NE024938 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 1.362,50
+Número da NL 2025NL068876 - 270100
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/3
+Valor 8.174,99
+Número da NL 2025NL068877 - 270100
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 8.174,99
+Número da NL 2025NL068878 - 270100
+Número da NE 2025NE054675 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 13.896,55
+Número da NL 2025NL068901 - 270100
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 10.490,78
+Pagamentos
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/3
+Código de Barras Código de Autenticação Valor
+81610000420-8 99813066202-1 50908555525-8 00008251800-2 0EB7D663632EC5E3 42.099,81
+Total 42.099,81
+Observação
+Destinado atender despesas referentes ao 2° Termo Aditivo de Prorrogação de Prazo ao Contrato nº 016/2023 concernente à contratação
+de empresa especializada na prestação de serviços contínuos de copeiragem, limpeza, conservação, higienização e jardinagem prestados
+nas dependências internas e externas desta Pasta e Anexos. Referente ao pagamento restante da Nota Fiscal nº00000750,
+00000751,00000752,00000753,00000754.
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Processado e Pago Data de retorno 14/08/25
+Envio
+Tipo de Normal Retorno Os códigos de barras da ordem bancária foram
+Pagamento pagos com sucesso.
+Programação de Desembolso
+Documento 2025PD077851 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 3/3
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 31
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072109 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Quarenta mil e quatrocentos e quinze reais e oitenta e dois centavos 40.415,82
+Detalhamento
+Tipo de Retenção IRRF PJ Conta D NL e PODERES
+Credor da Retenção TOCANTINS GOVERNO DO ESTADO
+Competência 08/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 070 - 0380 - 0003800167303
+Processo 202327000000120
+Itens
+Número da NL 2025NL068843 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 27,36
+Número da NL 2025NL068844 - 270100
+Número da NE 2025NE024938 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/4
+Valor 1.280,64
+Número da NL 2025NL068876 - 270100
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 7.847,99
+Número da NL 2025NL068877 - 270100
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 4.328,63
+Número da NL 2025NL068878 - 270100
+Número da NE 2025NE054675 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 13.340,69
+Número da NL 2025NL068901 - 270100
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/4
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 7.847,99
+Número da NL 2025NL068902 - 270100
+Número da NE 2025NE054676 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 2.223,16
+Número da NL 2025NL068903 - 270100
+Número da NE 2025NE024938 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 3.519,36
+Observação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 3/4
+PAGAMENTO DO (S) DOCUMENTO (S) 00000750, 00000751, 00000754, 00000752, 00000753 CONFORME PROCESSO Destinado a atender
+despesa com Repactuação de Valor por Convenção Coletiva ao Contrato nº 016/2023 concernente à contratação de empresa especializada
+na prestação de serviços contínuos de copeiragem, limpeza, conservação, higienização e jardinagem prestados nas dependências internas
+e externas desta Pasta e Anexos. Pagamento referente Nota Fiscal nº 00000750,00000751,00000752,00000753,00000754.
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária paga e liberada com
+Pagamento sucesso.
+Programação de Desembolso
+Documento 2025PD077850 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 4/4
+
+====================================================================================================
+  ARQUIVO: OB-MA- REPACTUAÇÃO E OUTRAS NFS
+====================================================================================================
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072118 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Duzentos e trinta e cinco mil e quatrocentos e sete reais e cinquenta e nove centavos 235.407,59
+Detalhamento
+Nota Liquidação 2025NL068878
+Nota de Empenho 2025NE054675
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 235.407,59
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077848 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072117 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Quarenta e quatro mil e noventa e dois reais e sessenta e oito centavos 44.092,68
+Detalhamento
+Nota Liquidação 2025NL068902
+Nota de Empenho 2025NE054676
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 44.092,68
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077847 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072116 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Cento e trinta e três mil e seiscentos e vinte e um reais e quatorze centavos 133.621,14
+Detalhamento
+Nota Liquidação 2025NL068901
+Nota de Empenho 2025NE070581
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 133.621,14
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077846 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072115 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Cento e trinta e oito mil e quatrocentos e oitenta e quatro reais e trinta centavos 138.484,30
+Detalhamento
+Nota Liquidação 2025NL068876
+Nota de Empenho 2025NE070581
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 138.484,30
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077845 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072114 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Sessenta e oito mil e seiscentos e oitenta e três reais e cinquenta e três centavos 68.683,53
+Detalhamento
+Nota Liquidação 2025NL068877
+Nota de Empenho 2025NE070581
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 68.683,53
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077844 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072113 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Sessenta e nove mil e oitocentos reais e setenta e sete centavos 69.800,77
+Detalhamento
+Nota Liquidação 2025NL068903
+Nota de Empenho 2025NE024938
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 69.800,77
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Destinado atender despesas referentes ao 2° Termo Aditivo de Prorrogação de Prazo ao Contrato nº 016/2023 concernente à contratação
+de empresa especializada na prestação de serviços contínuos de copeiragem, limpeza, conservação, higienização e jardinagem prestados
+nas dependências internas e externas desta Pasta e Anexos. Pagamento Parcial referente a Nota Fiscal nº00000751.
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077843 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072112 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Vinte e dois mil e quinhentos e trinta e sete reais e noventa e nove centavos 22.537,99
+Detalhamento
+Nota Liquidação 2025NL068844
+Nota de Empenho 2025NE024938
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 22.537,99
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Destinado atender despesas referentes ao 2° Termo Aditivo de Prorrogação de Prazo ao Contrato nº 016/2023 concernente à contratação
+de empresa especializada na prestação de serviços contínuos de copeiragem, limpeza, conservação, higienização e jardinagem prestados
+nas dependências internas e externas desta Pasta e Anexos. Referente ao pagamento restante da Nota Fiscal nº00000750.
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077842 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072111 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Quinhentos e quarenta e dois reais e setenta e três centavos 542,73
+Detalhamento
+Nota Liquidação 2025NL068843
+Nota de Empenho 2025NE012683
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 542,73
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077841 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 38
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072110 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Quarenta e dois mil e noventa e nove reais e oitenta e um centavos 42.099,81
+Detalhamento
+Tipo de Retenção ISS
+Credor da Retenção PREFEITURA DE PALMAS - TO
+Competência 08/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CODBARRAS
+Processo 202327000000120
+Itens
+Número da NL 2025NL068844 - 270100
+Número da NE 2025NE024938 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 1.362,50
+Número da NL 2025NL068876 - 270100
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/3
+Valor 8.174,99
+Número da NL 2025NL068877 - 270100
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 8.174,99
+Número da NL 2025NL068878 - 270100
+Número da NE 2025NE054675 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 13.896,55
+Número da NL 2025NL068901 - 270100
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 10.490,78
+Pagamentos
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/3
+Código de Barras Código de Autenticação Valor
+81610000420-8 99813066202-1 50908555525-8 00008251800-2 0EB7D663632EC5E3 42.099,81
+Total 42.099,81
+Observação
+Destinado atender despesas referentes ao 2° Termo Aditivo de Prorrogação de Prazo ao Contrato nº 016/2023 concernente à contratação
+de empresa especializada na prestação de serviços contínuos de copeiragem, limpeza, conservação, higienização e jardinagem prestados
+nas dependências internas e externas desta Pasta e Anexos. Referente ao pagamento restante da Nota Fiscal nº00000750,
+00000751,00000752,00000753,00000754.
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Processado e Pago Data de retorno 14/08/25
+Envio
+Tipo de Normal Retorno Os códigos de barras da ordem bancária foram
+Pagamento pagos com sucesso.
+Programação de Desembolso
+Documento 2025PD077851 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 3/3
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 31
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072109 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Quarenta mil e quatrocentos e quinze reais e oitenta e dois centavos 40.415,82
+Detalhamento
+Tipo de Retenção IRRF PJ Conta D NL e PODERES
+Credor da Retenção TOCANTINS GOVERNO DO ESTADO
+Competência 08/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 070 - 0380 - 0003800167303
+Processo 202327000000120
+Itens
+Número da NL 2025NL068843 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 27,36
+Número da NL 2025NL068844 - 270100
+Número da NE 2025NE024938 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/4
+Valor 1.280,64
+Número da NL 2025NL068876 - 270100
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 7.847,99
+Número da NL 2025NL068877 - 270100
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 4.328,63
+Número da NL 2025NL068878 - 270100
+Número da NE 2025NE054675 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 13.340,69
+Número da NL 2025NL068901 - 270100
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/4
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 7.847,99
+Número da NL 2025NL068902 - 270100
+Número da NE 2025NE054676 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 2.223,16
+Número da NL 2025NL068903 - 270100
+Número da NE 2025NE024938 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 3.519,36
+Observação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 3/4
+PAGAMENTO DO (S) DOCUMENTO (S) 00000750, 00000751, 00000754, 00000752, 00000753 CONFORME PROCESSO Destinado a atender
+despesa com Repactuação de Valor por Convenção Coletiva ao Contrato nº 016/2023 concernente à contratação de empresa especializada
+na prestação de serviços contínuos de copeiragem, limpeza, conservação, higienização e jardinagem prestados nas dependências internas
+e externas desta Pasta e Anexos. Pagamento referente Nota Fiscal nº 00000750,00000751,00000752,00000753,00000754.
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária paga e liberada com
+Pagamento sucesso.
+Programação de Desembolso
+Documento 2025PD077850 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 4/4
+
+====================================================================================================
+  ARQUIVO: OB-MA-2025-1226 E 2025-1227
+====================================================================================================
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Outubro
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB116183 25/11/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Trezentos e cinquenta e cinco mil e quatrocentos e vinte e sete reais e sessenta e quatro centavos 355.427,64
+Detalhamento
+Nota Liquidação 2025NL100874
+Nota de Empenho 2025NE082828
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 10/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 355.427,64
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Atender prestação de serviços contínuos de copeiragem, limpeza, conservação, higienização e jardinagem, com fornecimento de materiais
+e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e externas da Sede da Secretaria
+da Educação do Estado do Tocantins e anexos. Pagamento das NF's n° 202500000001226 e 202500000001227, referente aos meses de
+Setembro e Outubro de 2025, respectivamente.
+Registro de Envio
+UG Emitente 390998 Emissão 25/11/25
+Documento 2025RE015954 Data de Envio 25/11/25
+Status de Envio Processado e Pago Data de retorno 27/11/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD112178 Emissão 17/11/25 Data de 25/11/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 25/11/25 às 10: Impresso por Maria Amélia Ferreira de Almeida em 28/11/25 às 09:42.
+38.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+
+====================================================================================================
+  ARQUIVO: OB-MA-ABRIL E MAIO 2025
+====================================================================================================
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072118 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Duzentos e trinta e cinco mil e quatrocentos e sete reais e cinquenta e nove centavos 235.407,59
+Detalhamento
+Nota Liquidação 2025NL068878
+Nota de Empenho 2025NE054675
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 235.407,59
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077848 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072117 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Quarenta e quatro mil e noventa e dois reais e sessenta e oito centavos 44.092,68
+Detalhamento
+Nota Liquidação 2025NL068902
+Nota de Empenho 2025NE054676
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 44.092,68
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077847 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072116 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Cento e trinta e três mil e seiscentos e vinte e um reais e quatorze centavos 133.621,14
+Detalhamento
+Nota Liquidação 2025NL068901
+Nota de Empenho 2025NE070581
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 133.621,14
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077846 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072115 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Cento e trinta e oito mil e quatrocentos e oitenta e quatro reais e trinta centavos 138.484,30
+Detalhamento
+Nota Liquidação 2025NL068876
+Nota de Empenho 2025NE070581
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 138.484,30
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077845 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072114 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Sessenta e oito mil e seiscentos e oitenta e três reais e cinquenta e três centavos 68.683,53
+Detalhamento
+Nota Liquidação 2025NL068877
+Nota de Empenho 2025NE070581
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 68.683,53
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077844 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072113 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Sessenta e nove mil e oitocentos reais e setenta e sete centavos 69.800,77
+Detalhamento
+Nota Liquidação 2025NL068903
+Nota de Empenho 2025NE024938
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 69.800,77
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Destinado atender despesas referentes ao 2° Termo Aditivo de Prorrogação de Prazo ao Contrato nº 016/2023 concernente à contratação
+de empresa especializada na prestação de serviços contínuos de copeiragem, limpeza, conservação, higienização e jardinagem prestados
+nas dependências internas e externas desta Pasta e Anexos. Pagamento Parcial referente a Nota Fiscal nº00000751.
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077843 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072112 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Vinte e dois mil e quinhentos e trinta e sete reais e noventa e nove centavos 22.537,99
+Detalhamento
+Nota Liquidação 2025NL068844
+Nota de Empenho 2025NE024938
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 22.537,99
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Destinado atender despesas referentes ao 2° Termo Aditivo de Prorrogação de Prazo ao Contrato nº 016/2023 concernente à contratação
+de empresa especializada na prestação de serviços contínuos de copeiragem, limpeza, conservação, higienização e jardinagem prestados
+nas dependências internas e externas desta Pasta e Anexos. Referente ao pagamento restante da Nota Fiscal nº00000750.
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077842 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072111 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Quinhentos e quarenta e dois reais e setenta e três centavos 542,73
+Detalhamento
+Nota Liquidação 2025NL068843
+Nota de Empenho 2025NE012683
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 08/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 542,73
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD077841 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 38
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072110 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Quarenta e dois mil e noventa e nove reais e oitenta e um centavos 42.099,81
+Detalhamento
+Tipo de Retenção ISS
+Credor da Retenção PREFEITURA DE PALMAS - TO
+Competência 08/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CODBARRAS
+Processo 202327000000120
+Itens
+Número da NL 2025NL068844 - 270100
+Número da NE 2025NE024938 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 1.362,50
+Número da NL 2025NL068876 - 270100
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/3
+Valor 8.174,99
+Número da NL 2025NL068877 - 270100
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 8.174,99
+Número da NL 2025NL068878 - 270100
+Número da NE 2025NE054675 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 13.896,55
+Número da NL 2025NL068901 - 270100
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 10.490,78
+Pagamentos
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/3
+Código de Barras Código de Autenticação Valor
+81610000420-8 99813066202-1 50908555525-8 00008251800-2 0EB7D663632EC5E3 42.099,81
+Total 42.099,81
+Observação
+Destinado atender despesas referentes ao 2° Termo Aditivo de Prorrogação de Prazo ao Contrato nº 016/2023 concernente à contratação
+de empresa especializada na prestação de serviços contínuos de copeiragem, limpeza, conservação, higienização e jardinagem prestados
+nas dependências internas e externas desta Pasta e Anexos. Referente ao pagamento restante da Nota Fiscal nº00000750,
+00000751,00000752,00000753,00000754.
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Processado e Pago Data de retorno 14/08/25
+Envio
+Tipo de Normal Retorno Os códigos de barras da ordem bancária foram
+Pagamento pagos com sucesso.
+Programação de Desembolso
+Documento 2025PD077851 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 3/3
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 31
+Encerrado até Julho
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB072109 12/08/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Quarenta mil e quatrocentos e quinze reais e oitenta e dois centavos 40.415,82
+Detalhamento
+Tipo de Retenção IRRF PJ Conta D NL e PODERES
+Credor da Retenção TOCANTINS GOVERNO DO ESTADO
+Competência 08/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 070 - 0380 - 0003800167303
+Processo 202327000000120
+Itens
+Número da NL 2025NL068843 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 27,36
+Número da NL 2025NL068844 - 270100
+Número da NE 2025NE024938 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/4
+Valor 1.280,64
+Número da NL 2025NL068876 - 270100
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 7.847,99
+Número da NL 2025NL068877 - 270100
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 4.328,63
+Número da NL 2025NL068878 - 270100
+Número da NE 2025NE054675 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 13.340,69
+Número da NL 2025NL068901 - 270100
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/4
+Número da NE 2025NE070581 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 7.847,99
+Número da NL 2025NL068902 - 270100
+Número da NE 2025NE054676 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 2.223,16
+Número da NL 2025NL068903 - 270100
+Número da NE 2025NE024938 - 270100
+Ano 2025
+Mês Competência 8 - Agosto
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 3.519,36
+Observação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 3/4
+PAGAMENTO DO (S) DOCUMENTO (S) 00000750, 00000751, 00000754, 00000752, 00000753 CONFORME PROCESSO Destinado a atender
+despesa com Repactuação de Valor por Convenção Coletiva ao Contrato nº 016/2023 concernente à contratação de empresa especializada
+na prestação de serviços contínuos de copeiragem, limpeza, conservação, higienização e jardinagem prestados nas dependências internas
+e externas desta Pasta e Anexos. Pagamento referente Nota Fiscal nº 00000750,00000751,00000752,00000753,00000754.
+Registro de Envio
+UG Emitente 390998 Emissão 12/08/25
+Documento 2025RE010114 Data de Envio 12/08/25
+Status de Envio Processado e Pago Data de retorno 14/08/25
+Tipo de Normal Retorno Ordem bancária paga e liberada com
+Pagamento sucesso.
+Programação de Desembolso
+Documento 2025PD077850 Emissão 07/08/25 Data de 12/08/25
+Programação
+Emitido/contabilizado por CAROLINNE SOARES MAGALHAES RIBEIRO em 12/08/25 às 12: Impresso por JACQUELINE SARAIVA DA CONCEIÇÃO em 20/08/25 às 13:18.
+41.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 4/4
+
+====================================================================================================
+  ARQUIVO: OB-MA-NF 2025-892
+====================================================================================================
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Setembro
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB112148 04/11/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Cento e setenta e sete mil e setecentos e treze reais e oitenta e dois centavos 177.713,82
+Detalhamento
+Nota Liquidação 2025NL080884
+Nota de Empenho 2025NE082828
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 09/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 177.713,82
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Atender prestação de serviços contínuos de copeiragem, limpeza, conservação, higienização e jardinagem, com fornecimento de materiais
+e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e externas da Sede da Secretaria
+da Educação do Estado do Tocantins e anexos. Pagamento da NF n°202500000000892.
+Registro de Envio
+UG Emitente 390998 Emissão 04/11/25
+Documento 2025RE014732 Data de Envio 04/11/25
+Status de Envio Processado e Pago Data de retorno 06/11/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD108916 Emissão 29/10/25 Data de 04/11/25
+Programação
+Emitido/contabilizado por Joelma Lopes de Paiva Moreno em 04/11/25 às 12:10. Impresso por KATIA VANUZA VIEIRA NEVES em 06/11/25 às 14:48.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 38
+Encerrado até Setembro
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB112147 04/11/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Dez mil e quatrocentos e noventa reais e setenta e oito centavos 10.490,78
+Detalhamento
+Tipo de Retenção ISS
+Credor da Retenção PREFEITURA DE PALMAS - TO
+Competência 09/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CODBARRAS
+Processo 202327000000120
+Itens
+Número da NL 2025NL080884 - 270100
+Número da NE 2025NE082828 - 270100
+Ano 2025
+Mês Competência 9 - Setembro
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 10.490,78
+Pagamentos
+Código de Barras Código de Autenticação Valor
+81610000104-8 90783066202-5 51128555525-2 00008467970-3 1EFEDD72D5AAC9FF 10.490,78
+Total 10.490,78
+Observação
+Atender prestação de serviços contínuos de copeiragem, limpeza, conservação, higienização e jardinagem, com fornecimento de
+materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e externas da Sede da
+Secretaria da Educação do Estado do Tocantins e anexos. Pagamento da NF n°202500000000892.
+Registro de Envio
+UG Emitente 390998 Emissão 04/11/25
+Documento 2025RE014732 Data de Envio 04/11/25
+Status de Processado e Pago Data de retorno 06/11/25
+Envio
+Tipo de Normal Retorno Os códigos de barras da ordem bancária foram
+Pagamento pagos com sucesso.
+Programação de Desembolso
+Documento 2025PD108918 Emissão 29/10/25 Data de 04/11/25
+Programação
+Emitido/contabilizado por Joelma Lopes de Paiva Moreno em 04/11/25 às 12:10. Impresso por KATIA VANUZA VIEIRA NEVES em 06/11/25 às 14:48.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 31
+Encerrado até Setembro
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB112146 04/11/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Dez mil e setenta e um reais e quinze centavos 10.071,15
+Detalhamento
+Tipo de Retenção IRRF PJ Conta D NL e PODERES
+Credor da Retenção TOCANTINS GOVERNO DO ESTADO
+Competência 09/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 070 - 0380 - 0003800167303
+Processo 202327000000120
+Itens
+Número da NL 2025NL080884 - 270100
+Número da NE 2025NE082828 - 270100
+Ano 2025
+Mês Competência 9 - Setembro
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 10.071,15
+Observação
+Atender prestação de serviços contínuos de copeiragem, limpeza, conservação, higienização e jardinagem, com fornecimento de
+materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e externas da Sede da
+Secretaria da Educação do Estado do Tocantins e anexos. Pagamento da NF n°202500000000892.
+Registro de Envio
+UG Emitente 390998 Emissão 04/11/25
+Documento 2025RE014732 Data de Envio 04/11/25
+Status de Envio Processado e Pago Data de retorno 06/11/25
+Tipo de Normal Retorno Ordem bancária paga e liberada com
+Pagamento sucesso.
+Programação de Desembolso
+Documento 2025PD108917 Emissão 29/10/25 Data de 04/11/25
+Programação
+Emitido/contabilizado por Joelma Lopes de Paiva Moreno em 04/11/25 às 12:10. Impresso por KATIA VANUZA VIEIRA NEVES em 06/11/25 às 14:48.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+
+====================================================================================================
+  ARQUIVO: OB-MS- DIVERSAS
+====================================================================================================
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032234 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Cento e trinta e seis mil e seiscentos e sete reais e cinquenta e oito centavos 136.607,58
+Detalhamento
+Nota Liquidação 2025NL025012
+Nota de Empenho 2025NE012683
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 01/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 136.607,58
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento da NF n° 202500000000143, referente aos
+serviços prestados no mês de Janeiro de 2025.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Envio Processado e Pago Data de retorno 09/05/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD030421 Emissão 05/05/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 32
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032233 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Duzentos e setenta e seis mil e novecentos e sessenta e oito reais e sessenta centavos 276.968,60
+Detalhamento
+Nota Liquidação 2025NL024709
+Nota de Empenho 2025NE012683
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Detalhamento de Fonte 149063 - COMPENSACOES FINANCEIRAS - PETROBRAS - (573.0000000)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000434 - PRESTAÇÃO DE SERVIÇOS CONTÍNUOS DE COPEIRAGEM, LIMPEZA, CON...
+Domicílio Bancário Origem 001 - 3615 - 149063 - Conta D
+Domicílio Bancário Destino 001 - 1505 - 1090437 - CONTA TJTO ATUAL
+Competência 03/2025
+Processo 202327000000120
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 02 - LIMPEZA E 4269 - Pagamento com recursos 99 - Sem consumo 276.968,60
+Mão de Obra CONSERVACAO de outra UG conta D de Limite de Saque
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento das NF's n° 202500000000286 e
+202500000000287, referente aos serviços prestados nos meses de Fevereiro e Março de 2025, respectivamente.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Envio Processado e Pago Data de retorno 09/05/25
+Tipo de Normal Retorno Ordem bancária
+Pagamento paga e liberada
+com sucesso.
+Programação de Desembolso
+Documento 2025PD030090 Emissão 28/04/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 38
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032232 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Dezessete mil e novecentos e oitenta e quatro reais e noventa e oito centavos 17.984,98
+Detalhamento
+Tipo de Retenção INSS
+Credor da Retenção MINISTERIO DA FAZENDA
+Competência 04/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CODBARRAS
+Processo 202327000000120
+Itens
+Número da NL 2025NL024709 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 4 - Abril
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 17.984,98
+Pagamentos
+Código de Barras Código de Autenticação Valor
+85840000089-2 92490385251-3 39071625125-0 40621583434-2 300C8191CC8B09C0 8.992,49
+85800000089-5 92490385251-3 39071625125-0 40457490025-8 FA686BDCD3FF0210 8.992,49
+Total 17.984,98
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento das NF's n° 202500000000286 e
+202500000000287, referente aos serviços prestados nos meses de Fevereiro e Março de 2025, respectivamente.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Processado e Pago Data de retorno 09/05/25
+Envio
+Tipo de Normal Retorno Os códigos de barras da ordem bancária foram
+Pagamento pagos com sucesso.
+Programação de Desembolso
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/2
+Documento 2025PD030449 Emissão 05/05/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/2
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 32
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032231 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Sete mil e oitocentos e quarenta e sete reais e noventa e nove centavos 7.847,99
+Detalhamento
+Tipo de Retenção IRRF PJ Conta D NL e PODERES
+Credor da Retenção TOCANTINS GOVERNO DO ESTADO
+Competência 02/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CONTAUNICA
+Processo 202327000000120
+Itens
+Número da NL 2025NL025012 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 2 - Fevereiro
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 7.847,99
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento da NF n° 202500000000143, referente aos
+serviços prestados no mês de Janeiro de 2025.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Envio Processado e Pago Data de retorno 09/05/25
+Tipo de Normal Retorno Ordem bancária paga e liberada com
+Pagamento sucesso.
+Programação de Desembolso
+Documento 2025PD030424 Emissão 05/05/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 38
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032230 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Oito mil e cento e setenta e quatro reais e noventa e nove centavos 8.174,99
+Detalhamento
+Tipo de Retenção ISS
+Credor da Retenção PREFEITURA DE PALMAS - TO
+Competência 02/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CODBARRAS
+Processo 202327000000120
+Itens
+Número da NL 2025NL025012 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 2 - Fevereiro
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 8.174,99
+Pagamentos
+Código de Barras Código de Autenticação Valor
+81670000081-2 74993066202-0 50530555525-0 00007928350-3 FA1801D9D1A80A90 8.174,99
+Total 8.174,99
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento da NF n° 202500000000143, referente aos
+serviços prestados no mês de Janeiro de 2025.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Processado e Pago Data de retorno 09/05/25
+Envio
+Tipo de Normal Retorno Os códigos de barras da ordem bancária foram
+Pagamento pagos com sucesso.
+Programação de Desembolso
+Documento 2025PD030423 Emissão 05/05/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/2
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/2
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 38
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032229 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Dez mil e oitocentos e sessenta e nove reais e vinte e um centavos 10.869,21
+Detalhamento
+Tipo de Retenção INSS
+Credor da Retenção MINISTERIO DA FAZENDA
+Competência 02/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CODBARRAS
+Processo 202327000000120
+Itens
+Número da NL 2025NL025012 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 2 - Fevereiro
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 10.869,21
+Pagamentos
+Código de Barras Código de Autenticação Valor
+85860000108-6 69210385251-4 36071625125-9 42535188620-7 65EE7FC7AEFD8E3D 10.869,21
+Total 10.869,21
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento da NF n° 202500000000143, referente aos
+serviços prestados no mês de Janeiro de 2025.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Processado e Pago Data de retorno 09/05/25
+Envio
+Tipo de Normal Retorno Os códigos de barras da ordem bancária foram
+Pagamento pagos com sucesso.
+Programação de Desembolso
+Documento 2025PD030422 Emissão 05/05/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/2
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/2
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 38
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032228 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Dezesseis mil e trezentos e quarenta e nove reais e noventa e oito centavos 16.349,98
+Detalhamento
+Tipo de Retenção ISS
+Credor da Retenção PREFEITURA DE PALMAS - TO
+Competência 04/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CODBARRAS
+Processo 202327000000120
+Itens
+Número da NL 2025NL024709 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 4 - Abril
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 0 - Indefinido
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 16.349,98
+Pagamentos
+Código de Barras Código de Autenticação Valor
+81600000163-5 49983066202-3 50530555525-0 00007928360-2 26148C1F491CDA80 16.349,98
+Total 16.349,98
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento das NF's n° 202500000000286 e
+202500000000287, referente aos serviços prestados nos meses de Fevereiro e Março de 2025, respectivamente.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Processado e Pago Data de retorno 09/05/25
+Envio
+Tipo de Normal Retorno Os códigos de barras da ordem bancária foram
+Pagamento pagos com sucesso.
+Programação de Desembolso
+Documento 2025PD030095 Emissão 28/04/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/2
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 2/2
+Governo do Estado do Tocantins
+Ordem Bancária de Retenção
+TIPO 32
+Encerrado até Março
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2025OB032227 07/05/25
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Quinze mil e seiscentos e noventa e cinco reais e noventa e oito centavos 15.695,98
+Detalhamento
+Tipo de Retenção IRRF PJ Conta D NL e PODERES
+Credor da Retenção TOCANTINS GOVERNO DO ESTADO
+Competência 04/2025
+Domicílio Bancário Origem 001 - 3615 - 149063
+Domicílio Bancário Destino 001 - 3615 - CONTAUNICA
+Processo 202327000000120
+Itens
+Número da NL 2025NL024709 - 270100
+Número da NE 2025NE012683 - 270100
+Ano 2025
+Mês Competência 4 - Abril
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 573 - ROYALTIES E PARTICIPACAO ESPECIAL DE PETROLEO E GAS NATURAL VINCUL...
+Marcador de Fonte 0000000 - SEM MARCADOR
+Convênio de Despesa 000000 - Convênio não identificado
+Convênio de Receita 000000 - Convênio não identificado
+Credor 14092519000151 - MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP
+Tipo Patrimonial 122 - Locação de Mão de Obra
+Sub-item da Despesa 02 - LIMPEZA E CONSERVACAO
+Vinculação de Pagamento 99 - Sem consumo de Limite de Saque
+Grupo de Liberação de Cotas... 2 - Tesouro Extra Cota
+Código da receita do tributo 6256 - IRPJ - PAGAMENTO EFETUADO POR ÓRGÃO PÚBLICO - IN RFB 1234
+DEA Código: 00000000; Termo: INDEFINIDO
+Credor Secundário 99999999999999 - CREDOR INDEFINIDO
+Valor 15.695,98
+Observação
+Atender despesas com a prestação de serviços contínuos de copeiragem, limpeza conservação, higienização e jardinagem, com
+fornecimento de materiais e produtos apropriados, máquinas, equipamentos e mão-de-obra, prestados nas dependências internas e
+externas da Sede da Secretaria da Educação do Estado do Tocantins e Anexos. Pagamento das NF's n° 202500000000286 e
+202500000000287, referente aos serviços prestados nos meses de Fevereiro e Março de 2025, respectivamente.
+Registro de Envio
+UG Emitente 390998 Emissão 07/05/25
+Documento 2025RE004763 Data de Envio 07/05/25
+Status de Envio Processado e Pago Data de retorno 09/05/25
+Tipo de Normal Retorno Ordem bancária paga e liberada com
+Pagamento sucesso.
+Programação de Desembolso
+Documento 2025PD030094 Emissão 28/04/25 Data de 07/05/25
+Programação
+Emitido/contabilizado por Simone Rios Luz Borges em 07/05/25 às 09:44. Impresso por RONNEY SIANDRO BARBOSA COSTA em 09/05/25 às 09:49.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1
+
+====================================================================================================
+  ARQUIVO: OB-MS-CONTRATO 011-2023-NF0428ENF00429 REF 02-2026
+====================================================================================================
+Governo do Estado do Tocantins
+Ordem Bancária Orçamentária
+TIPO 11
+Encerrado até Fevereiro
+Identificação
+UG Emitente Documento Emissão
+270100 - SECRETARIA DA EDUCACAO 2026OB015010 01/04/26
+UG Liquidante UG Pagadora
+270100 - SECRETARIA DA EDUCACAO 390998 - UG-FINANC.TESOURO
+Valor por Extenso Valor
+Oitenta e quatro mil e cento e setenta e nove reais e quarenta e seis centavos 84.179,46
+Detalhamento
+Nota Liquidação 2026NL008114
+Nota de Empenho 2026NE008027
+Credor 19200109000109 - MONTANA SEGURANÇA PRIVADA LTDA
+Natureza 339037 - LOCACAO DE MAO-DE-OBRA
+Identificador Exercício Fonte 1 - Recursos do Exercício Corrente
+Fonte 500 - RECURSOS NAO VINCULADOS DE IMPOSTOS
+Marcador de Fonte 1001101 - Identificação das despesas com manutenção e desenvolvimento do...
+Detalhamento de Fonte 882011 - MANUTENCAO E DESENVOLVIMENTO DO ENSINO - MDE - (500.1001101)
+Convênio de Receita 000000 - Convênio não identificado
+Convênio de Despesa 000000 - Convênio não identificado
+Contrato 23000339 - CONTRATAÇÃO DE EMPRESA ESPECIALIZADA NA PRESTAÇÃO DE SERVIÇOS...
+Domicílio Bancário Origem 070 - 0380 - 0003800167303 - Conta Unica
+Domicílio Bancário Destino 001 - 1505 - 666203 - ALTERAÇÃO DE DADOS BANCÁRIOS OFÍCIO 07/2026 MONTANA
+Competência 03/2026
+Código de Autenticação 8C69646B22
+Processo 202227000005515
+Itens
+Tipo Patrimonial Sub-item da Operação Patrimonial Vinculação de Classificação Valor
+Despesa Pagamento Complementar
+122 - Locação de 03 - VIGILANCIA 3687 - Pagamento consumindo 0 - Liberação 84.179,46
+Mão de Obra OSTENSIVA Limite de Saque automática de
+Limite de Saque
+Observação
+Destinado atender despesa com pagamento de alusivos ao contrato nº 011/23 concernente à prestação de serviço contínuos de vigilância
+patrimonial para atender a Sede e Almoxarifado desta Pasta . Pagamento das notas fiscais n° 00428 referente a janeiro/2026 e 00429
+referente a fevereiro/2026.
+Registro de Envio
+UG Emitente 390998 Emissão 01/04/26
+Documento 2026RE004486 Data de Envio 01/04/26
+Status de Envio Processado e Pago Data de retorno 01/04/26
+Tipo de Normal Retorno Crédito ou Débito
+Pagamento Efetivado - Este
+código indica que
+o pagamento foi
+confirmado
+Programação de Desembolso
+Documento 2026PD016506 Emissão 27/03/26 Data de 31/03/26
+Programação
+Emitido/contabilizado por Joelma Lopes de Paiva Moreno em 01/04/26 às 13:43. Impresso por RANNYERE ALMEIDA RIBEIRO MAGALHÃES em 07/04/26 às 09:23.
+Siafe-TO / SEFAZ-TO - Desenvolvido por Logus Tecnologia Página 1/1

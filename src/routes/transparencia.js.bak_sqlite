@@ -1,0 +1,323 @@
+/**
+ * Montana — Integração Portal Transparência Palmas-TO
+ * API: portaldatransparencia.palmas.to.gov.br/gastosdiretos/all/...
+ *
+ * URL pattern (descoberto via DevTools em 2026-04-07):
+ *   GET /gastosdiretos/all/dt_emp_in/{M-D-YYYY}/dt_emp_fm/{M-D-YYYY}
+ *                        /dt_pgm_in/{M-D-YYYY}/dt_pgm_fm/{M-D-YYYY}
+ *                        /dt_liq_in/{M-D-YYYY}/dt_liq_fm/{M-D-YYYY}
+ *                        /ano/{ano}/termo/{termo}/diaria/0/
+ * Usar "None" para campos sem filtro. Datas no formato en-US: M-D-YYYY.
+ * Resposta: [{"count":N,"next":"...","previous":null,"results":[...]}]
+ * Sem resultados: [{"error":"Ok"}]
+ *
+ * Operações:
+ *   GET  /transparencia/status          — testa conectividade
+ *   GET  /transparencia/consultar       — consulta pagamentos por termo + período
+ *   POST /transparencia/importar        — importa pagamentos para tabela transparencia_palmas
+ *   GET  /transparencia/conciliar       — cruza pagamentos com extratos bancários
+ *   GET  /transparencia/pendentes       — pagamentos do portal sem match no extrato
+ */
+
+const express  = require('express');
+const { getDb } = require('../db_pg');
+const companyMw = require('../companyMiddleware');
+
+const router = express.Router();
+router.use(companyMw);
+
+const PORTAL_BASE = 'http://portaldatransparencia.palmas.to.gov.br';
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Converte "2025-01-31" → "1-31-2025" (en-US com / substituído por -)
+ */
+function toPortalDate(isoDate) {
+  if (!isoDate) return 'None';
+  const [y, m, d] = isoDate.split('-');
+  return `${parseInt(m)}-${parseInt(d)}-${y}`;
+}
+
+function buildPortalUrl({ dataInicial, dataFinal, termo = 'None', diaria = 0 }) {
+  const dtIn  = toPortalDate(dataInicial);
+  const dtFm  = toPortalDate(dataFinal);
+  return `${PORTAL_BASE}/gastosdiretos/all/dt_emp_in/None/dt_emp_fm/None/dt_pgm_in/${dtIn}/dt_pgm_fm/${dtFm}/dt_liq_in/None/dt_liq_fm/None/ano/None/termo/${encodeURIComponent(termo)}/diaria/${diaria}/`;
+}
+
+async function fetchPagamentos(url) {
+  const r = await fetch(url, {
+    headers: {
+      'Accept': 'application/json, text/plain, */*',
+      'Referer': `${PORTAL_BASE}/despesa/`,
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const json = await r.json();
+  // Resposta: array com 1 elemento [{count, next, results}] ou [{error:"Ok"}]
+  const envelope = Array.isArray(json) ? json[0] : json;
+  if (!envelope || envelope.error === 'Ok' || !envelope.results) return { results: [], count: 0, next: null };
+  return { results: envelope.results, count: envelope.count, next: envelope.next || null };
+}
+
+function normalizarPagamentos(results, fonte) {
+  return results.map(r => ({
+    fonte,
+    numero_empenho:  String(r.empenho      || r.numero_empenho  || r.cotacao_numero || ''),
+    data_empenho:    r.data_empenho  || r.data           || '',
+    data_liquidacao: r.data_liquidacao || '',
+    data_pagamento:  r.data_pagamento || r.data           || '',
+    valor_pago:      parseFloat(r.valor_pago   || r.valor_empenho || 0),
+    fornecedor:      r.fornecedor    || '',
+    cnpj_fornecedor: (r.cpf_cnpj || '').replace(/\D/g, ''),
+    elemento_despesa:r.natureza      || r.cod_natureza   || '',
+    subnatureza:     r.subnatureza   || r.cod_subnatureza|| '',
+    processo:        String(r.processo || ''),
+    gestao:          r.gestao        || r.gestao_descricao|| '',
+    fonte_recurso:   r.fonte         || r.cod_fonte       || '',
+    pronto_pagamento:'',
+    raw:             JSON.stringify(r),
+  }));
+}
+
+// ─── Garante tabela no banco ──────────────────────────────────────────────────
+
+function ensureTable(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS transparencia_palmas (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      fonte            TEXT,
+      numero_empenho   TEXT,
+      data_empenho     TEXT,
+      data_liquidacao  TEXT,
+      data_pagamento   TEXT,
+      valor_pago       REAL DEFAULT 0,
+      fornecedor       TEXT,
+      cnpj_fornecedor  TEXT,
+      elemento_despesa TEXT,
+      subnatureza      TEXT,
+      processo         TEXT,
+      gestao           TEXT,
+      fonte_recurso    TEXT,
+      pronto_pagamento TEXT,
+      extrato_id       INTEGER REFERENCES extratos(id),
+      status_conciliacao TEXT DEFAULT 'PENDENTE',
+      raw              TEXT,
+      created_at       TEXT DEFAULT (NOW())
+    );
+    CREATE INDEX IF NOT EXISTS idx_transp_data ON transparencia_palmas(data_pagamento);
+    CREATE INDEX IF NOT EXISTS idx_transp_valor ON transparencia_palmas(valor_pago);
+    CREATE INDEX IF NOT EXISTS idx_transp_cnpj ON transparencia_palmas(cnpj_fornecedor);
+  `);
+}
+
+// ─── GET /status ──────────────────────────────────────────────────────────────
+
+router.get('/status', async (req, res) => {
+  try {
+    const r = await fetch(`${PORTAL_BASE}/despesa/`, { signal: AbortSignal.timeout(5000) });
+    res.json({
+      ok: r.ok,
+      status: r.status,
+      portal: PORTAL_BASE,
+      nota: 'Dados disponíveis apenas até ~2019 no portal público',
+    });
+  } catch (e) {
+    res.status(503).json({ ok: false, erro: e.message });
+  }
+});
+
+// ─── GET /consultar ───────────────────────────────────────────────────────────
+
+router.get('/consultar', async (req, res) => {
+  const { termo = 'None', dataInicial, dataFinal } = req.query;
+
+  try {
+    const url = buildPortalUrl({ dataInicial, dataFinal, termo });
+    const { results, count, next } = await fetchPagamentos(url);
+    const pagamentos = normalizarPagamentos(results, 'portal_palmas');
+    res.json({ ok: true, total: count, retornados: pagamentos.length, pagamentos, urlConsultada: url });
+  } catch (e) {
+    res.status(500).json({ ok: false, erro: e.message });
+  }
+});
+
+// ─── POST /importar ───────────────────────────────────────────────────────────
+
+router.post('/importar', async (req, res) => {
+  const db = req.db;
+  if (!db) return res.status(400).json({ error: 'Empresa não informada (X-Company)' });
+
+  const {
+    termo       = req.company?.nomeAbrev || 'MONTANA',
+    dataInicial = `${new Date().getFullYear() - 1}-01-01`,
+    dataFinal   = new Date().toISOString().split('T')[0],
+    sobrescrever = false,
+  } = req.body;
+
+  ensureTable(db);
+
+  let importados = 0;
+  let duplicados = 0;
+  let nextUrl    = buildPortalUrl({ dataInicial, dataFinal, termo });
+
+  try {
+    const insert = db.prepare(`
+      INSERT INTO transparencia_palmas
+        (fonte, numero_empenho, data_empenho, data_liquidacao, data_pagamento,
+         valor_pago, fornecedor, cnpj_fornecedor, elemento_despesa, subnatureza,
+         processo, gestao, fonte_recurso, pronto_pagamento, raw)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `);
+    const check = db.prepare(`
+      SELECT id FROM transparencia_palmas WHERE numero_empenho=? AND data_pagamento=? AND valor_pago=?
+    `);
+
+    let paginas = 0;
+    while (nextUrl && paginas < 50) {
+      const { results, next } = await fetchPagamentos(nextUrl);
+      if (!results.length) break;
+
+      const pagamentos = normalizarPagamentos(results, 'portal_palmas');
+      db.transaction((lista) => {
+        for (const p of lista) {
+          const existe = check.get(p.numero_empenho, p.data_pagamento, p.valor_pago);
+          if (existe && !sobrescrever) { duplicados++; continue; }
+          insert.run(p.fonte, p.numero_empenho, p.data_empenho, p.data_liquidacao,
+            p.data_pagamento, p.valor_pago, p.fornecedor, p.cnpj_fornecedor,
+            p.elemento_despesa, p.subnatureza, p.processo, p.gestao,
+            p.fonte_recurso, p.pronto_pagamento, p.raw);
+          importados++;
+        }
+      })(pagamentos);
+
+      nextUrl = next;
+      paginas++;
+    }
+
+    res.json({ ok: true, importados, duplicados, paginas });
+  } catch (e) {
+    res.status(500).json({ ok: false, erro: e.message });
+  }
+});
+
+// ─── GET /conciliar — cruza transparência com extratos ───────────────────────
+
+router.get('/conciliar', async (req, res) => {
+  const db = req.db;
+  if (!db) return res.status(400).json({ error: 'Empresa não informada' });
+
+  ensureTable(db);
+
+  const { mes, tolerancia = 2 } = req.query; // tolerancia em dias
+  const tol = parseInt(tolerancia);
+
+  try {
+    // Busca pagamentos pendentes de conciliação
+    const pendentes = await db.prepare(`
+      SELECT * FROM transparencia_palmas
+      WHERE status_conciliacao = 'PENDENTE'
+      ${mes ? "AND strftime('%Y-%m', data_pagamento) = ?" : ''}
+      ORDER BY data_pagamento DESC
+    `).all(...(mes ? [mes] : []));
+
+    let conciliados = 0;
+    const updateStatus = db.prepare(`
+      UPDATE transparencia_palmas SET status_conciliacao=?, extrato_id=? WHERE id=?
+    `);
+
+    const conciliarTodos = db.transaction(async () => {
+      for (const p of pendentes) {
+        if (!p.data_pagamento || !p.valor_pago) continue;
+
+        // Busca extrato com valor próximo e data próxima (+/- tolerancia dias)
+        const match = await db.prepare(`
+          SELECT id, data_iso, credito FROM extratos
+          WHERE ABS(credito - ?) < 0.02
+            AND date(data_iso) BETWEEN date(?, '-${tol} days') AND date(?, '+${tol} days')
+            AND status_conciliacao != 'CONCILIADO'
+          ORDER BY ABS(credito - ?) ASC, ABS(julianday(data_iso) - julianday(?)) ASC
+          LIMIT 1
+        `).get(p.valor_pago, p.data_pagamento, p.data_pagamento, p.valor_pago, p.data_pagamento);
+
+        if (match) {
+          updateStatus.run('CONCILIADO', match.id, p.id);
+          await db.prepare(`UPDATE extratos SET status_conciliacao='CONCILIADO' WHERE id=?`).run(match.id);
+          conciliados++;
+        }
+      }
+    });
+    conciliarTodos();
+
+    // Resumo final
+    const resumo = await db.prepare(`
+      SELECT status_conciliacao, COUNT(*) qtd, SUM(valor_pago) total
+      FROM transparencia_palmas GROUP BY status_conciliacao
+    `).all();
+
+    res.json({ ok: true, conciliados, pendentes: pendentes.length - conciliados, resumo });
+  } catch (e) {
+    res.status(500).json({ ok: false, erro: e.message });
+  }
+});
+
+// ─── GET /pendentes — lista pagamentos não conciliados ───────────────────────
+
+router.get('/pendentes', async (req, res) => {
+  const db = req.db;
+  if (!db) return res.status(400).json({ error: 'Empresa não informada' });
+
+  ensureTable(db);
+
+  const { mes, status = 'PENDENTE', limit = 200 } = req.query;
+  try {
+    const rows = await db.prepare(`
+      SELECT t.*, e.data_iso as extrato_data, e.credito as extrato_valor, e.historico as extrato_hist
+      FROM transparencia_palmas t
+      LEFT JOIN extratos e ON e.id = t.extrato_id
+      WHERE t.status_conciliacao = ?
+      ${mes ? "AND strftime('%Y-%m', t.data_pagamento) = ?" : ''}
+      ORDER BY t.data_pagamento DESC
+      LIMIT ?
+    `).all(...([status, ...(mes ? [mes] : []), parseInt(limit)]));
+
+    const totais = await db.prepare(`
+      SELECT COUNT(*) qtd, SUM(valor_pago) total FROM transparencia_palmas WHERE status_conciliacao=?
+    `).get(status);
+
+    res.json({ ok: true, registros: rows, ...totais });
+  } catch (e) {
+    res.status(500).json({ ok: false, erro: e.message });
+  }
+});
+
+// ─── GET /resumo ─────────────────────────────────────────────────────────────
+
+router.get('/resumo', async (req, res) => {
+  const db = req.db;
+  if (!db) return res.status(400).json({ error: 'Empresa não informada' });
+
+  ensureTable(db);
+
+  try {
+    const porStatus = await db.prepare(`
+      SELECT status_conciliacao, COUNT(*) qtd, COALESCE(SUM(valor_pago),0) total
+      FROM transparencia_palmas GROUP BY status_conciliacao
+    `).all();
+
+    const porMes = await db.prepare(`
+      SELECT strftime('%Y-%m', data_pagamento) mes, COUNT(*) qtd, SUM(valor_pago) total
+      FROM transparencia_palmas
+      WHERE data_pagamento IS NOT NULL AND data_pagamento != ''
+      GROUP BY mes ORDER BY mes DESC LIMIT 24
+    `).all();
+
+    res.json({ ok: true, porStatus, porMes, portal: PORTAL_BASE });
+  } catch (e) {
+    res.status(500).json({ ok: false, erro: e.message });
+  }
+});
+
+module.exports = router;
