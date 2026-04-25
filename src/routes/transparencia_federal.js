@@ -1,0 +1,147 @@
+/**
+ * Montana - Rotas /api/transparencia/federal/*
+ * Portal da Transparência Federal (v2 - endpoints corretos)
+ */
+const express = require('express');
+const federal = require('../adapters/federal');
+const companyMw = require('../companyMiddleware');
+
+const router = express.Router();
+router.use(companyMw);
+
+// GET /status
+router.get('/status', async (req, res) => {
+  try {
+    // Lista ao menos um órgão para validar chave
+    const test = await fetch('https://api.portaldatransparencia.gov.br/api-de-dados/orgaos-siafi?codigo=26271&pagina=1', {
+      headers: {
+        'chave-api-dados': process.env.PORTAL_FEDERAL_API_KEY,
+        'Accept': 'application/json',
+      },
+    });
+    res.json({
+      ok: test.ok,
+      portal: 'Portal da Transparência Federal',
+      url_base: federal.BASE,
+      status: test.status,
+      chaves_configuradas: {
+        assessoria: !!process.env.PORTAL_FEDERAL_KEY_14092519000151,
+        seguranca:  !!process.env.PORTAL_FEDERAL_KEY_19200109000109,
+      },
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /contratos?cnpj=X
+router.get('/contratos', async (req, res) => {
+  const cnpj = (req.query.cnpj || '').replace(/\D/g, '');
+  if (!cnpj) return res.status(400).json({ error: 'cnpj obrigatorio' });
+  try {
+    const contratos = await federal.contratosPorCnpj(cnpj);
+    res.json({
+      cnpj, total: contratos.length,
+      data: contratos.map(c => federal.normalizarContrato(c, req.companyKey)),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /pagamentos?cnpj=X&ano=2025
+router.get('/pagamentos', async (req, res) => {
+  const cnpj = (req.query.cnpj || '').replace(/\D/g, '');
+  const ano = parseInt(req.query.ano) || new Date().getFullYear();
+  if (!cnpj) return res.status(400).json({ error: 'cnpj obrigatorio' });
+  try {
+    const docs = await federal.documentosPorFavorecido(cnpj, ano, 'pagamento');
+    const total = docs.reduce((s, d) => s + federal.normalizarDocumento(d).valor_pago, 0);
+    res.json({
+      cnpj, ano, total_docs: docs.length, total_valor: total,
+      data: docs.map(d => federal.normalizarDocumento(d, req.companyKey)),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /coletar body: { cnpj, ano, fases: ['empenho','liquidacao','pagamento'] }
+router.post('/coletar', async (req, res) => {
+  const cnpj = (req.body?.cnpj || '').replace(/\D/g, '');
+  const ano = parseInt(req.body?.ano) || new Date().getFullYear();
+  const fases = req.body?.fases || ['pagamento', 'empenho'];
+
+  if (!cnpj) return res.status(400).json({ error: 'cnpj obrigatorio' });
+  const inicio = Date.now();
+
+  try {
+    // Coletar documentos das fases pedidas
+    const todosItems = [];
+    for (const fase of fases) {
+      const docs = await federal.documentosPorFavorecido(cnpj, ano, fase);
+      for (const d of docs) todosItems.push(federal.normalizarDocumento(d, req.companyKey));
+    }
+
+    const stmt = req.db.prepare(`
+      INSERT INTO transparencia_pagamentos (
+        fonte_portal, empresa_key, numero_empenho, processo,
+        data_empenho, data_pagamento, valor_empenhado, valor_pago,
+        fornecedor_nome, fornecedor_cnpj,
+        gestao, gestao_codigo, fonte_recurso, fonte_detalhada,
+        elemento_despesa, subnatureza, mes, ano,
+        tipo_licitacao, modalidade, objeto, raw_json, status_match,
+        coletado_em, atualizado_em
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente',
+                datetime('now','localtime'), datetime('now','localtime'))
+    `);
+
+    let salvos = 0;
+    const trans = req.db.transaction(async (list) => {
+      for (const it of list) {
+        const r = stmt.run(
+          it.fonte_portal, it.empresa_key,
+          it.numero_empenho || '', it.processo || '',
+          it.data_empenho || null, it.data_pagamento || null,
+          it.valor_empenhado || 0, it.valor_pago || 0,
+          it.fornecedor_nome || '', it.fornecedor_cnpj || '',
+          it.gestao || '', it.gestao_codigo || '',
+          it.fonte_recurso || '', it.fonte_detalhada || '',
+          it.elemento_despesa || '', it.subnatureza || '',
+          it.mes || 0, it.ano || 0,
+          it.tipo_licitacao || '', it.modalidade || '',
+          it.objeto || '', it.raw_json || '{}'
+        );
+        if (r.changes > 0) salvos++;
+      }
+    });
+    trans(todosItems);
+
+    await req.db.prepare(`
+      INSERT INTO transparencia_coletas (filtros_json, total_retornado, novos, duracao_ms)
+      VALUES (?, ?, ?, ?)
+    `).run(
+      JSON.stringify({ portal: 'federal', cnpj, ano, fases }),
+      todosItems.length, salvos, Date.now() - inicio
+    );
+
+    res.json({ ok: true, coletados: todosItems.length, salvos, duracao_ms: Date.now() - inicio });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /resumo - agrega tudo do federal
+router.get('/resumo', async (req, res) => {
+  try {
+    const rows = await req.db.prepare(`
+      SELECT ano, mes, modalidade as fase,
+             COUNT(*) as qtd,
+             ROUND(SUM(valor_empenhado), 2) as total_empenhado,
+             ROUND(SUM(valor_pago), 2) as total_pago,
+             fornecedor_cnpj,
+             gestao
+      FROM transparencia_pagamentos
+      WHERE fonte_portal = 'portal-federal'
+      GROUP BY ano, mes, modalidade, fornecedor_cnpj, gestao
+      ORDER BY ano DESC, mes DESC
+    `).all();
+    res.json({ data: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+module.exports = router;
