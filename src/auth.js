@@ -55,10 +55,10 @@ async function loginHandler(req, res) {
   try {
     const { seedAdmin, ensureTable } = require('./routes/usuarios');
     const db = getDb(companyKey);
-    ensureTable(db);
-    seedAdmin(db);  // garante admin padrão na primeira vez
+    await ensureTable(db);
+    await seedAdmin(db);  // garante admin padrão na primeira vez
 
-    const user = db.prepare('SELECT * FROM usuarios WHERE usuario = ? AND ativo = 1').get(usuario);
+    const user = await db.prepare('SELECT * FROM usuarios WHERE usuario = ? AND ativo = 1').get(usuario);
     if (!user) {
       return res.status(401).json({ error: 'Usuário ou senha incorretos' });
     }

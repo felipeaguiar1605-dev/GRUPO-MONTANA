@@ -50,10 +50,10 @@ function soAdmin(req, res, next) {
 
 // ─── Garante tabela usuarios no banco da empresa ──────────────────
 
-function ensureTable(db) {
-  db.exec(`
+async function ensureTable(db) {
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS usuarios (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      id          BIGSERIAL PRIMARY KEY,
       usuario     TEXT NOT NULL UNIQUE,
       nome        TEXT NOT NULL,
       email       TEXT DEFAULT '',
@@ -62,25 +62,25 @@ function ensureTable(db) {
       ativo       INTEGER NOT NULL DEFAULT 1,
       lotacao     TEXT DEFAULT '',
       criado_por  TEXT DEFAULT '',
-      created_at  TEXT DEFAULT (datetime('now')),
-      updated_at  TEXT DEFAULT (datetime('now'))
+      created_at  TIMESTAMP DEFAULT NOW(),
+      updated_at  TIMESTAMP DEFAULT NOW()
     );
   `);
   // Migration: add lotacao if missing
-  try { db.exec("ALTER TABLE usuarios ADD COLUMN lotacao TEXT DEFAULT ''"); } catch(e) {}
+  try { await db.exec("ALTER TABLE usuarios ADD COLUMN lotacao TEXT DEFAULT ''"); } catch(e) {}
   // Migration: add empresa if missing
-  try { db.exec("ALTER TABLE usuarios ADD COLUMN empresa TEXT DEFAULT ''"); } catch(e) {}
+  try { await db.exec("ALTER TABLE usuarios ADD COLUMN empresa TEXT DEFAULT ''"); } catch(e) {}
 }
 
 // ─── Seed: garante que o admin padrão existe ──────────────────────
 
-function seedAdmin(db) {
-  ensureTable(db);
-  const existe = db.prepare('SELECT id FROM usuarios WHERE usuario = ?').get('admin');
+async function seedAdmin(db) {
+  await ensureTable(db);
+  const existe = await db.prepare('SELECT id FROM usuarios WHERE usuario = ?').get('admin');
   if (!existe) {
     const senhaAdmin = process.env.ADMIN_SENHA || 'montana2026';
     const hash = bcrypt.hashSync(senhaAdmin, 10);
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO usuarios (usuario, nome, email, senha_hash, role, criado_por)
       VALUES ('admin', 'Administrador', '', ?, 'admin', 'sistema')
     `).run(hash);
