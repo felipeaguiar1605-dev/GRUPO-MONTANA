@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<!-- Stats Grid -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon blue">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
+        </div>
+        <div class="stat-info">
+            <h4>Vendas do Mes</h4>
+            <div class="stat-value">R$ {{ stats.vendas_total|floatformat:2|intcomma }}</div>
+            <div class="stat-change">{{ stats.vendas_count }} venda{{ stats.vendas_count|pluralize:"s" }}</div>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-icon green">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z"/></svg>
+        </div>
+        <div class="stat-info">
+            <h4>A Receber</h4>
+            <div class="stat-value">R$ {{ stats.a_receber|floatformat:2|intcomma }}</div>
+            <div class="stat-change">{{ stats.a_receber_count }} titulo{{ stats.a_receber_count|pluralize:"s" }} pendente{{ stats.a_receber_count|pluralize:"s" }}</div>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-icon red">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </div>
+        <div class="stat-info">
+            <h4>A Pagar</h4>
+            <div class="stat-value">R$ {{ stats.a_pagar|floatformat:2|intcomma }}</div>
+            <div class="stat-change">{{ stats.a_pagar_count }} titulo{{ stats.a_pagar_count|pluralize:"s" }} pendente{{ stats.a_pagar_count|pluralize:"s" }}</div>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-icon yellow">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z"/></svg>
+        </div>
+        <div class="stat-info">
+            <h4>Compras do Mes</h4>
+            <div class="stat-value">R$ {{ stats.compras_total|floatformat:2|intcomma }}</div>
+            <div class="stat-change">{{ stats.compras_count }} compra{{ stats.compras_count|pluralize:"s" }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- Secondary Stats -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon cyan">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+        </div>
+        <div class="stat-info">
+            <h4>Produtos Ativos</h4>
+            <div class="stat-value">{{ stats.total_produtos|intcomma }}</div>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-icon blue">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        </div>
+        <div class="stat-info">
+            <h4>Clientes Ativos</h4>
+            <div class="stat-value">{{ stats.total_clientes|intcomma }}</div>
+        </div>
+    </div>
+
+    {% if stats.estoque_baixo > 0 %}
+    <div class="stat-card">
+        <div class="stat-icon yellow">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+        </div>
+        <div class="stat-info">
+            <h4>Estoque Baixo</h4>
+            <div class="stat-value">{{ stats.estoque_baixo }}</div>
+            <div class="stat-change down">produto{{ stats.estoque_baixo|pluralize:"s" }} abaixo do minimo</div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if stats.vencidas > 0 %}
+    <div class="stat-card">
+        <div class="stat-icon red">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </div>
+        <div class="stat-info">
+            <h4>Contas Vencidas</h4>
+            <div class="stat-value">{{ stats.vencidas }}</div>
+            <div class="stat-change down">conta{{ stats.vencidas|pluralize:"s" }} vencida{{ stats.vencidas|pluralize:"s" }}</div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Recent Sales Table -->
+<div class="card">
+    <div class="card-header">
+        <h3>Vendas Recentes</h3>
+    </div>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Numero</th>
+                    <th>Cliente</th>
+                    <th>Data</th>
+                    <th>Total</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for venda in vendas_recentes %}
+                <tr>
+                    <td><strong>#{{ venda.id }}</strong></td>
+                    <td>{{ venda.cliente.razao_social|default:"Consumidor Final" }}</td>
+                    <td>{{ venda.data_venda|date:"d/m/Y H:i" }}</td>
+                    <td>R$ {{ venda.total|floatformat:2|intcomma }}</td>
+                    <td>
+                        {% if venda.status == 'finalizada' %}
+                        <span class="badge badge-success">Finalizada</span>
+                        {% elif venda.status == 'pendente' %}
+                        <span class="badge badge-warning">Pendente</span>
+                        {% elif venda.status == 'cancelada' %}
+                        <span class="badge badge-danger">Cancelada</span>
+                        {% else %}
+                        <span class="badge badge-secondary">{{ venda.status|title }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="5">
+                        <div class="empty-state">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
+                            <h3>Nenhuma venda registrada</h3>
+                            <p>As vendas realizadas aparecerão aqui.</p>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
