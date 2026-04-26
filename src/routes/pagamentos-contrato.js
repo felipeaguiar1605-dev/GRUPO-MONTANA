@@ -8,6 +8,13 @@ const companyMw = require('../companyMiddleware');
 const router = express.Router();
 router.use(companyMw);
 
+// PG retorna NUMERIC como string — sempre converter antes de aritmética
+const toNum = (v) => {
+  if (v === null || v === undefined) return 0;
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
 // ── Extrai keyword de busca do nome do tomador ───────────────────
 function tomadorKeyword(tomador) {
   const t = (tomador || '').trim().toUpperCase();
@@ -51,9 +58,10 @@ function diasDesde(dataIso) {
 
 // Busca créditos por keyword e tenta match individual + agregado
 async function matchCreditos(db, nfsSemLink, keyword, dataFrom, dataToExt) {
-  if (!nfsSemLink.length || !keyword) return 0;
+  const nfsArr = Array.isArray(nfsSemLink) ? nfsSemLink : [];
+  if (!nfsArr.length || !keyword) return 0;
 
-  const credits = await db.prepare(`
+  const creditsRaw = await db.prepare(`
     SELECT id, credito, data_iso FROM extratos
     WHERE data_iso >= ? AND data_iso <= ?
       AND credito > 0
@@ -65,22 +73,23 @@ async function matchCreditos(db, nfsSemLink, keyword, dataFrom, dataToExt) {
     ORDER BY data_iso
   `).all(dataFrom, dataToExt, `%${keyword}%`);
 
+  const credits = Array.isArray(creditsRaw) ? creditsRaw : [];
   if (!credits.length) return 0;
 
   let recebido = 0;
   const usados = new Set();
 
-  for (const nf of nfsSemLink) {
-    const target = nf.valor_liquido > 0 ? nf.valor_liquido : nf.valor_bruto;
+  for (const nf of nfsArr) {
+    const target = toNum(nf.valor_liquido) > 0 ? toNum(nf.valor_liquido) : toNum(nf.valor_bruto);
     const tol = Math.max(target * 0.10, 50);
-    const match = credits.find(c => !usados.has(c.id) && Math.abs(c.credito - target) <= tol);
-    if (match) { recebido += match.credito; usados.add(match.id); }
+    const match = credits.find(c => !usados.has(c.id) && Math.abs(toNum(c.credito) - target) <= tol);
+    if (match) { recebido += toNum(match.credito); usados.add(match.id); }
   }
 
   // Nenhum match individual: tenta soma agregada (±15%)
   if (usados.size === 0) {
-    const sumC = credits.reduce((s, c) => s + c.credito, 0);
-    const sumN = nfsSemLink.reduce((s, n) => s + (n.valor_liquido > 0 ? n.valor_liquido : n.valor_bruto), 0);
+    const sumC = credits.reduce((s, c) => s + toNum(c.credito), 0);
+    const sumN = nfsArr.reduce((s, n) => s + (toNum(n.valor_liquido) > 0 ? toNum(n.valor_liquido) : toNum(n.valor_bruto)), 0);
     if (sumN > 0 && Math.abs(sumC - sumN) / sumN <= 0.15) recebido = sumC;
   }
 
@@ -100,7 +109,7 @@ router.get('/resumo', async (req, res) => {
     extTo.setDate(extTo.getDate() + 60);
     const dataToExt = extTo.toISOString().split('T')[0];
 
-    const nfs = await db.prepare(`
+    const nfsRaw = await db.prepare(`
       SELECT id, numero, tomador, valor_bruto, valor_liquido,
              data_emissao, competencia, status_conciliacao, extrato_id
       FROM notas_fiscais
@@ -108,7 +117,9 @@ router.get('/resumo', async (req, res) => {
         AND valor_bruto > 0
         AND UPPER(COALESCE(status_conciliacao,'')) != 'ASSESSORIA'
       ORDER BY tomador, data_emissao
-    `).all([dataFrom, dataTo]);
+    `).all(dataFrom, dataTo);
+
+    const nfs = Array.isArray(nfsRaw) ? nfsRaw : [];
 
     // Agrupa por tomador
     const groups = {};
@@ -116,7 +127,7 @@ router.get('/resumo', async (req, res) => {
       const key = (nf.tomador || 'SEM TOMADOR').trim().toUpperCase();
       if (!groups[key]) groups[key] = { tomador: key, nfs: [], faturado: 0 };
       groups[key].nfs.push(nf);
-      groups[key].faturado += nf.valor_bruto || 0;
+      groups[key].faturado += toNum(nf.valor_bruto);
     }
 
     const resultado = [];
@@ -128,14 +139,14 @@ router.get('/resumo', async (req, res) => {
       // Método 1: links diretos (extrato_id definido)
       for (const nf of grupo.nfs.filter(n => n.extrato_id)) {
         const ext = await db.prepare(`SELECT COALESCE(credito,0) credito FROM extratos WHERE id=?`).get(nf.extrato_id);
-        if (ext) recebido += ext.credito;
+        if (ext) recebido += toNum(ext.credito);
       }
 
       // Método 2: heurística para NFs sem link
       const semLink = grupo.nfs.filter(n => !n.extrato_id);
-      recebido += matchCreditos(db, semLink, keyword, dataFrom, dataToExt);
+      recebido += await matchCreditos(db, semLink, keyword, dataFrom, dataToExt);
 
-      const faturado = grupo.faturado;
+      const faturado = toNum(grupo.faturado);
       const em_aberto = Math.max(faturado - recebido, 0);
 
       const nfsSemPag = grupo.nfs.filter(n => !n.extrato_id);
@@ -194,7 +205,7 @@ router.get('/historico', async (req, res) => {
       const extTo    = new Date(d.getFullYear(), d.getMonth() + 2, 28);
       const dataToExt = extTo.toISOString().split('T')[0];
 
-      const nfs = await db.prepare(`
+      const nfsRaw = await db.prepare(`
         SELECT id, valor_bruto, valor_liquido, data_emissao, extrato_id
         FROM notas_fiscais
         WHERE data_emissao >= ? AND data_emissao <= ?
@@ -203,15 +214,16 @@ router.get('/historico', async (req, res) => {
           AND UPPER(COALESCE(status_conciliacao,'')) != 'ASSESSORIA'
       `).all(dataFrom, dataTo, `%${tomador.trim().toUpperCase()}%`);
 
-      let faturado = nfs.reduce((s, n) => s + (n.valor_bruto || 0), 0);
+      const nfs = Array.isArray(nfsRaw) ? nfsRaw : [];
+      let faturado = nfs.reduce((s, n) => s + toNum(n.valor_bruto), 0);
       let recebido = 0;
 
       for (const nf of nfs.filter(n => n.extrato_id)) {
         const ext = await db.prepare(`SELECT COALESCE(credito,0) c FROM extratos WHERE id=?`).get(nf.extrato_id);
-        if (ext) recebido += ext.c;
+        if (ext) recebido += toNum(ext.c);
       }
 
-      recebido += matchCreditos(db, nfs.filter(n => !n.extrato_id), keyword, dataFrom, dataToExt);
+      recebido += await matchCreditos(db, nfs.filter(n => !n.extrato_id), keyword, dataFrom, dataToExt);
 
       resultado.push({
         mes: mesStr,
@@ -237,7 +249,7 @@ router.get('/inadimplentes', async (req, res) => {
     const hoje = new Date().toISOString().split('T')[0];
     const inicio = new Date(Date.now() - 90 * 86400000).toISOString().split('T')[0];
 
-    const nfs = await db.prepare(`
+    const nfsRaw = await db.prepare(`
       SELECT id, numero, tomador, valor_bruto, valor_liquido, data_emissao, extrato_id
       FROM notas_fiscais
       WHERE data_emissao >= ?
@@ -246,6 +258,7 @@ router.get('/inadimplentes', async (req, res) => {
       ORDER BY tomador, data_emissao
     `).all(inicio);
 
+    const nfs = Array.isArray(nfsRaw) ? nfsRaw : [];
     const groups = {};
     for (const nf of nfs) {
       const key = (nf.tomador || 'SEM TOMADOR').trim().toUpperCase();
@@ -256,21 +269,23 @@ router.get('/inadimplentes', async (req, res) => {
     const inadimplentes = [];
 
     for (const grupo of Object.values(groups)) {
-      let faturado = grupo.nfs.reduce((s, n) => s + (n.valor_bruto || 0), 0);
+      let faturado = grupo.nfs.reduce((s, n) => s + toNum(n.valor_bruto), 0);
       let recebido = 0;
 
       for (const nf of grupo.nfs.filter(n => n.extrato_id)) {
         const ext = await db.prepare(`SELECT COALESCE(credito,0) credito FROM extratos WHERE id=?`).get(nf.extrato_id);
-        if (ext) recebido += ext.credito;
+        if (ext) recebido += toNum(ext.credito);
       }
 
       const semLink = grupo.nfs.filter(n => !n.extrato_id);
       if (semLink.length > 0) {
         const keyword = tomadorKeyword(grupo.tomador);
-        const dataFromH = semLink.sort((a, b) => a.data_emissao.localeCompare(b.data_emissao))[0].data_emissao;
-        recebido += matchCreditos(db, semLink, keyword, dataFromH, hoje);
+        const dataFromH = semLink.sort((a, b) => (a.data_emissao || '').localeCompare(b.data_emissao || ''))[0].data_emissao;
+        recebido += await matchCreditos(db, semLink, keyword, dataFromH, hoje);
       }
 
+      faturado = toNum(faturado);
+      recebido = toNum(recebido);
       const em_aberto = Math.max(faturado - recebido, 0);
       if (em_aberto < 1) continue;
 
@@ -316,7 +331,7 @@ router.get('/detalhe', async (req, res) => {
     const dataToExt = extTo.toISOString().split('T')[0];
     const keyword = tomadorKeyword(tomador);
 
-    const nfs = await db.prepare(`
+    const nfsRaw = await db.prepare(`
       SELECT id, numero, tomador, valor_bruto, valor_liquido,
              data_emissao, competencia, status_conciliacao, extrato_id
       FROM notas_fiscais
@@ -326,8 +341,9 @@ router.get('/detalhe', async (req, res) => {
         AND UPPER(COALESCE(status_conciliacao,'')) != 'ASSESSORIA'
       ORDER BY data_emissao
     `).all(dataFrom, dataTo, `%${tomador.trim().toUpperCase()}%`);
+    const nfs = Array.isArray(nfsRaw) ? nfsRaw : [];
 
-    const creditos = keyword ? await db.prepare(`
+    const creditosRaw = keyword ? await db.prepare(`
       SELECT id, data_iso, historico, credito
       FROM extratos
       WHERE data_iso >= ? AND data_iso <= ?
@@ -335,6 +351,7 @@ router.get('/detalhe', async (req, res) => {
         AND UPPER(historico) LIKE ?
       ORDER BY data_iso
     `).all(dataFrom, dataToExt, `%${keyword}%`) : [];
+    const creditos = Array.isArray(creditosRaw) ? creditosRaw : [];
 
     const usadosExt = new Set();
 
@@ -344,20 +361,20 @@ router.get('/detalhe', async (req, res) => {
         const ext = await db.prepare(`SELECT id, data_iso, historico, credito FROM extratos WHERE id=?`).get(nf.extrato_id);
         if (ext) { match = ext; usadosExt.add(ext.id); }
       } else {
-        const target = nf.valor_liquido > 0 ? nf.valor_liquido : nf.valor_bruto;
+        const target = toNum(nf.valor_liquido) > 0 ? toNum(nf.valor_liquido) : toNum(nf.valor_bruto);
         const tol    = Math.max(target * 0.10, 50);
-        const found  = creditos.find(c => !usadosExt.has(c.id) && Math.abs(c.credito - target) <= tol);
+        const found  = creditos.find(c => !usadosExt.has(c.id) && Math.abs(toNum(c.credito) - target) <= tol);
         if (found) { match = found; usadosExt.add(found.id); }
       }
 
-      const pago   = match ? match.credito : 0;
-      const status = calcStatus(nf.valor_bruto, pago, diasDesde(nf.data_emissao));
+      const pago   = match ? toNum(match.credito) : 0;
+      const status = calcStatus(toNum(nf.valor_bruto), pago, diasDesde(nf.data_emissao));
 
       return {
         id:              nf.id,
         numero:          nf.numero,
-        valor_bruto:     nf.valor_bruto,
-        valor_liquido:   nf.valor_liquido,
+        valor_bruto:     toNum(nf.valor_bruto),
+        valor_liquido:   toNum(nf.valor_liquido),
         data_emissao:    nf.data_emissao,
         status,
         pago,

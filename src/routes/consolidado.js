@@ -14,15 +14,34 @@ const express = require('express');
 const { getDb, COMPANIES } = require('../db_pg');
 const router = express.Router();
 
-function num(v) { return Math.round((v || 0) * 100) / 100; }
+function num(v) {
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+}
+function int(v) {
+  const n = typeof v === 'number' ? v : parseInt(v, 10);
+  return Number.isFinite(n) ? n : 0;
+}
 
 // Lê colunas de uma tabela (suporta schemas que podem variar entre local/prod)
 async function cols(db, table) {
-  try { return await db.prepare(`SELECT column_name as name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='${table}' ORDER BY ordinal_position`).all().map(c => c.name); }
-  catch { return []; }
+  try {
+    const rows = await db.prepare(
+      `SELECT column_name as name FROM information_schema.columns
+        WHERE table_schema=current_schema() AND table_name=$1
+        ORDER BY ordinal_position`
+    ).all(table);
+    return Array.isArray(rows) ? rows.map(c => c.name) : [];
+  } catch { return []; }
 }
 async function hasTable(db, name) {
-  return !!await db.prepare(`SELECT 1 FROM information_schema.tables WHERE table_schema=current_schema() AND table_name=$1`).get(name);
+  try {
+    const row = await db.prepare(
+      `SELECT 1 AS x FROM information_schema.tables
+        WHERE table_schema=current_schema() AND table_name=$1`
+    ).get(name);
+    return !!row;
+  } catch { return false; }
 }
 
 // ─── GET /api/consolidado ─────────────────────────────────────────
@@ -39,36 +58,36 @@ router.get('/consolidado', async (req, res) => {
     for (const [key, company] of Object.entries(COMPANIES)) {
       try {
         const db = getDb(key);
-        const extratos = await db.prepare(`
+        const extratos = (await db.prepare(`
           SELECT COUNT(*) cnt,
                  COALESCE(SUM(credito),0) entradas,
                  COALESCE(SUM(debito),0) saidas
             FROM extratos WHERE data_iso >= ? AND data_iso <= ?
-        `).get(from, to);
-        const nfs = await db.prepare(`
+        `).get(from, to)) || {};
+        const nfs = (await db.prepare(`
           SELECT COUNT(*) cnt, COALESCE(SUM(valor_bruto),0) bruto
             FROM notas_fiscais
            WHERE (data_emissao >= ? AND data_emissao <= ?)
-              OR (data_emissao = '' AND created_at >= ? AND created_at <= ?)
-        `).get(from, to, from, to);
-        const desp = await db.prepare(`
+              OR (data_emissao IS NULL AND created_at >= ? AND created_at <= ?)
+        `).get(from, to, from, to)) || {};
+        const desp = (await db.prepare(`
           SELECT COALESCE(SUM(valor_bruto),0) total
             FROM despesas WHERE data_iso >= ? AND data_iso <= ?
-        `).get(from, to);
-        const pend = await db.prepare(`SELECT COUNT(*) cnt FROM extratos WHERE status_conciliacao='PENDENTE'`).get();
-        const funcs = await db.prepare(`SELECT COUNT(*) cnt FROM rh_funcionarios WHERE status='ATIVO'`).get();
+        `).get(from, to)) || {};
+        const pend = (await db.prepare(`SELECT COUNT(*) cnt FROM extratos WHERE status_conciliacao='PENDENTE'`).get()) || {};
+        const funcs = (await db.prepare(`SELECT COUNT(*) cnt FROM rh_funcionarios WHERE status='ATIVO'`).get()) || {};
 
         resultado[key] = {
           nome: company.nome, nomeAbrev: company.nomeAbrev, cnpj: company.cnpj,
           cor: company.cor, icone: company.icone,
-          extratos_total: extratos.cnt,
+          extratos_total: int(extratos.cnt),
           entradas: num(extratos.entradas),
           saidas:   num(extratos.saidas),
-          nfs_total: nfs.cnt,
+          nfs_total: int(nfs.cnt),
           faturamento: num(nfs.bruto),
           despesas: num(desp.total),
-          pendentes: pend.cnt,
-          funcionarios: funcs.cnt,
+          pendentes: int(pend.cnt),
+          funcionarios: int(funcs.cnt),
         };
       } catch (e) {
         resultado[key] = { nome: company.nome, erro: e.message };
@@ -101,18 +120,18 @@ router.get('/consolidado/resumo', async (req, res) => {
     for (const [key, company] of Object.entries(COMPANIES)) {
       try {
         const db = getDb(key);
-        const nfCols = new Set(cols(db, 'notas_fiscais'));
+        const nfCols = new Set(await cols(db, 'notas_fiscais'));
 
         // Monta lista de campos de retenção que realmente existem no schema
         const possRet = ['inss','ir','iss','csll','pis','cofins','retencao','outros_descontos'];
         const camposRet = possRet.filter(c => nfCols.has(c))
           .map(c => `COALESCE(${c},0)`).join('+') || '0';
 
-        // Filtro de soft-delete só se a coluna existir
-        const deletedFilter = nfCols.has('deleted_at') ? `AND COALESCE(deleted_at,'') = ''` : '';
+        // Filtro de soft-delete só se a coluna existir (deleted_at é timestamptz → IS NULL, não '')
+        const deletedFilter = nfCols.has('deleted_at') ? `AND deleted_at IS NULL` : '';
 
         // Receita — notas_fiscais no período (por data_emissao; fallback created_at)
-        const nfs = await db.prepare(`
+        const nfs = (await db.prepare(`
           SELECT COUNT(*) qtd,
                  COALESCE(SUM(valor_bruto),   0) bruto,
                  COALESCE(SUM(valor_liquido), 0) liquido,
@@ -120,19 +139,20 @@ router.get('/consolidado/resumo', async (req, res) => {
             FROM notas_fiscais
            WHERE 1=1 ${deletedFilter}
              AND ((data_emissao >= ? AND data_emissao <= ?)
-               OR (COALESCE(data_emissao,'') = '' AND created_at >= ? AND created_at <= ?))
-        `).get(from, to, from, to);
+               OR (data_emissao IS NULL AND created_at >= ? AND created_at <= ?))
+        `).get(from, to, from, to)) || {};
 
         // valor_liquido às vezes não é preenchido → derivar de bruto - retenções
         const receita_bruta    = num(nfs.bruto);
         const receita_liquida_calc = receita_bruta - num(nfs.retencoes_soma);
         const receita_liquida  = num(nfs.liquido) > 0 ? num(nfs.liquido) : num(receita_liquida_calc);
         const retencoes        = num(receita_bruta - receita_liquida);
+        const qtdNfs           = int(nfs.qtd);
 
         // Despesas reais no período — exclui aplicações financeiras e intragrupo
         let despesas = 0;
-        if (hasTable(db, 'despesas')) {
-          const dCols = new Set(cols(db, 'despesas'));
+        if (await hasTable(db, 'despesas')) {
+          const dCols = new Set(await cols(db, 'despesas'));
           const campoDesc = dCols.has('descricao') ? 'descricao'
                           : dCols.has('historico')  ? 'historico'
                           : null;
@@ -146,21 +166,25 @@ router.get('/consolidado/resumo', async (req, res) => {
             OR UPPER(COALESCE(${campoDesc},'')) LIKE '%CH.AVULSO ENTRE AG%'
             OR UPPER(COALESCE(${campoDesc},'')) LIKE '%TED MESMA TITUL%'
              )` : '';
-          const desp = await db.prepare(`
+          const desp = (await db.prepare(`
             SELECT COALESCE(SUM(valor_bruto),0) total
               FROM despesas
              WHERE data_iso >= ? AND data_iso <= ?
                ${filtro}
-          `).get(from, to);
+          `).get(from, to)) || {};
           despesas = num(desp.total);
         }
 
         // Contratos ativos — vigência_fim futura OU nula/vazia
-        const ca = hasTable(db,'contratos') ? await db.prepare(`
+        const temContratos = await hasTable(db, 'contratos');
+        // vigencia_fim pode ser text 'YYYY-MM-DD' OU date — comparar via to_char para evitar cast.
+        const ca = temContratos ? ((await db.prepare(`
           SELECT COUNT(*) cnt FROM contratos
-           WHERE COALESCE(vigencia_fim,'') = ''
-              OR vigencia_fim >= CURRENT_DATE
-        `).get() : { cnt: 0 };
+           WHERE vigencia_fim IS NULL
+              OR COALESCE(vigencia_fim::text, '') = ''
+              OR vigencia_fim::text >= to_char(CURRENT_DATE, 'YYYY-MM-DD')
+        `).get()) || { cnt: 0 }) : { cnt: 0 };
+        const contratosAtivos = int(ca.cnt);
 
         const resultado = num(receita_liquida - despesas);
         const margem_pct = receita_liquida > 0
@@ -177,8 +201,8 @@ router.get('/consolidado/resumo', async (req, res) => {
           despesas,
           resultado,
           margem_pct,
-          qtd_nfs: nfs.qtd,
-          contratos_ativos: ca.cnt,
+          qtd_nfs: qtdNfs,
+          contratos_ativos: contratosAtivos,
         });
 
         totais.receita_bruta    += receita_bruta;
@@ -186,8 +210,8 @@ router.get('/consolidado/resumo', async (req, res) => {
         totais.receita_liquida  += receita_liquida;
         totais.despesas         += despesas;
         totais.resultado        += resultado;
-        totais.qtd_nfs          += nfs.qtd;
-        totais.contratos_ativos += ca.cnt;
+        totais.qtd_nfs          += qtdNfs;
+        totais.contratos_ativos += contratosAtivos;
       } catch (e) {
         empresas.push({ empresa: key, nome: company.nomeAbrev || company.nome, erro: e.message });
       }

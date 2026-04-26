@@ -133,9 +133,18 @@ class PgDb {
     const exec = this._exec;
     const self = this;
 
+    // Compat better-sqlite3: aceita varargs .get(a, b, c) e converte para array.
+    // Mantém comportamento existente para 0 ou 1 argumento (escalar/array/object).
+    const normalizeArgs = (args) => {
+      if (args.length === 0) return undefined;
+      if (args.length === 1) return args[0];
+      return args; // varargs → trata como array posicional
+    };
+
     return {
       /** SELECT que retorna 1 linha (ou null) */
-      async get(params) {
+      async get(...args) {
+        const params = normalizeArgs(args);
         const { sql, values } = buildQuery(rawSql, params);
         try {
           const res = await exec.query(sql, values);
@@ -147,7 +156,8 @@ class PgDb {
       },
 
       /** SELECT que retorna todas as linhas */
-      async all(params) {
+      async all(...args) {
+        const params = normalizeArgs(args);
         const { sql, values } = buildQuery(rawSql, params);
         try {
           const res = await exec.query(sql, values);
@@ -159,7 +169,8 @@ class PgDb {
       },
 
       /** INSERT / UPDATE / DELETE */
-      async run(params) {
+      async run(...args) {
+        const params = normalizeArgs(args);
         let { sql, values } = buildQuery(rawSql, params);
         sql = finalizeInsert(sql, rawSql);
 
