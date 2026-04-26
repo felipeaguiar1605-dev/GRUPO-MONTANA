@@ -78,7 +78,9 @@ function buildQuery(rawSql, params) {
   }
 
   // Parâmetros nomeados: @nome (estilo better-sqlite3)
-  if (typeof params === 'object' && !Array.isArray(params)) {
+  // Nota: Buffer e Date são objetos mas devem ser tratados como escalar.
+  if (typeof params === 'object' && !Array.isArray(params)
+      && !(params instanceof Date) && !Buffer.isBuffer(params)) {
     const names = [];
     const pgSql = sql.replace(/@(\w+)/g, (_, name) => {
       // Evita duplicar o mesmo nome → mesmo índice
@@ -94,16 +96,23 @@ function buildQuery(rawSql, params) {
     return { sql: pgSql, values };
   }
 
-  // Array de parâmetros posicionais
-  if (Array.isArray(params)) {
-    let i = 0;
-    const pgSql = sql.replace(/\?/g, () => `$${++i}`);
-    return { sql: pgSql, values: params };
-  }
+  // Array (ou escalar normalizado para array) → posicionais ?
+  const arr = Array.isArray(params) ? params : [params];
+  let i = 0;
+  const pgSql = sql.replace(/\?/g, () => `$${++i}`);
+  return { sql: pgSql, values: arr };
+}
 
-  // Parâmetro único escalar
-  const pgSql = sql.replace(/\?/, '$1');
-  return { sql: pgSql, values: [params] };
+// Normaliza args variádicos (estilo better-sqlite3) para um único `params`:
+//   .run()                       → undefined
+//   .run(scalar)                 → scalar
+//   .run(obj)                    → obj          (named params @nome)
+//   .run([v1,v2])                → [v1,v2]      (passar array já pronto)
+//   .run(v1, v2, v3, ...)        → [v1,v2,v3]   (spread args → array)
+function normalizeArgs(args) {
+  if (args.length === 0) return undefined;
+  if (args.length === 1) return args[0];
+  return args;
 }
 
 // ── Adiciona ON CONFLICT DO NOTHING se foi INSERT OR IGNORE ─────
@@ -135,8 +144,8 @@ class PgDb {
 
     return {
       /** SELECT que retorna 1 linha (ou null) */
-      async get(params) {
-        const { sql, values } = buildQuery(rawSql, params);
+      async get(...args) {
+        const { sql, values } = buildQuery(rawSql, normalizeArgs(args));
         try {
           const res = await exec.query(sql, values);
           return res.rows[0] || null;
@@ -147,8 +156,8 @@ class PgDb {
       },
 
       /** SELECT que retorna todas as linhas */
-      async all(params) {
-        const { sql, values } = buildQuery(rawSql, params);
+      async all(...args) {
+        const { sql, values } = buildQuery(rawSql, normalizeArgs(args));
         try {
           const res = await exec.query(sql, values);
           return res.rows;
@@ -159,8 +168,8 @@ class PgDb {
       },
 
       /** INSERT / UPDATE / DELETE */
-      async run(params) {
-        let { sql, values } = buildQuery(rawSql, params);
+      async run(...args) {
+        let { sql, values } = buildQuery(rawSql, normalizeArgs(args));
         sql = finalizeInsert(sql, rawSql);
 
         // Para INSERT, adiciona RETURNING id se não houver
