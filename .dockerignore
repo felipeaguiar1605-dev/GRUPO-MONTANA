@@ -1,0 +1,13 @@
+node_modules
+.env
+database/*.db
+database/*.db-journal
+database/*.db-shm
+database/*.db-wal
+database/sessions.db
+.git
+.gitignore
+erp_production
+uploads/*
+*.log
+.DS_Store
