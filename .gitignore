@@ -9,3 +9,9 @@ uploads/*
 !uploads/.gitkeep
 *.log
 .DS_Store
+__pycache__/
+*.pyc
+erp_production/db.sqlite3
+erp_production/media/*
+erp_production/staticfiles/
+erp_production/.env
