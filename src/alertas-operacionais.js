@@ -190,7 +190,7 @@ function cobrancasAtrasadas(db, company, opcoes = {}) {
     WHERE (data_pagamento IS NULL OR data_pagamento = '')
       AND COALESCE(status_conciliacao,'') NOT IN ('CONCILIADO','ASSESSORIA','IGNORAR')
       AND data_emissao IS NOT NULL
-      AND data_emissao <= date('now')
+      AND data_emissao <= to_char(CURRENT_DATE, 'YYYY-MM-DD')
       AND data_emissao >= ?
       AND COALESCE(valor_bruto, 0) > 0
   `).all(dataLimite);

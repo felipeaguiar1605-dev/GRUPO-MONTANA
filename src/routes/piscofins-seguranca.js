@@ -89,7 +89,7 @@ async function apurar(db, anoMes, companyKey) {
   const dateFrom   = `${ano}-${String(mes).padStart(2,'0')}-01`;
   const dateTo     = `${ano}-${String(mes).padStart(2,'0')}-31`;
 
-  const rows = db.prepare(`
+  const rowsRaw = await db.prepare(`
     SELECT
       e.id, e.data_iso, e.historico, e.credito,
       e.pagador_identificado, e.pagador_cnpj,
@@ -107,6 +107,7 @@ async function apurar(db, anoMes, companyKey) {
       AND e.credito > 0
     ORDER BY e.data_iso
   `).all(dateFrom, dateTo);
+  const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
 
   const tributaveis = [], excluidos = [], naoTributa = [], pendentes = [];
 
@@ -184,7 +185,7 @@ router.get('/:anomes', async (req, res) => {
         }
       });
     }
-    const dados = apurar(req.db, anomes, req.companyKey);
+    const dados = await apurar(req.db, anomes, req.companyKey);
     res.json({ ok: true, dados });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -203,7 +204,7 @@ router.get('/:anomes/excel', async (req, res) => {
     if (!cfg.aplicavel) {
       return res.status(400).json({ error: `${cfg.nome_curto} é ${cfg.regime} — apuração separada não se aplica.` });
     }
-    const d  = apurar(req.db, anomes, req.companyKey);
+    const d  = await apurar(req.db, anomes, req.companyKey);
     const wb = new ExcelJS.Workbook();
     wb.creator = 'Montana';
 
