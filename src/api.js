@@ -491,7 +491,7 @@ router.get('/dashboard', async (req, res) => {
   )`;
 
   // 1. Totais gerais dos extratos
-  const totais = req.db.prepare(`
+  const totais = await req.db.prepare(`
     SELECT
       COUNT(*) as total,
       COALESCE(SUM(credito), 0) as total_creditos,
