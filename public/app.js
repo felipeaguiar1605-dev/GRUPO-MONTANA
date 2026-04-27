@@ -208,6 +208,53 @@ function showTab(id,el){
   if(id==='supervisor')window.supervisorInit && window.supervisorInit();
   if(id==='painel-pgto') window.painelPgtoInit && window.painelPgtoInit();
   if(id==='patrimonio')  window.patrimonioInit && window.patrimonioInit();
+  // Sub-nav consistente entre páginas relacionadas (introduzido em 2026-04
+  // para reduzir clutter do menu lateral). Páginas no mapa abaixo recebem
+  // uma faixa de sub-abas no topo que navega entre os irmãos.
+  _renderPageSubnav(id);
+}
+
+// ─── Sub-nav entre páginas relacionadas ──────────────────────────
+const _SUBNAV_GRUPO_NFS = [
+  { tab: 'nfs',         label: '🧾 Notas Fiscais' },
+  { tab: 'nf-modelos',  label: '🧰 Modelos' },
+];
+const _SUBNAV_GRUPO_CONTRATOS = [
+  { tab: 'cont',         label: '📋 Contratos' },
+  { tab: 'painel-pgto',  label: '💰 Adimplência' },
+];
+const _SUBNAV_GRUPO_CAIXA = [
+  { tab: 'fluxo',        label: '📈 Fluxo de Caixa' },
+  { tab: 'caixa-livre',  label: '💵 Caixa Livre' },
+  { tab: 'fluxo-proj',   label: '🔮 Projetado' },
+];
+const _SUBNAV_GRUPO_CONCILIA = [
+  { tab: 'conciliacao3v',    label: '📊 3 Vias' },
+  { tab: 'concilia-robusta', label: '🧩 IA / Pendentes' },
+];
+const _PAGE_SUBNAVS = {
+  nfs:                _SUBNAV_GRUPO_NFS,
+  'nf-modelos':       _SUBNAV_GRUPO_NFS,
+  cont:               _SUBNAV_GRUPO_CONTRATOS,
+  'painel-pgto':      _SUBNAV_GRUPO_CONTRATOS,
+  fluxo:              _SUBNAV_GRUPO_CAIXA,
+  'caixa-livre':      _SUBNAV_GRUPO_CAIXA,
+  'fluxo-proj':       _SUBNAV_GRUPO_CAIXA,
+  conciliacao3v:      _SUBNAV_GRUPO_CONCILIA,
+  'concilia-robusta': _SUBNAV_GRUPO_CONCILIA,
+};
+function _renderPageSubnav(active) {
+  const items = _PAGE_SUBNAVS[active];
+  if (!items) return;
+  const wrap = document.getElementById('pg-' + active + '__subnav');
+  if (!wrap) return;
+  wrap.style.cssText = 'display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin:0 0 14px 0;padding:0';
+  const baseStyle = 'padding:8px 16px;font-size:11px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;color:#64748b;margin-bottom:-2px;text-decoration:none;user-select:none';
+  const activeStyle = ';border-bottom-color:#7c3aed;color:#7c3aed';
+  wrap.innerHTML = items.map(it => {
+    const a = it.tab === active;
+    return `<a onclick="navGo('${it.tab}')" style="${baseStyle}${a ? activeStyle : ''}">${it.label}</a>`;
+  }).join('');
 }
 
 // ─── Global Period Filter ────────────────────────────────────────

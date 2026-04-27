@@ -131,19 +131,23 @@
     <div class="nav-group-items" style="display:none">
       <div class="tab" data-tab="ext" onclick="navGo('ext',this)">🏦 Extratos</div>
       <div class="tab" data-tab="nfs" onclick="navGo('nfs',this)">🧾 Notas Fiscais</div>
-      <div class="tab" data-tab="nf-modelos" onclick="navGo('nf-modelos',this);setTimeout(()=>window.nfModelosInit&&window.nfModelosInit(),50)">🧰 Modelos NF</div>
+      <!-- Modelos NF virou sub-aba de Notas Fiscais (2026-04). Tab oculta mas rota mantida. -->
+      <div class="tab" data-tab="nf-modelos" onclick="navGo('nf-modelos',this);setTimeout(()=>window.nfModelosInit&&window.nfModelosInit(),50)" style="display:none">🧰 Modelos NF</div>
       <div class="tab" data-tab="cont" onclick="navGo('cont',this)">📋 Contratos</div>
-      <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)">💰 Adimplência por Contrato</div>
+      <!-- Adimplência por Contrato virou sub-aba de Contratos (2026-04). Tab oculta mas rota mantida. -->
+      <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)" style="display:none">💰 Adimplência por Contrato</div>
       <div class="tab" data-tab="margem-contrato" onclick="navGo('margem-contrato',this);setTimeout(()=>margemContratoInit&&margemContratoInit(),50)">📊 Margem por Contrato</div>
-      <div class="tab" data-tab="patrimonio" onclick="navGo('patrimonio',this)">🏗️ Patrimônio</div>
+      <div class="tab" data-tab="boletins" onclick="navGo('boletins',this)">📄 Boletins</div>
       <div class="tab" data-tab="pag" onclick="navGo('pag',this);setTimeout(()=>compListar&&compListar(),50)">🧾 Comprovantes de Pagamento</div>
       <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
       <div class="tab" data-tab="fluxo" onclick="navGo('fluxo',this)">📈 Fluxo de Caixa</div>
-      <div class="tab" data-tab="fluxo-proj" onclick="navGo('fluxo-proj',this);setTimeout(()=>fcpCarregar&&fcpCarregar(),50)">🔮 Fluxo Projetado</div>
-      <div class="tab" data-tab="caixa-livre" onclick="navGo('caixa-livre',this);setTimeout(()=>window.caixaLivreInit&&window.caixaLivreInit(),50)">💵 Caixa Livre</div>
+      <!-- Caixa Livre e Fluxo Projetado viraram sub-abas de Fluxo (2026-04). Tabs ocultas mas rotas mantidas. -->
+      <div class="tab" data-tab="fluxo-proj" onclick="navGo('fluxo-proj',this);setTimeout(()=>fcpCarregar&&fcpCarregar(),50)" style="display:none">🔮 Fluxo Projetado</div>
+      <div class="tab" data-tab="caixa-livre" onclick="navGo('caixa-livre',this);setTimeout(()=>window.caixaLivreInit&&window.caixaLivreInit(),50)" style="display:none">💵 Caixa Livre</div>
       <div class="tab" data-tab="conta-vinculada" onclick="navGo('conta-vinculada',this)">🏦 Conta Vinculada</div>
-      <div class="tab" data-tab="conciliacao3v" onclick="navGo('conciliacao3v',this)">🔗 Conciliação 3V</div>
-      <div class="tab" data-tab="concilia-robusta" onclick="navGo('concilia-robusta',this);setTimeout(()=>crInit&&crInit(),50)">🧩 Conciliação IA</div>
+      <div class="tab" data-tab="conciliacao3v" onclick="navGo('conciliacao3v',this)">🔗 Conciliação</div>
+      <!-- Conciliação IA virou sub-aba de Conciliação (2026-04). Tab oculta mas rota mantida. -->
+      <div class="tab" data-tab="concilia-robusta" onclick="navGo('concilia-robusta',this);setTimeout(()=>crInit&&crInit(),50)" style="display:none">🧩 Conciliação IA</div>
       <div class="tab" data-tab="import" onclick="navGo('import',this)">📥 Importar</div>
     </div>
   </div>
@@ -159,7 +163,6 @@
       <div class="tab" data-tab="inss-retido" onclick="navGo('inss-retido',this)">🏛️ INSS Retido S-1300</div>
       <div class="tab" data-tab="retencoes" onclick="navGo('retencoes',this)">🏛️ Retenções</div>
       <div class="tab" data-tab="reajuste" onclick="navGo('reajuste',this)">📈 Reajuste</div>
-      <div class="tab" data-tab="boletins" onclick="navGo('boletins',this)">📄 Boletins</div>
     </div>
   </div>
 
@@ -214,6 +217,7 @@
     </div>
     <div class="nav-group-items" style="display:none">
       <div class="tab" data-tab="estoque" onclick="navGo('estoque',this);setTimeout(()=>estoqueShowView('dashboard'),50)">📊 Painel Estoque</div>
+      <div class="tab" data-tab="patrimonio" onclick="navGo('patrimonio',this)">🏗️ Patrimônio</div>
       <div class="tab" data-tab="estoque" onclick="navGo('estoque',this);setTimeout(()=>estoqueShowView('itens'),50)">📋 Itens / Materiais</div>
       <div class="tab" data-tab="estoque" onclick="navGo('estoque',this);setTimeout(()=>estoqueShowView('ficha'),50)">🦺 Fichas EPI</div>
       <div class="tab" data-tab="estoque" onclick="navGo('estoque',this);setTimeout(()=>estoqueShowView('alertas'),50)">⚠️ Alertas</div>
@@ -384,6 +388,7 @@
 
 <!-- Notas Fiscais -->
 <div id="pg-nfs" class="pg">
+  <div id="pg-nfs__subnav"></div>
   <div class="fbar" id="nfs-filters"></div>
   <div id="nfs-alerta-sem-data" style="display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 16px;margin-bottom:10px;display:flex;align-items:center;gap:10px">
     <span style="font-size:18px">⚠️</span>
@@ -424,6 +429,7 @@
 
 <!-- Contratos -->
 <div id="pg-cont" class="pg">
+  <div id="pg-cont__subnav"></div>
   <div class="kpis" id="cont-kpis"></div>
   <!-- Painel: NFs em aberto do período -->
   <div id="cont-abertas-panel" style="margin-bottom:16px"></div>
@@ -434,6 +440,7 @@
 
 <!-- Adimplência por Contrato (antes: Painel de Pagamentos) -->
 <div id="pg-painel-pgto" class="pg">
+  <div id="pg-painel-pgto__subnav"></div>
   <div class="toolbar">
     <span style="font-size:16px">💰</span>
     <span class="toolbar-title">ADIMPLÊNCIA POR CONTRATO</span>
@@ -1150,6 +1157,7 @@
 
 <!-- Fluxo de Caixa Projetado -->
 <div id="pg-fluxo" class="pg">
+  <div id="pg-fluxo__subnav"></div>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
     <div>
       <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">📈 Fluxo de Caixa Projetado</h2>
@@ -1261,6 +1269,7 @@
 <!-- FLUXO DE CAIXA PROJETADO 30/60/90d (SLAs + NFs a receber)  -->
 <!-- ═══════════════════════════════════════════════════════════ -->
 <div id="pg-fluxo-proj" class="pg">
+  <div id="pg-fluxo-proj__subnav"></div>
   <div class="toolbar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
     <h2 style="margin:0;font-size:15px">🔮 Fluxo de Caixa Projetado</h2>
     <span style="font-size:10px;color:#64748b">Baseado em SLA médio por tomador × NFs em aberto × despesas recorrentes</span>
@@ -2232,6 +2241,7 @@
 
 <!-- F-1: Conciliação 3 Vias -->
 <div id="pg-conciliacao3v" class="pg">
+  <div id="pg-conciliacao3v__subnav"></div>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
     <div>
       <h2 style="font-size:16px;font-weight:800;color:#0f172a">🔗 Conciliação 3 Vias</h2>
@@ -2262,6 +2272,7 @@
 
 <!-- F-1b: Conciliação Robusta (pagador_alias + sugestões) -->
 <div id="pg-concilia-robusta" class="pg">
+  <div id="pg-concilia-robusta__subnav"></div>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
     <div>
       <h2 style="font-size:16px;font-weight:800;color:#0f172a">🧩 Conciliação IA — Extratos sem NF</h2>
@@ -3624,6 +3635,7 @@
 
 <!-- 💵 Caixa Livre Consolidado -->
 <div id="pg-caixa-livre" class="pg">
+  <div id="pg-caixa-livre__subnav"></div>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
     <div>
       <h2 style="margin:0;font-size:18px;color:#1e293b;font-weight:800">💵 Caixa Livre Consolidado</h2>
@@ -3665,6 +3677,7 @@
 
 <!-- 🧰 Modelos de NF (templates pré-cadastrados) -->
 <div id="pg-nf-modelos" class="pg">
+  <div id="pg-nf-modelos__subnav"></div>
   <div class="toolbar" style="margin-bottom:10px">
     <span style="font-size:16px">🧰</span>
     <span class="toolbar-title">MODELOS DE NF — TEMPLATES PRÉ-CADASTRADOS</span>
