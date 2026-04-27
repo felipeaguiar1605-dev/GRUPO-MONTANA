@@ -3395,13 +3395,16 @@ router.get('/fluxo-parcelas', async (req, res) => {
     `).all(meses[0], meses[2]);
 
     // Despesa média mensal (últimos 3 meses)
-    const despMedia = await req.db.prepare(`
-      SELECT COALESCE(AVG(mensal), 0) as media FROM (
-        SELECT SUM(valor_bruto) as mensal FROM despesas
+    // FIX 2026-04: PG exige alias na subquery em FROM (`AS sub`) e
+    //             `await ... .get()` precisa ser awaited ANTES do `.media`.
+    const _despRow = await req.db.prepare(`
+      SELECT COALESCE(AVG(mensal), 0) AS media FROM (
+        SELECT SUM(valor_bruto) AS mensal FROM despesas
         WHERE data_iso >= to_char(CURRENT_DATE - INTERVAL '3 months', 'YYYY-MM-DD') AND data_iso != ''
         GROUP BY to_char(safe_date(data_iso), 'YYYY-MM') ORDER BY 1 DESC LIMIT 3
-      )
-    `).get().media || 0;
+      ) AS sub
+    `).get();
+    const despMedia = (_despRow && _despRow.media) || 0;
 
     // Agrupa por mês
     const MESES_PT = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];

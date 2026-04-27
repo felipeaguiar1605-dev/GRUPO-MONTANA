@@ -55,6 +55,14 @@ function convertSql(sql) {
   return sql
     // datetime('now') e datetime("now") → NOW()
     .replace(/datetime\(['"']now['"']\)/gi, 'NOW()')
+    // date('now', '-365 days') → (CURRENT_DATE + INTERVAL '-365 days')
+    // Também aceita 'months'/'years'/'day'/'month'/'year'.
+    .replace(
+      /date\s*\(\s*['"]now['"]\s*,\s*['"]\s*([+-]?\d+)\s+(day|days|month|months|year|years)\s*['"]\s*\)/gi,
+      "(CURRENT_DATE + INTERVAL '$1 $2')"
+    )
+    // date('now') sozinho → CURRENT_DATE
+    .replace(/date\s*\(\s*['"]now['"]\s*\)/gi, 'CURRENT_DATE')
     // strftime('%Y-%m', campo) → to_char(campo, 'YYYY-MM')
     .replace(/strftime\s*\(\s*'%Y-%m'\s*,\s*/gi, "to_char(")
     .replace(/strftime\s*\(\s*'%Y'\s*,\s*/gi,    "to_char(")
