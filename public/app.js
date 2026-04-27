@@ -2507,6 +2507,8 @@ function onDespCatChange(){
   // Campo de contrato: visível só quando centro_custo é vazio (despesa vinculada a contrato)
   const wrap=document.getElementById('nd-contrato-wrap');
   if(wrap) wrap.style.display = cc ? 'none' : '';
+  // Auto-sugestão de tipo de lançamento (item 3)
+  if (typeof onDespCampoChange === 'function') onDespCampoChange();
   // Destaque visual para categorias de overhead
   const hdr=document.getElementById('nd-overhead-hint');
   if(hdr){
@@ -2557,6 +2559,8 @@ async function toggleDespForm(){
         <label style="font-size:11px;cursor:pointer">
           <input type="radio" name="nd-tipo" value="patrimonio" onchange="onTipoLancamentoChange()"> 🏗️ Aquisição de Patrimônio
         </label>
+        <!-- Auto-sugestão heurística (item 3 do roadmap) -->
+        <div id="nd-tipo-hint" style="display:none;margin-top:6px;padding:5px 9px;background:#dbeafe;border:1px solid #93c5fd;border-radius:6px;font-size:10px;color:#1e40af"></div>
       </div>
 
       <!-- ── Painel ESTOQUE ── -->
@@ -2663,7 +2667,7 @@ async function toggleDespForm(){
         <div><label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:2px">VALOR BRUTO (R$)</label>
           <input id="nd-vbruto" type="text" onkeyup="calcRetFe()" style="width:100%;padding:6px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;font-weight:700" placeholder="0,00"></div>
         <div><label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:2px">DESCRIÇÃO</label>
-          <input id="nd-desc" style="width:100%;padding:6px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px" placeholder="Descrição da despesa"></div>
+          <input id="nd-desc" oninput="onDespCampoChange()" style="width:100%;padding:6px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px" placeholder="Descrição da despesa"></div>
       </div>
 
       <div style="margin-top:10px;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
@@ -2725,6 +2729,71 @@ function onTipoLancamentoChange() {
   const pp = document.getElementById('nd-painel-patrimonio');
   if (pe) pe.style.display = (tipo === 'estoque')    ? 'block' : 'none';
   if (pp) pp.style.display = (tipo === 'patrimonio') ? 'block' : 'none';
+}
+
+// Heurística: dado categoria + descrição, sugere ('estoque', 'patrimonio', null).
+// Item (3) do roadmap: classificação automática. Versão sem XML NFe — usa as
+// pistas que já estão no formulário manual e em CSVs de despesa.
+function _sugerirTipoLancamento(categoria, descricao) {
+  const cat = String(categoria || '').toUpperCase();
+  const desc = String(descricao || '').toLowerCase();
+
+  // Patrimônio (vida útil > 1 ano, valor unitário relevante, ativos fixos)
+  const PATRIM_KEYWORDS = [
+    'computador','notebook','desktop','servidor','impressora','monitor','pc ',
+    'mesa','cadeira','armário','armario','estante','rack','bancada','poltrona',
+    'veículo','veiculo','carro','moto','caminhão','caminhao','camionete','utilitário',
+    'câmera','camera','cftv','dvr','nvr','catraca','torniquete','detector',
+    'ar condicionado','split','frigobar','geladeira','fogão','fogao','micro-ondas',
+    'aspirador','enceradeira','lavadora industrial',
+    'roteador','switch','firewall','no-break','nobreak','ups',
+  ];
+  if (PATRIM_KEYWORDS.some(k => desc.includes(k))) return 'patrimonio';
+
+  // Estoque (consumível, EPI, material que entra e sai)
+  if (cat === 'EPI/FERRAMENTAS' || cat === 'EPI' || cat === 'MATERIAL LIMPEZA') return 'estoque';
+  const ESTOQUE_KEYWORDS = [
+    'luva','capacete','colete','botina','coturno','farda','fardamento','uniforme',
+    'camisa','calça','calca','jaqueta','japona','meia','bota','tênis','tenis',
+    'epi','protetor auricular','máscara','mascara','óculos','oculos',
+    'detergente','desinfetante','álcool','alcool','sabão','sabao','sanitário','sanitario',
+    'papel toalha','papel higiênico','higienico','vassoura','rodo','pano',
+    'caneta','lápis','lapis','grampeador','clips','envelope','pasta','folha a4',
+    'cartucho','toner','grafite',
+    'lacre','algema','cassetete','tonfa','espargidor','spray pimenta',
+  ];
+  if (ESTOQUE_KEYWORDS.some(k => desc.includes(k))) return 'estoque';
+
+  return null;
+}
+
+// Aplica auto-sugestão visual quando user muda categoria/descrição no form
+function onDespCampoChange() {
+  const cat = document.getElementById('nd-cat')?.value || '';
+  const desc = document.getElementById('nd-desc')?.value || '';
+  const sugestao = _sugerirTipoLancamento(cat, desc);
+  const hintEl = document.getElementById('nd-tipo-hint');
+  if (!hintEl) return;
+  if (!sugestao) {
+    hintEl.style.display = 'none';
+    return;
+  }
+  // Só sugere se ainda está em "simples" (não atrapalha quem já escolheu)
+  const atual = document.querySelector('input[name="nd-tipo"]:checked')?.value;
+  if (atual !== 'simples') {
+    hintEl.style.display = 'none';
+    return;
+  }
+  const label = sugestao === 'estoque' ? '📦 Compra para Estoque' : '🏗️ Aquisição de Patrimônio';
+  hintEl.innerHTML = `💡 Sugestão pelo conteúdo: <strong>${label}</strong>. <a onclick="_aplicarSugestaoTipo('${sugestao}')" style="color:#0369a1;cursor:pointer;text-decoration:underline">Aplicar</a> · <a onclick="document.getElementById('nd-tipo-hint').style.display='none'" style="color:#94a3b8;cursor:pointer">Ignorar</a>`;
+  hintEl.style.display = 'block';
+}
+
+function _aplicarSugestaoTipo(tipo) {
+  const radio = document.querySelector(`input[name="nd-tipo"][value="${tipo}"]`);
+  if (radio) { radio.checked = true; onTipoLancamentoChange(); }
+  const hint = document.getElementById('nd-tipo-hint');
+  if (hint) hint.style.display = 'none';
 }
 
 // Quando user seleciona um item existente do estoque, esconde os campos
