@@ -136,7 +136,6 @@
       <div class="tab" data-tab="cont" onclick="navGo('cont',this)">📋 Contratos</div>
       <!-- Adimplência por Contrato virou sub-aba de Contratos (2026-04). Tab oculta mas rota mantida. -->
       <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)" style="display:none">💰 Adimplência por Contrato</div>
-      <div class="tab" data-tab="margem-contrato" onclick="navGo('margem-contrato',this);setTimeout(()=>margemContratoInit&&margemContratoInit(),50)">📊 Margem por Contrato</div>
       <div class="tab" data-tab="boletins" onclick="navGo('boletins',this)">📄 Boletins</div>
       <div class="tab" data-tab="pag" onclick="navGo('pag',this);setTimeout(()=>compListar&&compListar(),50)">🧾 Comprovantes de Pagamento</div>
       <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
@@ -206,6 +205,7 @@
     <div class="nav-group-items" style="display:none">
       <div class="tab" data-tab="dre" onclick="navGo('dre',this)">📊 DRE</div>
       <div class="tab" data-tab="margem" onclick="navGo('margem',this)">💰 Margem</div>
+      <div class="tab" data-tab="margem-contrato" onclick="navGo('margem-contrato',this);setTimeout(()=>margemContratoInit&&margemContratoInit(),50)">📊 Margem por Contrato</div>
       <div class="tab" data-tab="relat" onclick="navGo('relat',this)">📄 Relatórios</div>
       <div class="tab" data-tab="calculadora" onclick="navGo('calculadora',this)">🧮 Calculadora</div>
     </div>
