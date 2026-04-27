@@ -4200,6 +4200,122 @@ router.get('/contratos/:num/detalhe', async (req, res) => {
   } catch(e) { errRes(res, e); }
 });
 
+// ─── TIMELINE DE CONTRATO (modal acionado pelo botão "📅 Timeline") ──
+// Implementado em 2026-04 — antes o botão chamava esta rota mas ela não
+// existia, mostrando "Erro ao carregar timeline" e nada acontecia.
+router.get('/contratos/:id/timeline', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'ID inválido' });
+
+    const c = await req.db.prepare(`SELECT * FROM contratos WHERE id = ?`).get(id);
+    if (!c) return res.status(404).json({ error: 'Contrato não encontrado' });
+
+    const num     = c.numContrato || c.numcontrato || '';
+    const orgKey  = num.split(' ')[0] || '';
+    const orgLike = '%' + orgKey + '%';
+
+    // dias_para_vencer (positivo = ainda vigente; negativo = vencido)
+    let dias_para_vencer = null;
+    if (c.vigencia_fim) {
+      try {
+        const r = await req.db.prepare(`SELECT (safe_date(?) - CURRENT_DATE) AS d`).get(c.vigencia_fim);
+        if (r && r.d != null) dias_para_vencer = Number(r.d);
+      } catch (_) { /* vigencia_fim malformada → null */ }
+    }
+
+    // Total efetivamente recebido (extratos vinculados ao contrato)
+    const _totRec = await req.db.prepare(`
+      SELECT COALESCE(SUM(credito), 0) AS v
+      FROM extratos
+      WHERE contrato_vinculado = ? OR (contrato_vinculado LIKE ? AND contrato_vinculado != '')
+    `).get(num, orgLike);
+    const total_pago = Number((_totRec && _totRec.v) || c.total_pago || 0);
+
+    // Total faturado em NFs
+    const _totNF = await req.db.prepare(`
+      SELECT COALESCE(SUM(valor_bruto), 0) AS v, COUNT(*) AS qtd
+      FROM notas_fiscais
+      WHERE contrato_ref = ? OR (contrato_ref LIKE ? AND contrato_ref != '')
+    `).get(num, orgLike);
+    const total_nfs = Number((_totNF && _totNF.v) || 0);
+
+    // Boletins/competências distintas em que houve faturamento
+    const boletinsRows = await req.db.prepare(`
+      SELECT DISTINCT competencia
+      FROM notas_fiscais
+      WHERE (contrato_ref = ? OR (contrato_ref LIKE ? AND contrato_ref != ''))
+        AND competencia IS NOT NULL AND competencia <> ''
+      ORDER BY competencia DESC
+    `).all(num, orgLike);
+    const boletins = (Array.isArray(boletinsRows) ? boletinsRows : []).map(b => b.competencia);
+
+    // Últimos pagamentos (recebimentos). Competência: best-effort via mês
+    // do data_iso (vinculacoes não amarra extrato→NF, então não dá pra
+    // pegar a competência exata; o mês do recebimento é uma boa proxy).
+    const pagamentos = await req.db.prepare(`
+      SELECT data_iso, credito, substr(data_iso, 1, 7) AS competencia
+      FROM extratos
+      WHERE (contrato_vinculado = ? OR (contrato_vinculado LIKE ? AND contrato_vinculado != ''))
+        AND credito > 0
+        AND data_iso IS NOT NULL AND data_iso <> ''
+      ORDER BY data_iso DESC
+      LIMIT 10
+    `).all(num, orgLike);
+
+    // Aditivos / reajustes — campo livre em contratos.aditivos (JSON ou texto)
+    // ou tabela específica se existir. Tentamos tabela primeiro; cai em c.aditivos.
+    let aditivos = [];
+    try {
+      const r = await req.db.prepare(`
+        SELECT tipo, data, descricao FROM contrato_aditivos
+        WHERE contrato_id = ? ORDER BY data DESC
+      `).all(id);
+      if (Array.isArray(r)) aditivos = r;
+    } catch (_) {
+      // Tabela não existe — tenta parsear campo texto livre
+      if (c.aditivos) {
+        try {
+          const parsed = typeof c.aditivos === 'string' ? JSON.parse(c.aditivos) : c.aditivos;
+          if (Array.isArray(parsed)) aditivos = parsed;
+        } catch (_) {
+          aditivos = [{ tipo: 'Aditivo', data: null, descricao: String(c.aditivos).slice(0, 240) }];
+        }
+      }
+    }
+
+    // Valor total estimado: prioriza colunas explícitas, depois calcula via meses
+    let valor_total_estimado = Number(c.valor_total || c.valor_total_contrato || 0);
+    if (!valor_total_estimado && c.valor_mensal_liquido && c.vigencia_inicio && c.vigencia_fim) {
+      try {
+        const _meses = await req.db.prepare(`
+          SELECT GREATEST(1, ROUND((safe_date(?) - safe_date(?))::numeric / 30.0)::int) AS m
+        `).get(c.vigencia_fim, c.vigencia_inicio);
+        const meses = (_meses && _meses.m) || 12;
+        valor_total_estimado = Number(c.valor_mensal_liquido) * meses;
+      } catch (_) { valor_total_estimado = Number(c.valor_mensal_liquido) * 12; }
+    }
+    if (!valor_total_estimado) valor_total_estimado = total_pago + Number(c.total_aberto || 0);
+
+    const percentual_executado = valor_total_estimado > 0
+      ? Math.min(100, Math.round((total_pago / valor_total_estimado) * 100))
+      : 0;
+
+    res.json({
+      contrato: { ...c, numContrato: num },
+      dias_para_vencer,
+      total_pago: +total_pago.toFixed(2),
+      total_nfs: +total_nfs.toFixed(2),
+      qtd_nfs: Number((_totNF && _totNF.qtd) || 0),
+      boletins,
+      pagamentos: (pagamentos || []).map(p => ({ ...p, credito: Number(p.credito || 0) })),
+      aditivos,
+      valor_total_estimado: +valor_total_estimado.toFixed(2),
+      percentual_executado,
+    });
+  } catch (e) { errRes(res, e); }
+});
+
 // ─── CLASSIFICAR CRÉDITOS INTERNO / INVESTIMENTO ─────────────────
 // Marca extratos de crédito que são transferências internas ou resgates de aplicação
 // (não são receita operacional → excluídos do DRE de faturamento)
