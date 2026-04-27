@@ -131,6 +131,7 @@
     <div class="nav-group-items" style="display:none">
       <div class="tab" data-tab="ext" onclick="navGo('ext',this)">🏦 Extratos</div>
       <div class="tab" data-tab="nfs" onclick="navGo('nfs',this)">🧾 Notas Fiscais</div>
+      <div class="tab" data-tab="nf-modelos" onclick="navGo('nf-modelos',this);setTimeout(()=>window.nfModelosInit&&window.nfModelosInit(),50)">🧰 Modelos NF</div>
       <div class="tab" data-tab="cont" onclick="navGo('cont',this)">📋 Contratos</div>
       <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)">💰 Adimplência por Contrato</div>
       <div class="tab" data-tab="margem-contrato" onclick="navGo('margem-contrato',this);setTimeout(()=>margemContratoInit&&margemContratoInit(),50)">📊 Margem por Contrato</div>
@@ -3801,6 +3802,38 @@
   <div id="cl-body"><div class="loading" style="padding:30px;text-align:center;color:#94a3b8">Selecione uma empresa para carregar o caixa livre.</div></div>
 </div>
 
+<!-- 🧰 Modelos de NF (templates pré-cadastrados) -->
+<div id="pg-nf-modelos" class="pg">
+  <div class="toolbar" style="margin-bottom:10px">
+    <span style="font-size:16px">🧰</span>
+    <span class="toolbar-title">MODELOS DE NF — TEMPLATES PRÉ-CADASTRADOS</span>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button onclick="nfmListar()" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;padding:5px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">🔄 Atualizar</button>
+      <button onclick="nfmAbrirNovo()" style="background:#3b82f6;color:#fff;border:0;padding:5px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">➕ Novo Modelo</button>
+    </div>
+  </div>
+  <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:#854d0e">
+    💡 <b>Como funciona:</b> cadastre um modelo (tomador, valor, descrição com placeholders, alíquotas).
+    Mês a mês clique em <b>Emitir</b>, escolha a competência e (opcionalmente) ajuste colaboradores e glosas — uma NF nova é gerada como PENDENTE em "Notas Fiscais".
+    Placeholders disponíveis na descrição: <code>{{competencia}}</code>, <code>{{competencia_extenso}}</code>, <code>{{ano}}</code>, <code>{{mes}}</code>, <code>{{colaboradores}}</code>, <code>{{tomador}}</code>, <code>{{valor}}</code>.
+  </div>
+  <div class="tw">
+    <table>
+      <thead>
+        <tr style="font-size:11px">
+          <th>Modelo / Tomador</th>
+          <th>CNPJ</th>
+          <th class="r">Valor base</th>
+          <th>Emissões</th>
+          <th>Mostra colab?</th>
+          <th>Ações</th>
+        </tr>
+      </thead>
+      <tbody id="nfm-body"><tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px">Selecione "🧰 Modelos NF" no menu para carregar</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
 <script src="/app.js"></script>
 <script src="/app-extras.js"></script>
 <script src="/app-boletins.js"></script>
@@ -3814,5 +3847,6 @@
 <script src="/app-comprovantes.js"></script>
 <script src="/app-ciclo.js"></script>
 <script src="/app-caixa-livre.js"></script>
+<script src="/app-nf-modelos.js"></script>
 </body>
 </html>

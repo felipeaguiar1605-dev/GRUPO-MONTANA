@@ -150,6 +150,9 @@ app.use('/api/patrimonio', require('./routes/patrimonio'));
 // ─── Caixa Livre Consolidado (KPI por empresa + grupo) ───────
 app.use('/api/caixa-livre', require('./routes/caixa-livre'));
 
+// ─── Modelos de NF (templates de NF avulsa) ──────────────────
+app.use('/api/nf-modelos', require('./routes/nf-modelos'));
+
 // ─── Diagnóstico Noturno ──────────────────────────────────────
 app.get('/api/diagnostico/ultimo', (req, res) => {
   const diagFile = path.join(__dirname, '..', 'data', 'diagnostico_noturno.json');

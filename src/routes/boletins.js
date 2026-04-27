@@ -46,6 +46,45 @@ router.use(async (req, res, next) => {
     try { await db.prepare(`ALTER TABLE bol_contratos ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
   }
 
+  // ─── Feature: colaboradores opt-in por posto + glosas detalhadas ───
+  // Flag por posto: TRUE (default) → posto exibe lista de colaboradores no boletim/NF
+  //                 FALSE → posto NÃO nomina (segurança/sigilo, ex: vigilância armada)
+  try { await db.prepare(`ALTER TABLE bol_postos ADD COLUMN mostrar_colaboradores BOOLEAN DEFAULT TRUE`).run(); } catch (_) {}
+
+  // Lista de colaboradores que compuseram o posto naquele boletim (nominal)
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS bol_boletim_colaboradores (
+      id BIGSERIAL PRIMARY KEY,
+      boletim_id BIGINT NOT NULL REFERENCES bol_boletins(id) ON DELETE CASCADE,
+      posto_id BIGINT REFERENCES bol_postos(id) ON DELETE SET NULL,
+      nome_colaborador TEXT NOT NULL,
+      cpf TEXT,
+      funcao TEXT,
+      data_inicio DATE,
+      data_fim DATE,
+      observacao TEXT,
+      ordem INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )`).run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_bbc_boletim ON bol_boletim_colaboradores(boletim_id)`).run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_bbc_posto ON bol_boletim_colaboradores(posto_id)`).run();
+  } catch (_) {}
+
+  // Glosas detalhadas (substitui o uso isolado do campo agregado bol_boletins.glosas)
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS bol_boletim_glosas (
+      id BIGSERIAL PRIMARY KEY,
+      boletim_id BIGINT NOT NULL REFERENCES bol_boletins(id) ON DELETE CASCADE,
+      posto_id BIGINT REFERENCES bol_postos(id) ON DELETE SET NULL,
+      motivo TEXT NOT NULL,
+      valor NUMERIC(14,2) NOT NULL CHECK (valor >= 0),
+      data_referencia DATE,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`).run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_bbg_boletim ON bol_boletim_glosas(boletim_id)`).run();
+  } catch (_) {}
+
   next();
 });
 
@@ -1450,6 +1489,228 @@ router.post('/emitir-lote', async (req, res) => {
     console.error('Erro emitir-lote:', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  COLABORADORES POR BOLETIM (opt-in via bol_postos.mostrar_colaboradores)
+// ════════════════════════════════════════════════════════════════════
+
+// PATCH /api/boletins/postos/:id/mostrar-colaboradores  body: { mostrar: true|false }
+router.patch('/postos/:id/mostrar-colaboradores', async (req, res) => {
+  try {
+    const { mostrar } = req.body;
+    const flag = mostrar === false ? false : true;
+    await req.db.prepare('UPDATE bol_postos SET mostrar_colaboradores = ? WHERE id = ?')
+      .run(flag, req.params.id);
+    res.json({ ok: true, posto_id: req.params.id, mostrar_colaboradores: flag });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/boletins/:boletim_id/colaboradores
+router.get('/:boletim_id/colaboradores', async (req, res) => {
+  try {
+    const rowsRaw = await req.db.prepare(`
+      SELECT bbc.*, bp.descricao_posto, bp.campus_nome, bp.mostrar_colaboradores
+      FROM bol_boletim_colaboradores bbc
+      LEFT JOIN bol_postos bp ON bp.id = bbc.posto_id
+      WHERE bbc.boletim_id = ?
+      ORDER BY bbc.posto_id, bbc.ordem, bbc.nome_colaborador
+    `).all(req.params.boletim_id);
+    const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+    // Filtra: se posto tem mostrar_colaboradores=false, oculta a lista para esse posto
+    const visiveis = rows.filter(r => r.mostrar_colaboradores !== false);
+    const ocultos = rows.length - visiveis.length;
+    res.json({ ok: true, colaboradores: visiveis, total: rows.length, ocultos_por_flag: ocultos });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/boletins/:boletim_id/colaboradores  body: { colaboradores: [{ posto_id, nome, cpf?, funcao?, ... }] }
+router.post('/:boletim_id/colaboradores', async (req, res) => {
+  try {
+    const boletim_id = parseInt(req.params.boletim_id);
+    const lista = Array.isArray(req.body?.colaboradores) ? req.body.colaboradores : [];
+    if (!lista.length) return res.status(400).json({ error: 'Array colaboradores vazio' });
+    const inseridos = [];
+    for (const c of lista) {
+      if (!c.nome_colaborador && !c.nome) continue;
+      const r = await req.db.prepare(`
+        INSERT INTO bol_boletim_colaboradores
+          (boletim_id, posto_id, nome_colaborador, cpf, funcao, data_inicio, data_fim, observacao, ordem)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        boletim_id, c.posto_id || null,
+        c.nome_colaborador || c.nome,
+        c.cpf || null, c.funcao || null,
+        c.data_inicio || null, c.data_fim || null,
+        c.observacao || null, c.ordem || 0
+      );
+      inseridos.push(r.lastInsertRowid);
+    }
+    res.json({ ok: true, inseridos: inseridos.length, ids: inseridos });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/boletins/colaboradores/:id  body: { nome_colaborador, cpf, funcao, ... }
+router.put('/colaboradores/:id', async (req, res) => {
+  try {
+    const c = req.body || {};
+    await req.db.prepare(`
+      UPDATE bol_boletim_colaboradores SET
+        nome_colaborador = COALESCE(?, nome_colaborador),
+        cpf              = COALESCE(?, cpf),
+        funcao           = COALESCE(?, funcao),
+        data_inicio      = COALESCE(?, data_inicio),
+        data_fim         = COALESCE(?, data_fim),
+        observacao       = COALESCE(?, observacao),
+        ordem            = COALESCE(?, ordem),
+        updated_at       = NOW()
+      WHERE id = ?
+    `).run(
+      c.nome_colaborador || c.nome || null,
+      c.cpf || null, c.funcao || null,
+      c.data_inicio || null, c.data_fim || null,
+      c.observacao || null, c.ordem || null,
+      req.params.id
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/boletins/colaboradores/:id
+router.delete('/colaboradores/:id', async (req, res) => {
+  try {
+    await req.db.prepare('DELETE FROM bol_boletim_colaboradores WHERE id = ?').run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/boletins/:boletim_id/colaboradores/copiar-mes-anterior
+// Copia a lista de colaboradores do boletim do mesmo contrato/competência anterior
+router.post('/:boletim_id/colaboradores/copiar-mes-anterior', async (req, res) => {
+  try {
+    const boletim_id = parseInt(req.params.boletim_id);
+    const bol = await req.db.prepare('SELECT contrato_id, competencia FROM bol_boletins WHERE id = ?').get(boletim_id);
+    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+
+    // Acha boletim anterior do mesmo contrato (qualquer competencia anterior, mais recente primeiro)
+    const anterior = await req.db.prepare(`
+      SELECT id FROM bol_boletins
+      WHERE contrato_id = ? AND id < ?
+      ORDER BY id DESC LIMIT 1
+    `).get(bol.contrato_id, boletim_id);
+    if (!anterior) return res.status(404).json({ error: 'Nenhum boletim anterior encontrado para este contrato' });
+
+    const colabsRaw = await req.db.prepare(`
+      SELECT posto_id, nome_colaborador, cpf, funcao, ordem
+      FROM bol_boletim_colaboradores WHERE boletim_id = ?
+    `).all(anterior.id);
+    const colabs = Array.isArray(colabsRaw) ? colabsRaw : [];
+    if (!colabs.length) return res.json({ ok: true, copiados: 0, fonte_boletim_id: anterior.id });
+
+    // Limpa colaboradores atuais (substitui ao copiar)
+    await req.db.prepare('DELETE FROM bol_boletim_colaboradores WHERE boletim_id = ?').run(boletim_id);
+
+    let copiados = 0;
+    for (const c of colabs) {
+      await req.db.prepare(`
+        INSERT INTO bol_boletim_colaboradores
+          (boletim_id, posto_id, nome_colaborador, cpf, funcao, ordem)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(boletim_id, c.posto_id, c.nome_colaborador, c.cpf, c.funcao, c.ordem);
+      copiados++;
+    }
+    res.json({ ok: true, copiados, fonte_boletim_id: anterior.id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  GLOSAS DETALHADAS POR BOLETIM
+//  (recalcula bol_boletins.glosas e valor_total ao mudar a lista)
+// ════════════════════════════════════════════════════════════════════
+
+async function recalcularGlosaTotal(db, boletim_id) {
+  const sumRow = await db.prepare(`
+    SELECT COALESCE(SUM(valor), 0) as total
+    FROM bol_boletim_glosas WHERE boletim_id = ?
+  `).get(boletim_id);
+  const totalGlosa = sumRow ? Number(sumRow.total || 0) : 0;
+  const bol = await db.prepare('SELECT valor_base, acrescimos FROM bol_boletins WHERE id = ?').get(boletim_id);
+  if (!bol) return { totalGlosa, valor_total: 0 };
+  const valor_total = +Number((bol.valor_base || 0) + (bol.acrescimos || 0) - totalGlosa).toFixed(2);
+  await db.prepare(`
+    UPDATE bol_boletins SET glosas = ?, valor_total = ?, updated_at = NOW()
+    WHERE id = ?
+  `).run(totalGlosa, valor_total, boletim_id);
+  return { totalGlosa, valor_total };
+}
+
+// GET /api/boletins/:boletim_id/glosas
+router.get('/:boletim_id/glosas', async (req, res) => {
+  try {
+    const rowsRaw = await req.db.prepare(`
+      SELECT bbg.*, bp.descricao_posto
+      FROM bol_boletim_glosas bbg
+      LEFT JOIN bol_postos bp ON bp.id = bbg.posto_id
+      WHERE bbg.boletim_id = ?
+      ORDER BY bbg.created_at ASC
+    `).all(req.params.boletim_id);
+    const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+    const total = rows.reduce((s, r) => s + Number(r.valor || 0), 0);
+    res.json({ ok: true, glosas: rows, total: +total.toFixed(2) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/boletins/:boletim_id/glosas  body: { posto_id?, motivo, valor, data_referencia? }
+router.post('/:boletim_id/glosas', async (req, res) => {
+  try {
+    const boletim_id = parseInt(req.params.boletim_id);
+    const { posto_id, motivo, valor, data_referencia } = req.body || {};
+    if (!motivo) return res.status(400).json({ error: 'motivo obrigatório' });
+    const v = Math.max(0, parseFloat(valor) || 0);
+    if (v <= 0) return res.status(400).json({ error: 'valor deve ser > 0' });
+    const r = await req.db.prepare(`
+      INSERT INTO bol_boletim_glosas (boletim_id, posto_id, motivo, valor, data_referencia)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(boletim_id, posto_id || null, motivo, v, data_referencia || null);
+    const recalc = await recalcularGlosaTotal(req.db, boletim_id);
+    res.json({ ok: true, id: r.lastInsertRowid, ...recalc });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/boletins/glosas/:id  body: { motivo, valor, data_referencia, posto_id }
+router.put('/glosas/:id', async (req, res) => {
+  try {
+    const g = req.body || {};
+    const cur = await req.db.prepare('SELECT boletim_id FROM bol_boletim_glosas WHERE id = ?').get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Glosa não encontrada' });
+    await req.db.prepare(`
+      UPDATE bol_boletim_glosas SET
+        motivo          = COALESCE(?, motivo),
+        valor           = COALESCE(?, valor),
+        data_referencia = COALESCE(?, data_referencia),
+        posto_id        = COALESCE(?, posto_id)
+      WHERE id = ?
+    `).run(
+      g.motivo || null,
+      g.valor != null ? Math.max(0, parseFloat(g.valor) || 0) : null,
+      g.data_referencia || null,
+      g.posto_id || null,
+      req.params.id
+    );
+    const recalc = await recalcularGlosaTotal(req.db, cur.boletim_id);
+    res.json({ ok: true, ...recalc });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/boletins/glosas/:id
+router.delete('/glosas/:id', async (req, res) => {
+  try {
+    const cur = await req.db.prepare('SELECT boletim_id FROM bol_boletim_glosas WHERE id = ?').get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Glosa não encontrada' });
+    await req.db.prepare('DELETE FROM bol_boletim_glosas WHERE id = ?').run(req.params.id);
+    const recalc = await recalcularGlosaTotal(req.db, cur.boletim_id);
+    res.json({ ok: true, ...recalc });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 module.exports = router;
