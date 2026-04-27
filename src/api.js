@@ -1993,7 +1993,7 @@ router.get('/relatorios/a-receber-por-contrato', async (req, res) => {
         THEN p.valor_liquido ELSE 0 END), 0) as em_atraso,
       COALESCE(SUM(CASE WHEN p.status LIKE '%EMITIR NF%'
         THEN p.valor_liquido ELSE 0 END), 0) as emitir_nf,
-      GROUP_CONCAT(DISTINCT p.status) as status_parcelas,
+      STRING_AGG(DISTINCT p.status::text, ',') as status_parcelas,
       COUNT(DISTINCT CASE WHEN (p.valor_pago IS NULL OR p.valor_pago = 0)
         AND p.status NOT IN ('✅ PAGO','🧾 PARCIAL','🧾 RETENÇÃO','⏳ FUTURO')
         THEN p.id END) as qtd_pendentes,
@@ -3272,7 +3272,7 @@ router.get('/prefeitura/conciliacao', async (req, res) => {
 
     const pagamentos = await req.db.prepare(`
       SELECT p.*,
-        (SELECT GROUP_CONCAT(n.numero) FROM pref_nfs n WHERE n.pagamento_id = p.id) as nfs_vinculadas
+        (SELECT STRING_AGG(n.numero::text, ',') FROM pref_nfs n WHERE n.pagamento_id = p.id) as nfs_vinculadas
       FROM pref_pagamentos p
       WHERE 1=1 ${dateFilter}
       ORDER BY p.data_pagamento_iso DESC, p.valor_pago DESC

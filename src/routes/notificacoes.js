@@ -468,7 +468,7 @@ async function verificarDuplicatas(db, companyKey) {
   try {
     const dupNfs = await db.prepare(`
       SELECT numero, COUNT(*) cnt, MIN(data_emissao) data_emissao,
-             GROUP_CONCAT(tomador, ' / ') tomadores
+             STRING_AGG(tomador::text, ' / ') tomadores
       FROM notas_fiscais
       WHERE numero != '' AND numero != '0'
       GROUP BY numero HAVING cnt > 1
