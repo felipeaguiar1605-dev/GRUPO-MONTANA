@@ -941,9 +941,21 @@ router.get('/contratos/saude', async (req, res) => {
         nfWhere: `tomador LIKE ?`,
         nfParams: ['%SECRETARIA DO MEIO AMBIENTE E RECURSOS HIDRICOS%'],
       },
-      'PREVI PALMAS — em vigor': {
+      'PREVIPALMAS 02/2024 + 2°TA': {
         nfWhere: `(tomador LIKE ? OR tomador LIKE ?)`,
         nfParams: ['%PREVIPALMAS%','%PREVIDENCIA SOCIAL DO MUNICIPIO DE PALMAS%'],
+      },
+      'SEPLAD 002/2024 — encerrado': {
+        nfWhere: `tomador LIKE ?`,
+        nfParams: ['%SECRETARIA MUNICIPAL DE PLANEJAMENTO%'],
+      },
+      'TCE 26/2025': {
+        nfWhere: `tomador LIKE ? AND data_emissao >= '2025-01-01'`,
+        nfParams: ['%TRIBUNAL DE CONTAS DO ESTADO DO TOCANTINS%'],
+      },
+      'UFT 52/2025': {
+        nfWhere: `tomador LIKE ? AND data_emissao >= '2025-09-01'`,
+        nfParams: ['%FUNDACAO UNIVERSIDADE FEDERAL DO TOCANTINS%'],
       },
       'SEDUC 016/2023': {
         nfWhere: `tomador LIKE ?`,

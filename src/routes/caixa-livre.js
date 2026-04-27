@@ -139,12 +139,17 @@ async function calcularMes(db, mes, params) {
   } catch (_) { saidasDespesas = 0; }
 
   // Depreciação (módulo patrimônio — opcional)
+  // Coluna depreciacao_mensal não existe na tabela; calculamos dinamicamente:
+  // (valor_aquisicao - valor_residual) / vida_util_meses, apenas para status='ativo'.
   let depreciacao = 0;
   try {
     const r = await db.prepare(
-      `SELECT COALESCE(SUM(depreciacao_mensal), 0) AS total
+      `SELECT COALESCE(SUM(
+                (valor_aquisicao - COALESCE(valor_residual, 0))
+                / NULLIF(vida_util_meses, 0)
+              ), 0) AS total
          FROM patrimonio
-        WHERE COALESCE(ativo, true) = true`
+        WHERE COALESCE(status, 'ativo') = 'ativo'`
     ).get();
     depreciacao = parseFloat(r?.total || 0);
   } catch (_) { depreciacao = 0; }
