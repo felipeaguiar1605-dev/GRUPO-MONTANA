@@ -1086,8 +1086,9 @@ async function loadContratos(){
     const total=c.total_pago+c.total_aberto;
     const pct=total>0?((c.total_pago/total)*100).toFixed(1):0;
     const barColor=pct>=80?'#15803d':pct>=50?'#d97706':'#dc2626';
-    const id=c.numContrato.replace(/[^a-zA-Z0-9]/g,'_');
-    const numEsc = c.numContrato.replace(/'/g,"\\'");
+    const numContratoStr = String(c.numContrato || '');
+    const id=numContratoStr.replace(/[^a-zA-Z0-9]/g,'_') || ('contrato_'+(c.id||Math.random().toString(36).slice(2,8)));
+    const numEsc = numContratoStr.replace(/'/g,"\\'");
 
     // Alerta de vigência
     let vigAlerta = '';

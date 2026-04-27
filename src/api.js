@@ -878,13 +878,21 @@ router.get('/extratos', async (req, res) => {
 // ─── CONTRATOS ───────────────────────────────────────────────────
 router.get('/contratos', async (req, res) => {
   try {
-    const rows = await req.db.prepare(`
+    const rowsRaw = await req.db.prepare(`
       SELECT c.*,
+        c.numContrato AS "numContrato",
         COALESCE((SELECT SUM(v.valor) FROM vinculacoes v WHERE v.contrato_num = c.numContrato), 0) as total_vinculado,
         COALESCE((SELECT COUNT(*) FROM vinculacoes v WHERE v.contrato_num = c.numContrato), 0) as qtd_vinculacoes,
         COALESCE((SELECT COUNT(*) FROM parcelas p WHERE p.contrato_num = c.numContrato), 0) as qtd_parcelas
       FROM contratos c ORDER BY c.contrato
     `).all();
+    // PG normaliza nomes não-quoted para lowercase no result. O alias acima
+    // adiciona "numContrato" preservando o case; ainda assim, fallback defensivo:
+    const rows = (Array.isArray(rowsRaw) ? rowsRaw : []).map(r => ({
+      ...r,
+      numContrato: r.numContrato || r.numcontrato || '',
+      status: r.status || '',
+    }));
 
     const summary = await req.db.prepare(`
       SELECT
@@ -892,7 +900,7 @@ router.get('/contratos', async (req, res) => {
         COALESCE(SUM(total_aberto), 0) as soma_aberto,
         COUNT(*) as total_contratos
       FROM contratos
-    `).get();
+    `).get() || { soma_pago: 0, soma_aberto: 0, total_contratos: 0 };
 
     res.json({ data: rows, summary });
   } catch(e) { errRes(res, e); }
