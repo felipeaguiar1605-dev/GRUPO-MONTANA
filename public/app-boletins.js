@@ -1200,50 +1200,148 @@ async function painelAprovarTodos(mes) {
 }
 
 // FIX: recebe objeto boletim completo para pre-preencher valores existentes
+// ════════════════════════════════════════════════════════════════════
+//  PAINEL AJUSTAR BOLETIM — 3 sub-abas
+//   • Glosas/Acréscimos (totalizadores simples, padrão legado)
+//   • Colaboradores (nominal por posto)
+//   • Glosas detalhadas (motivo + valor + posto)
+// ════════════════════════════════════════════════════════════════════
+
+function _bolBrl(v) { return 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2}); }
+function _bolEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+// Estado mantido entre re-renders das sub-abas
+window._ajusteState = {
+  boletim_id: null, mes: null, valorBase: 0, bolObj: null,
+  abaAtiva: 'glosas',
+  colaboradores: [],   // [{ id?, posto_id, nome_colaborador, cpf, funcao, observacao }]
+  glosasDet: [],       // [{ id?, posto_id, motivo, valor, data_referencia }]
+  postos: [],          // [{ id, descricao_posto, mostrar_colaboradores }]
+};
+
+async function _ajusteBolFetch(url, opts) {
+  const token = localStorage.getItem('montana_jwt') || '';
+  const r = await fetch('/api/boletins' + url, {
+    ...opts,
+    headers: {
+      'X-Company': currentCompany,
+      'Authorization': 'Bearer ' + token,
+      'Content-Type': 'application/json',
+      ...(opts?.headers || {}),
+    },
+  });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(d.error || ('HTTP ' + r.status));
+  }
+  return r.json();
+}
+
 function painelAjustar(boletim_id, mes, bolObj) {
-  // bolObj pode ser passado inline ou buscamos via closure
   const glosas     = bolObj?.glosas     || 0;
   const acrescimos = bolObj?.acrescimos || 0;
   const obs        = bolObj?.obs        || '';
   const valorBase  = bolObj?.valor_base || bolObj?.valor_total || 0;
-  const brl = v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2});
+
+  window._ajusteState = {
+    boletim_id, mes, valorBase, bolObj,
+    abaAtiva: 'glosas',
+    colaboradores: [], glosasDet: [], postos: [],
+  };
 
   document.getElementById('modal-ajustar-boletim')?.remove();
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:30px;overflow:auto';
   overlay.id = 'modal-ajustar-boletim';
   overlay.innerHTML = `
-    <div style="background:#fff;border-radius:14px;padding:28px;width:400px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.35)">
-      <h3 style="margin:0 0 4px;font-size:16px;font-weight:800;color:#1e293b">✏️ Ajustar Boletim #${boletim_id}</h3>
-      <div style="font-size:11px;color:#64748b;margin-bottom:16px">Valor base: <strong>${brl(valorBase)}</strong></div>
-      <div style="margin-bottom:12px">
-        <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Glosas (R$) — desconto por serviço não executado</label>
-        <input id="ajuste-glosas" type="number" step="0.01" min="0" value="${glosas}"
-          oninput="_ajustePreview(${valorBase})"
-          style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box">
-      </div>
-      <div style="margin-bottom:12px">
-        <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Acréscimos (R$)</label>
-        <input id="ajuste-acrescimos" type="number" step="0.01" min="0" value="${acrescimos}"
-          oninput="_ajustePreview(${valorBase})"
-          style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box">
-      </div>
-      <div id="ajuste-preview" style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;text-align:center;color:#1e293b">
-        Valor final: <strong id="ajuste-preview-val">${brl(valorBase - glosas + acrescimos)}</strong>
-      </div>
-      <div style="margin-bottom:16px">
-        <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Observação</label>
-        <textarea id="ajuste-obs" rows="2"
-          style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;resize:vertical;box-sizing:border-box">${obs}</textarea>
-      </div>
-      <div style="display:flex;gap:8px;justify-content:flex-end">
+    <div style="background:#fff;border-radius:14px;padding:24px;width:760px;max-width:96vw;box-shadow:0 20px 60px rgba(0,0,0,.35)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <h3 style="margin:0;font-size:16px;font-weight:800;color:#1e293b">✏️ Ajustar Boletim #${boletim_id}</h3>
         <button onclick="document.getElementById('modal-ajustar-boletim').remove()"
-          style="padding:8px 16px;background:#f1f5f9;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">Cancelar</button>
-        <button id="ajuste-btn-salvar" onclick="_painelSalvarAjuste(${boletim_id},'${mes}')"
-          style="padding:8px 16px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">Salvar</button>
+          style="background:none;border:none;font-size:18px;cursor:pointer;color:#64748b">✕</button>
+      </div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:14px">Valor base: <strong>${_bolBrl(valorBase)}</strong> · Competência: <strong>${mes}</strong></div>
+
+      <!-- Sub-tabs -->
+      <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:14px">
+        <button class="aju-subtab" data-aba="glosas" onclick="_ajusteAba('glosas')"
+          style="padding:8px 16px;border:none;border-bottom:2px solid #2563eb;background:transparent;font-size:12px;font-weight:700;color:#2563eb;cursor:pointer;margin-bottom:-2px">
+          💰 Glosas / Acréscimos
+        </button>
+        <button class="aju-subtab" data-aba="colaboradores" onclick="_ajusteAba('colaboradores')"
+          style="padding:8px 16px;border:none;border-bottom:2px solid transparent;background:transparent;font-size:12px;font-weight:700;color:#64748b;cursor:pointer;margin-bottom:-2px">
+          🧑 Colaboradores
+        </button>
+        <button class="aju-subtab" data-aba="glosasdet" onclick="_ajusteAba('glosasdet')"
+          style="padding:8px 16px;border:none;border-bottom:2px solid transparent;background:transparent;font-size:12px;font-weight:700;color:#64748b;cursor:pointer;margin-bottom:-2px">
+          📉 Glosas detalhadas
+        </button>
+      </div>
+
+      <div id="aju-conteudo" style="min-height:280px"></div>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;padding-top:14px;border-top:1px solid #e2e8f0">
+        <button onclick="document.getElementById('modal-ajustar-boletim').remove()"
+          style="padding:8px 16px;background:#f1f5f9;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">Fechar</button>
+        <button id="aju-btn-salvar" onclick="_ajusteSalvarTudo()"
+          style="padding:8px 16px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">💾 Salvar tudo</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
+
+  // Renderiza a aba inicial e carrega dados das outras em paralelo
+  _ajusteRenderAbaGlosas();
+  _ajusteCarregarColaboradores().catch(()=>{});
+  _ajusteCarregarGlosasDet().catch(()=>{});
+  _ajusteCarregarPostos().catch(()=>{});
+}
+
+function _ajusteAba(nome) {
+  window._ajusteState.abaAtiva = nome;
+  // Atualiza estilo das tabs
+  document.querySelectorAll('.aju-subtab').forEach(b => {
+    const ativa = b.dataset.aba === nome;
+    b.style.borderBottomColor = ativa ? '#2563eb' : 'transparent';
+    b.style.color = ativa ? '#2563eb' : '#64748b';
+  });
+  // Renderiza conteúdo
+  if (nome === 'glosas') _ajusteRenderAbaGlosas();
+  else if (nome === 'colaboradores') _ajusteRenderAbaColaboradores();
+  else if (nome === 'glosasdet') _ajusteRenderAbaGlosasDet();
+}
+
+// ─── ABA 1: Glosas / Acréscimos (legado) ──────────────────────────
+function _ajusteRenderAbaGlosas() {
+  const s = window._ajusteState;
+  const glosas     = s.bolObj?.glosas     || 0;
+  const acrescimos = s.bolObj?.acrescimos || 0;
+  const obs        = s.bolObj?.obs        || '';
+  const cont = document.getElementById('aju-conteudo');
+  if (!cont) return;
+  cont.innerHTML = `
+    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px;margin-bottom:14px;font-size:11px;color:#854d0e">
+      💡 Use estes campos para ajustes simples (totalizadores). Para detalhar glosas por posto/motivo, use a aba <strong>Glosas detalhadas</strong>. O total das glosas detalhadas sobrescreve este campo.
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Glosas — total (R$)</label>
+      <input id="ajuste-glosas" type="number" step="0.01" min="0" value="${glosas}"
+        oninput="_ajustePreview(${s.valorBase})"
+        style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box">
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Acréscimos (R$)</label>
+      <input id="ajuste-acrescimos" type="number" step="0.01" min="0" value="${acrescimos}"
+        oninput="_ajustePreview(${s.valorBase})"
+        style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box">
+    </div>
+    <div id="ajuste-preview" style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;text-align:center;color:#1e293b">
+      Valor final: <strong id="ajuste-preview-val">${_bolBrl(s.valorBase - glosas + acrescimos)}</strong>
+    </div>
+    <div>
+      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Observação</label>
+      <textarea id="ajuste-obs" rows="2"
+        style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;resize:vertical;box-sizing:border-box">${_bolEsc(obs)}</textarea>
+    </div>`;
 }
 
 function _ajustePreview(base) {
@@ -1254,29 +1352,297 @@ function _ajustePreview(base) {
   if (el) el.textContent = 'R$ ' + total.toLocaleString('pt-BR',{minimumFractionDigits:2});
 }
 
-async function _painelSalvarAjuste(boletim_id, mes) {
-  const token = localStorage.getItem('montana_jwt') || '';
-  const btn = document.getElementById('ajuste-btn-salvar');
-  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+// ─── ABA 2: Colaboradores ─────────────────────────────────────────
+async function _ajusteCarregarColaboradores() {
+  const s = window._ajusteState;
   try {
-    const glosas      = parseFloat(document.getElementById('ajuste-glosas').value) || 0;
-    const acrescimos  = parseFloat(document.getElementById('ajuste-acrescimos').value) || 0;
-    const obs         = document.getElementById('ajuste-obs').value || '';
-    const r = await fetch(`/api/boletins/${boletim_id}/ajustar`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({ glosas, acrescimos, obs }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error);
-    document.getElementById('modal-ajustar-boletim')?.remove();
-    toast('✅ Ajuste salvo', 'success');
-    renderPainelFaturamento();
-  } catch (err) {
-    toast('Erro: ' + err.message, 'error');
-    if (btn) { btn.disabled = false; btn.textContent = 'Salvar'; }
+    const r = await _ajusteBolFetch('/' + s.boletim_id + '/colaboradores');
+    s.colaboradores = (r.colaboradores || []).map(c => ({ ...c, _saved: true }));
+    if (s.abaAtiva === 'colaboradores') _ajusteRenderAbaColaboradores();
+  } catch (_) {}
+}
+
+async function _ajusteCarregarPostos() {
+  const s = window._ajusteState;
+  if (!s.bolObj?.contrato_id) return;
+  try {
+    const r = await _ajusteBolFetch('/contratos/' + s.bolObj.contrato_id + '/postos');
+    s.postos = Array.isArray(r) ? r : (r.postos || []);
+    if (s.abaAtiva === 'colaboradores') _ajusteRenderAbaColaboradores();
+  } catch (_) {}
+}
+
+function _ajusteRenderAbaColaboradores() {
+  const s = window._ajusteState;
+  const cont = document.getElementById('aju-conteudo');
+  if (!cont) return;
+
+  const postoOptions = (postoId) => {
+    const opts = ['<option value="">— sem posto —</option>'];
+    for (const p of s.postos) {
+      const sel = String(p.id) === String(postoId) ? ' selected' : '';
+      opts.push(`<option value="${p.id}"${sel}>${_bolEsc(p.descricao_posto || p.campus_nome || ('Posto ' + p.id))}${p.mostrar_colaboradores === false ? ' (oculto na NF)' : ''}</option>`);
+    }
+    return opts.join('');
+  };
+
+  const linhas = s.colaboradores.map((c, i) => `
+    <tr>
+      <td style="padding:3px 4px"><input value="${_bolEsc(c.nome_colaborador||'')}" oninput="_ajusteState.colaboradores[${i}].nome_colaborador=this.value;_ajusteState.colaboradores[${i}]._dirty=true" placeholder="Nome completo" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px"></td>
+      <td style="padding:3px 4px"><input value="${_bolEsc(c.cpf||'')}" oninput="_ajusteState.colaboradores[${i}].cpf=this.value;_ajusteState.colaboradores[${i}]._dirty=true" placeholder="CPF" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px"></td>
+      <td style="padding:3px 4px"><input value="${_bolEsc(c.funcao||'')}" oninput="_ajusteState.colaboradores[${i}].funcao=this.value;_ajusteState.colaboradores[${i}]._dirty=true" placeholder="Função" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px"></td>
+      <td style="padding:3px 4px"><select onchange="_ajusteState.colaboradores[${i}].posto_id=this.value||null;_ajusteState.colaboradores[${i}]._dirty=true" style="width:100%;padding:4px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px">${postoOptions(c.posto_id)}</select></td>
+      <td style="padding:3px 4px;text-align:center;width:40px"><button onclick="_ajusteRemoverColab(${i})" style="background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;padding:2px 7px;border-radius:4px;cursor:pointer;font-size:10px;font-weight:700">×</button></td>
+    </tr>`).join('');
+
+  cont.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">
+      <div style="font-size:11px;color:#475569">
+        ${s.colaboradores.length} colaborador${s.colaboradores.length===1?'':'es'} ·
+        ${s.postos.length} posto${s.postos.length===1?'':'s'} no contrato
+      </div>
+      <div style="display:flex;gap:6px">
+        <button onclick="_ajusteCopiarMesAnterior()" title="Copia colaboradores do boletim anterior do mesmo contrato"
+          style="background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;padding:5px 10px;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700">📋 Copiar mês anterior</button>
+        <button onclick="_ajusteAddColab()"
+          style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:5px 10px;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700">+ Adicionar</button>
+      </div>
+    </div>
+    <div style="max-height:340px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px">
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <thead style="background:#f8fafc;position:sticky;top:0">
+          <tr>
+            <th style="padding:6px 4px;text-align:left;font-size:10px;color:#475569;font-weight:700">Nome *</th>
+            <th style="padding:6px 4px;text-align:left;font-size:10px;color:#475569;font-weight:700;width:120px">CPF</th>
+            <th style="padding:6px 4px;text-align:left;font-size:10px;color:#475569;font-weight:700;width:120px">Função</th>
+            <th style="padding:6px 4px;text-align:left;font-size:10px;color:#475569;font-weight:700;width:180px">Posto</th>
+            <th style="width:40px"></th>
+          </tr>
+        </thead>
+        <tbody>${linhas || '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:30px;font-size:11px">Nenhum colaborador cadastrado.<br>Clique em <strong>+ Adicionar</strong> ou <strong>📋 Copiar mês anterior</strong>.</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div style="margin-top:10px;font-size:10px;color:#64748b">
+      Postos com flag "<strong>oculto na NF</strong>" não nominam colaboradores na descrição da NF emitida (sigilo / contratos de segurança privada).
+    </div>`;
+}
+
+function _ajusteAddColab() {
+  window._ajusteState.colaboradores.push({ nome_colaborador: '', cpf: '', funcao: '', posto_id: null, _dirty: true });
+  _ajusteRenderAbaColaboradores();
+}
+
+function _ajusteRemoverColab(idx) {
+  const c = window._ajusteState.colaboradores[idx];
+  if (c?.id && c?._saved) {
+    if (!confirm('Remover ' + (c.nome_colaborador || 'este colaborador') + ' permanentemente?')) return;
+    c._delete = true;
+    // mantém na lista pra ser deletado no save
+    _ajusteRenderAbaColaboradores();
+  } else {
+    window._ajusteState.colaboradores.splice(idx, 1);
+    _ajusteRenderAbaColaboradores();
   }
 }
+
+async function _ajusteCopiarMesAnterior() {
+  const s = window._ajusteState;
+  if (!confirm('Copiar colaboradores do boletim anterior do mesmo contrato?\nIsso SUBSTITUI a lista atual.')) return;
+  try {
+    const r = await _ajusteBolFetch('/' + s.boletim_id + '/colaboradores/copiar-mes-anterior', { method: 'POST' });
+    if (typeof toast === 'function') toast('✅ ' + (r.copiados || 0) + ' colaborador(es) copiado(s) do boletim ' + (r.fonte_boletim_id || 'anterior'), 'success');
+    await _ajusteCarregarColaboradores();
+  } catch (e) {
+    if (typeof toast === 'function') toast('Erro: ' + e.message, 'error');
+  }
+}
+
+// ─── ABA 3: Glosas detalhadas ─────────────────────────────────────
+async function _ajusteCarregarGlosasDet() {
+  const s = window._ajusteState;
+  try {
+    const r = await _ajusteBolFetch('/' + s.boletim_id + '/glosas');
+    s.glosasDet = (r.glosas || []).map(g => ({ ...g, _saved: true }));
+    if (s.abaAtiva === 'glosasdet') _ajusteRenderAbaGlosasDet();
+  } catch (_) {}
+}
+
+function _ajusteRenderAbaGlosasDet() {
+  const s = window._ajusteState;
+  const cont = document.getElementById('aju-conteudo');
+  if (!cont) return;
+  const total = s.glosasDet.filter(g => !g._delete).reduce((sum, g) => sum + (parseFloat(g.valor) || 0), 0);
+
+  const postoOptions = (postoId) => {
+    const opts = ['<option value="">— geral —</option>'];
+    for (const p of s.postos) {
+      const sel = String(p.id) === String(postoId) ? ' selected' : '';
+      opts.push(`<option value="${p.id}"${sel}>${_bolEsc(p.descricao_posto || p.campus_nome || ('Posto ' + p.id))}</option>`);
+    }
+    return opts.join('');
+  };
+
+  const linhas = s.glosasDet.map((g, i) => g._delete ? '' : `
+    <tr>
+      <td style="padding:3px 4px"><input value="${_bolEsc(g.motivo||'')}" oninput="_ajusteState.glosasDet[${i}].motivo=this.value;_ajusteState.glosasDet[${i}]._dirty=true" placeholder="Ex: 3 dias de falta colaborador X" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px"></td>
+      <td style="padding:3px 4px"><input type="number" step="0.01" value="${g.valor||0}" oninput="_ajusteState.glosasDet[${i}].valor=parseFloat(this.value)||0;_ajusteState.glosasDet[${i}]._dirty=true;_ajusteRecalcGlosaTotal()" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px;text-align:right;font-family:monospace"></td>
+      <td style="padding:3px 4px"><select onchange="_ajusteState.glosasDet[${i}].posto_id=this.value||null;_ajusteState.glosasDet[${i}]._dirty=true" style="width:100%;padding:4px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px">${postoOptions(g.posto_id)}</select></td>
+      <td style="padding:3px 4px"><input type="date" value="${g.data_referencia||''}" oninput="_ajusteState.glosasDet[${i}].data_referencia=this.value;_ajusteState.glosasDet[${i}]._dirty=true" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px"></td>
+      <td style="padding:3px 4px;text-align:center;width:40px"><button onclick="_ajusteRemoverGlosa(${i})" style="background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;padding:2px 7px;border-radius:4px;cursor:pointer;font-size:10px;font-weight:700">×</button></td>
+    </tr>`).join('');
+
+  cont.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">
+      <div style="font-size:11px;color:#475569">
+        ${s.glosasDet.filter(g=>!g._delete).length} glosa${s.glosasDet.filter(g=>!g._delete).length===1?'':'s'} · Total <strong id="aju-glosa-total">${_bolBrl(total)}</strong>
+      </div>
+      <button onclick="_ajusteAddGlosa()"
+        style="background:#fef9c3;color:#854d0e;border:1px solid #fde68a;padding:5px 10px;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700">+ Adicionar glosa</button>
+    </div>
+    <div style="max-height:340px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px">
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <thead style="background:#f8fafc;position:sticky;top:0">
+          <tr>
+            <th style="padding:6px 4px;text-align:left;font-size:10px;color:#475569;font-weight:700">Motivo *</th>
+            <th style="padding:6px 4px;text-align:right;font-size:10px;color:#475569;font-weight:700;width:120px">Valor (R$) *</th>
+            <th style="padding:6px 4px;text-align:left;font-size:10px;color:#475569;font-weight:700;width:160px">Posto</th>
+            <th style="padding:6px 4px;text-align:left;font-size:10px;color:#475569;font-weight:700;width:130px">Data</th>
+            <th style="width:40px"></th>
+          </tr>
+        </thead>
+        <tbody>${linhas || '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:30px;font-size:11px">Nenhuma glosa detalhada.<br>Clique em <strong>+ Adicionar glosa</strong>.</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div style="margin-top:10px;font-size:10px;color:#64748b">
+      Ao salvar, o total das glosas detalhadas é gravado em <code>bol_boletins.glosas</code> e <code>valor_total</code> é recalculado automaticamente.
+    </div>`;
+}
+
+function _ajusteAddGlosa() {
+  window._ajusteState.glosasDet.push({ motivo: '', valor: 0, posto_id: null, data_referencia: '', _dirty: true });
+  _ajusteRenderAbaGlosasDet();
+}
+
+function _ajusteRemoverGlosa(idx) {
+  const g = window._ajusteState.glosasDet[idx];
+  if (g?.id && g?._saved) {
+    if (!confirm('Remover esta glosa permanentemente?')) return;
+    g._delete = true;
+    _ajusteRenderAbaGlosasDet();
+  } else {
+    window._ajusteState.glosasDet.splice(idx, 1);
+    _ajusteRenderAbaGlosasDet();
+  }
+}
+
+function _ajusteRecalcGlosaTotal() {
+  const s = window._ajusteState;
+  const total = s.glosasDet.filter(g => !g._delete).reduce((sum, g) => sum + (parseFloat(g.valor) || 0), 0);
+  const el = document.getElementById('aju-glosa-total');
+  if (el) el.textContent = _bolBrl(total);
+}
+
+// ─── SALVAR TUDO ──────────────────────────────────────────────────
+async function _ajusteSalvarTudo() {
+  const s = window._ajusteState;
+  const btn = document.getElementById('aju-btn-salvar');
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+  let erros = [];
+
+  try {
+    // 1. Glosas/Acréscimos legado (se aba renderizada e campos existem)
+    const gEl = document.getElementById('ajuste-glosas');
+    if (gEl) {
+      const glosas      = parseFloat(gEl.value) || 0;
+      const acrescimos  = parseFloat(document.getElementById('ajuste-acrescimos')?.value) || 0;
+      const obs         = document.getElementById('ajuste-obs')?.value || '';
+      try {
+        await _ajusteBolFetch('/' + s.boletim_id + '/ajustar', {
+          method: 'PATCH',
+          body: JSON.stringify({ glosas, acrescimos, obs }),
+        });
+      } catch (e) { erros.push('Glosas/Acréscimos: ' + e.message); }
+    }
+
+    // 2. Colaboradores — DELETE pendentes, PUT modificados, POST novos em lote
+    const colabsParaDeletar = s.colaboradores.filter(c => c._delete && c.id);
+    const colabsParaAtualizar = s.colaboradores.filter(c => c.id && c._saved && c._dirty && !c._delete);
+    const colabsNovos = s.colaboradores.filter(c => !c.id && !c._delete && (c.nome_colaborador || '').trim());
+
+    for (const c of colabsParaDeletar) {
+      try { await _ajusteBolFetch('/colaboradores/' + c.id, { method: 'DELETE' }); }
+      catch (e) { erros.push('Excluir colaborador #' + c.id + ': ' + e.message); }
+    }
+    for (const c of colabsParaAtualizar) {
+      try {
+        await _ajusteBolFetch('/colaboradores/' + c.id, {
+          method: 'PUT',
+          body: JSON.stringify({
+            nome_colaborador: c.nome_colaborador, cpf: c.cpf || null,
+            funcao: c.funcao || null, observacao: c.observacao || null,
+          }),
+        });
+      } catch (e) { erros.push('Atualizar colaborador: ' + e.message); }
+    }
+    if (colabsNovos.length) {
+      try {
+        await _ajusteBolFetch('/' + s.boletim_id + '/colaboradores', {
+          method: 'POST',
+          body: JSON.stringify({ colaboradores: colabsNovos }),
+        });
+      } catch (e) { erros.push('Inserir colaboradores: ' + e.message); }
+    }
+
+    // 3. Glosas detalhadas
+    const glosasParaDeletar = s.glosasDet.filter(g => g._delete && g.id);
+    const glosasParaAtualizar = s.glosasDet.filter(g => g.id && g._saved && g._dirty && !g._delete);
+    const glosasNovas = s.glosasDet.filter(g => !g.id && !g._delete && (g.motivo || '').trim() && parseFloat(g.valor) > 0);
+
+    for (const g of glosasParaDeletar) {
+      try { await _ajusteBolFetch('/glosas/' + g.id, { method: 'DELETE' }); }
+      catch (e) { erros.push('Excluir glosa #' + g.id + ': ' + e.message); }
+    }
+    for (const g of glosasParaAtualizar) {
+      try {
+        await _ajusteBolFetch('/glosas/' + g.id, {
+          method: 'PUT',
+          body: JSON.stringify({
+            motivo: g.motivo, valor: parseFloat(g.valor) || 0,
+            posto_id: g.posto_id || null, data_referencia: g.data_referencia || null,
+          }),
+        });
+      } catch (e) { erros.push('Atualizar glosa: ' + e.message); }
+    }
+    for (const g of glosasNovas) {
+      try {
+        await _ajusteBolFetch('/' + s.boletim_id + '/glosas', {
+          method: 'POST',
+          body: JSON.stringify({
+            motivo: g.motivo, valor: parseFloat(g.valor) || 0,
+            posto_id: g.posto_id || null, data_referencia: g.data_referencia || null,
+          }),
+        });
+      } catch (e) { erros.push('Inserir glosa: ' + e.message); }
+    }
+
+    if (erros.length) {
+      if (typeof toast === 'function') toast('⚠ ' + erros.length + ' erro(s): ' + erros[0], 'error');
+      console.error('[ajuste] erros:', erros);
+      if (btn) { btn.disabled = false; btn.textContent = '💾 Salvar tudo'; }
+      return;
+    }
+
+    document.getElementById('modal-ajustar-boletim')?.remove();
+    if (typeof toast === 'function') toast('✅ Ajustes salvos', 'success');
+    if (typeof renderPainelFaturamento === 'function') renderPainelFaturamento();
+  } catch (err) {
+    if (typeof toast === 'function') toast('Erro inesperado: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Salvar tudo'; }
+  }
+}
+
+// Backwards compat — código legado pode chamar essa função diretamente
+async function _painelSalvarAjuste(boletim_id, mes) { return _ajusteSalvarTudo(); }
 
 async function painelEmitirLote(mes) {
   const qtd = parseInt(event?.target?.textContent?.match(/\d+/)?.[0] || '0');
