@@ -1039,6 +1039,12 @@
       <p>CSV: Data;Categoria;Fornecedor;CNPJ;NF;Descrição;Valor Bruto;Competência</p>
       <input type="file" id="imp-desp" accept=".csv,.xls,.xlsx" style="display:none" onchange="importFile('despesas',this)">
     </div>
+    <div class="import-zone" style="border-color:#15803d;background:#f0fdf4" onclick="document.getElementById('imp-nfe').click()">
+      <h3>📑 NFe (XML / ZIP)</h3>
+      <p>Arquivo XML único ou ZIP com várias NFes de fornecedor. Classifica items em Estoque ou Patrimônio (CFOP/heurística).</p>
+      <span style="font-size:10px;background:#15803d;color:#fff;padding:2px 8px;border-radius:10px;font-weight:700">🆕 Auto-classifica</span>
+      <input type="file" id="imp-nfe" accept=".xml,.zip,.XML,.ZIP" style="display:none" onchange="importNfeXml(this)">
+    </div>
   </div>
   <h3 style="font-size:14px;font-weight:700;color:#475569;margin:20px 0 10px">Histórico de Importações</h3>
   <div class="tw"><table><thead><tr><th>Tipo</th><th>Arquivo</th><th>Registros</th><th>Data</th><th>Status</th></tr></thead><tbody id="import-hist"></tbody></table>    <div class="import-zone" onclick="document.getElementById('imp-ofx').click()">

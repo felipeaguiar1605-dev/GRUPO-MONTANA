@@ -2304,6 +2304,166 @@ async function delDesp(id){
   loadDespData();
 }
 
+// ─── IMPORTAÇÃO NFe XML (Item 3 — versão completa) ──────────────
+// Estado do preview entre upload e confirmação
+let _nfePreview = null;
+
+async function importNfeXml(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  showLoading('Analisando NFe...');
+  try {
+    const url = '/api/import/nfe-xml/preview?company=' + window.currentCompany;
+    const r = await fetch(url, {
+      method: 'POST', body: fd,
+      headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jwt') || '') },
+    });
+    const data = await r.json();
+    hideLoading();
+    if (!data.ok) { alert('Erro: ' + (data.error || 'desconhecido')); input.value = ''; return; }
+    _nfePreview = data.nfes;
+    abrirModalNfePreview();
+  } catch (e) {
+    hideLoading();
+    alert('Erro: ' + e.message);
+  }
+  input.value = '';
+}
+
+function abrirModalNfePreview() {
+  const old = document.getElementById('modal-nfe-preview');
+  if (old) old.remove();
+  const modal = document.createElement('div');
+  modal.id = 'modal-nfe-preview';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px';
+
+  const totalItems = _nfePreview.reduce((s, n) => s + ((n.items || []).length), 0);
+  const totalValor = _nfePreview.reduce((s, n) => s + Number(n.valor_total || 0), 0);
+  const erros = _nfePreview.filter(n => n._erro);
+
+  let html = `
+    <div style="background:#fff;border-radius:12px;max-width:1100px;width:100%;max-height:92vh;overflow-y:auto;padding:24px">
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:14px">
+        <div>
+          <div style="font-size:18px;font-weight:800;color:#0f172a">📑 Revisar NFe(s) antes de importar</div>
+          <div style="font-size:12px;color:#64748b;margin-top:2px">${_nfePreview.length} NFe(s) · ${totalItems} item(ns) · Total ${brl(totalValor)}</div>
+        </div>
+        <button onclick="document.getElementById('modal-nfe-preview').remove();_nfePreview=null" style="background:none;border:none;font-size:22px;cursor:pointer;color:#64748b">✕</button>
+      </div>
+  `;
+
+  if (erros.length) {
+    html += `<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:11px;color:#991b1b">
+      ⚠ ${erros.length} arquivo(s) com erro de parse:
+      <ul style="margin:4px 0 0 16px">${erros.map(e => `<li>${e._arquivo}: ${e._erro}</li>`).join('')}</ul>
+    </div>`;
+  }
+
+  _nfePreview.forEach((nfe, nfeIdx) => {
+    if (nfe._erro) return;
+    html += `
+      <div style="border:1px solid #e2e8f0;border-radius:10px;margin-bottom:14px;overflow:hidden">
+        <div style="padding:10px 14px;background:#f8fafc;border-bottom:1px solid #e2e8f0">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <strong style="font-size:13px">NFe ${nfe.numero || '?'}/${nfe.serie || '?'}</strong>
+              <span style="font-size:10px;color:#64748b;margin-left:6px">${nfe.data_emissao || ''} · ${nfe.emitente?.nome || ''} (${nfe.emitente?.cnpj || ''})</span>
+            </div>
+            <span style="font-size:13px;font-weight:700;color:#1d4ed8">${brl(nfe.valor_total)}</span>
+          </div>
+          <div style="font-size:9px;color:#94a3b8;margin-top:2px">${nfe.natureza || ''}</div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead>
+            <tr style="background:#1e293b;color:#fff;font-size:9px;text-transform:uppercase">
+              <th style="padding:6px 8px;text-align:left">#</th>
+              <th style="padding:6px 8px;text-align:left">Descrição</th>
+              <th style="padding:6px 8px;text-align:left">CFOP/NCM</th>
+              <th style="padding:6px 8px;text-align:right">Qtd</th>
+              <th style="padding:6px 8px;text-align:right">V.Unit</th>
+              <th style="padding:6px 8px;text-align:right">Total</th>
+              <th style="padding:6px 8px;text-align:center">Tipo</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+    (nfe.items || []).forEach((item, itemIdx) => {
+      html += `
+        <tr style="border-bottom:1px solid #f1f5f9">
+          <td style="padding:5px 8px;color:#94a3b8">${item.ordem}</td>
+          <td style="padding:5px 8px" title="${(item.descricao||'').replace(/"/g,'')}">${(item.descricao||'').slice(0, 60)}</td>
+          <td style="padding:5px 8px;font-size:9px;color:#64748b;font-family:monospace">${item.cfop||'—'}/${item.ncm||'—'}</td>
+          <td style="padding:5px 8px;text-align:right;font-family:monospace">${item.quantidade} ${item.unidade}</td>
+          <td style="padding:5px 8px;text-align:right;font-family:monospace">${brl(item.valor_unit)}</td>
+          <td style="padding:5px 8px;text-align:right;font-family:monospace;font-weight:600">${brl(item.valor_total)}</td>
+          <td style="padding:5px 8px;text-align:center">
+            <select onchange="_nfePreviewSetTipo(${nfeIdx},${itemIdx},this.value)" style="font-size:10px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px">
+              <option value="estoque" ${item.tipo_sugerido==='estoque'?'selected':''}>📦 Estoque</option>
+              <option value="patrimonio" ${item.tipo_sugerido==='patrimonio'?'selected':''}>🏗️ Patrimônio</option>
+              <option value="ignorar">— Ignorar —</option>
+            </select>
+            <div style="font-size:8px;color:#94a3b8;margin-top:1px;text-align:center" title="${item.motivo_sugestao||''}">💡 ${item.tipo_sugerido}</div>
+          </td>
+        </tr>
+      `;
+    });
+    html += `</tbody></table></div>`;
+  });
+
+  html += `
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
+        <button onclick="document.getElementById('modal-nfe-preview').remove();_nfePreview=null" style="padding:9px 18px;font-size:12px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;color:#475569;cursor:pointer">Cancelar</button>
+        <button onclick="confirmarImportNfe()" style="padding:9px 22px;font-size:12px;font-weight:800;border:none;border-radius:6px;background:#15803d;color:#fff;cursor:pointer">✓ Importar (${totalItems} item${totalItems>1?'s':''})</button>
+      </div>
+    </div>
+  `;
+
+  modal.innerHTML = html;
+  document.body.appendChild(modal);
+}
+
+function _nfePreviewSetTipo(nfeIdx, itemIdx, tipo) {
+  if (!_nfePreview) return;
+  const nfe = _nfePreview[nfeIdx];
+  if (!nfe || !nfe.items || !nfe.items[itemIdx]) return;
+  if (tipo === 'ignorar') {
+    nfe.items[itemIdx].tipo_user = '__ignorar__';
+  } else {
+    nfe.items[itemIdx].tipo_user = tipo;
+  }
+}
+
+async function confirmarImportNfe() {
+  if (!_nfePreview) return;
+  // Filtra items "ignorar"
+  const nfesEnviar = _nfePreview.map(nfe => ({
+    ...nfe,
+    items: (nfe.items || []).filter(it => it.tipo_user !== '__ignorar__'),
+  }));
+
+  showLoading('Gravando despesas e vínculos...');
+  try {
+    const r = await api('/import/nfe-xml/confirmar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nfes: nfesEnviar }),
+    });
+    hideLoading();
+    if (!r.ok) { alert('Erro: ' + (r.error || 'desconhecido')); return; }
+
+    const totalCriados = r.resultados.reduce((s, x) => s + (x.items_criados || 0), 0);
+    document.getElementById('modal-nfe-preview')?.remove();
+    _nfePreview = null;
+    toast(`✅ ${r.total_nfes} NFe(s) importada(s) · ${totalCriados} despesa(s) criada(s)`);
+    if (typeof loadImportHist === 'function') loadImportHist();
+  } catch (e) {
+    hideLoading();
+    alert('Erro: ' + e.message);
+  }
+}
+
 async function desvincularDesp(id){
   if(!confirm('Remover o vínculo desta despesa com Estoque/Patrimônio?\n\n(O item de estoque ou patrimônio NÃO é apagado — apenas o link com a despesa.)'))return;
   await api(`/despesas/${id}/desvincular`,{method:'POST'});

@@ -2996,6 +2996,252 @@ router.delete('/despesas/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── IMPORTAÇÃO NFe XML (Item 3 — versão completa) ───────────────
+// Aceita .xml único ou .zip com múltiplos. Faz parse, classifica cada
+// item por CFOP/heurística e retorna preview (sem gravar). Usuário
+// revisa/edita e chama /confirmar pra criar despesas + estoque/patrimônio.
+
+const _xmldom = require('@xmldom/xmldom');
+
+// CFOPs que indicam aquisição de imobilizado (vão pra patrimônio).
+// Fonte: Tabela do SINIEF — entrada de mercadoria/serviço por CFOP de início 1, 2 ou 3.
+const CFOP_IMOBILIZADO = new Set([
+  '1551', '2551', '3551',  // Compra de bem para o ativo imobilizado
+  '1552', '2552',          // Transferência de bem do ativo imobilizado
+  '1553', '2553', '3553',  // Devolução de bem do ativo imobilizado
+  '1556', '2556',          // Compra de material para uso ou consumo
+]);
+
+// Helper: pega text content de um elemento ou null
+function _xmlText(parent, tagName) {
+  if (!parent) return null;
+  const el = parent.getElementsByTagName(tagName)[0];
+  return el ? (el.textContent || '').trim() : null;
+}
+
+// Heurística complementar quando CFOP não identifica claramente
+function _classificarItemPorXProd(xProd) {
+  const desc = String(xProd || '').toLowerCase();
+  // Patrimônio (bens duráveis)
+  const patrim = [
+    'computador','notebook','desktop','servidor','impressora','monitor',
+    'mesa','cadeira','armário','armario','rack','bancada',
+    'veículo','veiculo','carro','moto','caminhão','caminhao',
+    'câmera','camera','cftv','dvr','nvr','catraca','torniquete',
+    'ar condicionado','split','frigobar','geladeira','fogão','fogao',
+    'roteador','switch','firewall','no-break','nobreak',
+  ];
+  if (patrim.some(k => desc.includes(k))) return 'patrimonio';
+  // Default: estoque (consumível ou material)
+  return 'estoque';
+}
+
+// Parse de uma NFe (XML buffer) → estrutura padronizada
+function parseNFeXml(xmlBuffer) {
+  const xmlString = Buffer.isBuffer(xmlBuffer) ? xmlBuffer.toString('utf8') : String(xmlBuffer);
+  const doc = new _xmldom.DOMParser({ errorHandler: { warning: () => {}, error: () => {}, fatalError: () => {} } })
+    .parseFromString(xmlString, 'text/xml');
+
+  const infNFe = doc.getElementsByTagName('infNFe')[0];
+  if (!infNFe) throw new Error('XML não contém <infNFe>; arquivo não parece ser uma NFe válida');
+
+  const ide   = infNFe.getElementsByTagName('ide')[0];
+  const emit  = infNFe.getElementsByTagName('emit')[0];
+  const dest  = infNFe.getElementsByTagName('dest')[0];
+  const total = infNFe.getElementsByTagName('total')[0];
+  const ICMSTot = total ? total.getElementsByTagName('ICMSTot')[0] : null;
+
+  const dets = infNFe.getElementsByTagName('det');
+  const items = [];
+  for (let i = 0; i < dets.length; i++) {
+    const det = dets[i];
+    const prod = det.getElementsByTagName('prod')[0];
+    if (!prod) continue;
+    const cfop = _xmlText(prod, 'CFOP');
+    const xProd = _xmlText(prod, 'xProd');
+    let tipo_sugerido = 'estoque';
+    let motivo = '';
+    if (cfop && CFOP_IMOBILIZADO.has(cfop)) {
+      tipo_sugerido = 'patrimonio';
+      motivo = `CFOP ${cfop} = aquisição de imobilizado`;
+    } else {
+      tipo_sugerido = _classificarItemPorXProd(xProd);
+      motivo = tipo_sugerido === 'patrimonio'
+        ? 'descrição contém termo de bem durável'
+        : `CFOP ${cfop || '—'} → consumível/revenda`;
+    }
+    items.push({
+      ordem:       parseInt(det.getAttribute('nItem'), 10) || (i + 1),
+      codigo:      _xmlText(prod, 'cProd'),
+      descricao:   xProd,
+      ncm:         _xmlText(prod, 'NCM'),
+      cfop:        cfop,
+      unidade:     _xmlText(prod, 'uCom') || 'UN',
+      quantidade:  parseFloat(_xmlText(prod, 'qCom')) || 0,
+      valor_unit:  parseFloat(_xmlText(prod, 'vUnCom')) || 0,
+      valor_total: parseFloat(_xmlText(prod, 'vProd')) || 0,
+      tipo_sugerido,
+      motivo_sugestao: motivo,
+    });
+  }
+
+  return {
+    chave_nfe:       _xmlText(infNFe, 'Id') || infNFe.getAttribute('Id') || null,
+    numero:          _xmlText(ide, 'nNF'),
+    serie:           _xmlText(ide, 'serie'),
+    data_emissao:    (_xmlText(ide, 'dhEmi') || _xmlText(ide, 'dEmi') || '').slice(0, 10),
+    natureza:        _xmlText(ide, 'natOp'),
+    emitente: {
+      cnpj:  _xmlText(emit, 'CNPJ') || _xmlText(emit, 'CPF'),
+      nome:  _xmlText(emit, 'xNome'),
+      fant:  _xmlText(emit, 'xFant'),
+    },
+    destinatario: {
+      cnpj:  _xmlText(dest, 'CNPJ') || _xmlText(dest, 'CPF'),
+      nome:  _xmlText(dest, 'xNome'),
+    },
+    valor_total: parseFloat(_xmlText(ICMSTot, 'vNF')) || 0,
+    items,
+  };
+}
+
+// POST /import/nfe-xml/preview — upload (.xml ou .zip), retorna estrutura
+router.post('/import/nfe-xml/preview', (req, res, next) => getUpload(req).single('file')(req, res, next), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Arquivo não enviado' });
+    const ext = (req.file.originalname || '').toLowerCase().split('.').pop();
+    const buf = fs.readFileSync(req.file.path);
+
+    let nfes = [];
+    if (ext === 'zip') {
+      const AdmZip = require('adm-zip');
+      const zip = new AdmZip(buf);
+      for (const entry of zip.getEntries()) {
+        if (!entry.entryName.toLowerCase().endsWith('.xml')) continue;
+        try {
+          const nfe = parseNFeXml(entry.getData());
+          nfe._arquivo = entry.entryName;
+          nfes.push(nfe);
+        } catch (e) {
+          nfes.push({ _arquivo: entry.entryName, _erro: e.message });
+        }
+      }
+    } else if (ext === 'xml') {
+      const nfe = parseNFeXml(buf);
+      nfe._arquivo = req.file.originalname;
+      nfes.push(nfe);
+    } else {
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+      return res.status(400).json({ error: 'Aceita apenas .xml ou .zip' });
+    }
+
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+    res.json({ ok: true, total: nfes.length, nfes });
+  } catch (e) {
+    try { if (req.file) fs.unlinkSync(req.file.path); } catch (_) {}
+    errRes(res, e);
+  }
+});
+
+// POST /import/nfe-xml/confirmar — recebe estrutura (possivelmente editada
+// pelo user no preview) e cria 1 despesa por item da NFe, com vínculo a
+// estoque OU patrimônio conforme tipo_sugerido (ou tipo_user override).
+router.post('/import/nfe-xml/confirmar', async (req, res) => {
+  try {
+    await ensureDespesasVinculoCols(req.db);
+    const { nfes } = req.body;
+    if (!Array.isArray(nfes) || nfes.length === 0) {
+      return res.status(400).json({ error: 'nfes obrigatório' });
+    }
+
+    const resultados = [];
+
+    for (const nfe of nfes) {
+      if (nfe._erro) { resultados.push({ ...nfe, _ignorado: 'erro no parse' }); continue; }
+      const itensCriados = [];
+
+      for (const item of (nfe.items || [])) {
+        const tipo = item.tipo_user || item.tipo_sugerido || 'estoque';
+        const valor = Number(item.valor_total || 0);
+        if (valor <= 0) continue;
+        const data_iso_val = nfe.data_emissao || new Date().toISOString().slice(0, 10);
+
+        // 1) Cria despesa
+        const dedup_hash_val = dedupHash(req.companyKey, data_iso_val, valor,
+          nfe.emitente?.nome || '', item.descricao || '');
+        const r = await req.db.prepare(`
+          INSERT INTO despesas (categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, data_iso,
+            valor_bruto, valor_liquido, total_retencao, status, dedup_hash)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'PENDENTE', ?)
+        `).run(
+          tipo === 'estoque' ? 'EPI/Ferramentas' : 'FORNECEDOR',
+          item.descricao || '(sem descrição)',
+          nfe.emitente?.nome || '',
+          nfe.emitente?.cnpj || '',
+          nfe.numero || '',
+          data_iso_val.split('-').reverse().join('/'),
+          data_iso_val,
+          valor,
+          valor,
+          dedup_hash_val
+        );
+        if (r.changes === 0) {
+          itensCriados.push({ item: item.descricao, _dup: true });
+          continue;
+        }
+        const despId = r.lastInsertRowid;
+
+        // 2) Cria registro vinculado em estoque ou patrimônio
+        if (tipo === 'estoque') {
+          // Procura item de estoque por nome (match exato case-insensitive); cria se não achar
+          let itemRow = null;
+          try {
+            itemRow = await req.db.prepare(
+              `SELECT id FROM estoque_itens WHERE LOWER(nome) = LOWER(?) LIMIT 1`
+            ).get(item.descricao || '');
+          } catch (_) {}
+          let itemId = itemRow?.id;
+          if (!itemId) {
+            const novo = await req.db.prepare(`
+              INSERT INTO estoque_itens (nome, categoria, descricao, unidade, estoque_minimo, valor_unitario, estoque_atual)
+              VALUES (?, 'OUTROS', ?, ?, 0, ?, 0)
+            `).run(item.descricao || '(sem nome)', `NCM ${item.ncm || '—'} · CFOP ${item.cfop || '—'}`,
+                   item.unidade || 'UN', item.valor_unit || 0);
+            itemId = novo.lastInsertRowid;
+          }
+          await req.db.prepare(`
+            INSERT INTO estoque_movimentos (item_id, tipo, quantidade, valor_unitario, total, data_movimento, motivo, fornecedor, nota_fiscal)
+            VALUES (?, 'ENTRADA', ?, ?, ?, ?, ?, ?, ?)
+          `).run(itemId, item.quantidade || 1, item.valor_unit || valor, valor, data_iso_val,
+                 `NFe ${nfe.numero || ''} item ${item.ordem}`, nfe.emitente?.nome || '', nfe.numero || '');
+          await req.db.prepare(`UPDATE estoque_itens SET estoque_atual = estoque_atual + ?, updated_at = NOW() WHERE id = ?`).run(item.quantidade || 1, itemId);
+          await req.db.prepare(`UPDATE despesas SET vinculo_tipo = 'estoque', vinculo_id = ? WHERE id = ?`).run(itemId, despId);
+          itensCriados.push({ item: item.descricao, despesa_id: despId, vinculo: { tipo: 'estoque', id: itemId } });
+        } else if (tipo === 'patrimonio') {
+          const pr = await req.db.prepare(`
+            INSERT INTO patrimonio (empresa, descricao, categoria, valor_aquisicao, data_aquisicao, vida_util_meses, valor_residual, observacoes)
+            VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+          `).run(req.companyKey, item.descricao || '(sem descrição)', 'Equipamento',
+                 valor, data_iso_val, 60,
+                 `NFe ${nfe.numero || ''} item ${item.ordem} · ${nfe.emitente?.nome || ''}`);
+          const patId = pr.lastInsertRowid;
+          await req.db.prepare(`UPDATE despesas SET vinculo_tipo = 'patrimonio', vinculo_id = ? WHERE id = ?`).run(patId, despId);
+          itensCriados.push({ item: item.descricao, despesa_id: despId, vinculo: { tipo: 'patrimonio', id: patId } });
+        }
+      }
+
+      resultados.push({
+        nfe: nfe.numero,
+        emitente: nfe.emitente?.nome,
+        items_criados: itensCriados.length,
+        items: itensCriados,
+      });
+    }
+
+    res.json({ ok: true, total_nfes: resultados.length, resultados });
+  } catch (e) { errRes(res, e); }
+});
+
 router.post('/import/despesas', (req, res, next) => getUpload(req).single("file")(req, res, next), async (req, res) => {
   try {
     const extErr = validarExtensao(req.file.originalname, ['csv', 'txt']);
