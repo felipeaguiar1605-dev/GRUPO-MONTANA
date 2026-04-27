@@ -136,6 +136,8 @@
       <div class="tab" data-tab="cont" onclick="navGo('cont',this)">📋 Contratos</div>
       <!-- Adimplência por Contrato virou sub-aba de Contratos (2026-04). Tab oculta mas rota mantida. -->
       <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)" style="display:none">💰 Adimplência por Contrato</div>
+      <!-- Faturamento Previsto: sub-aba de Contratos (2026-04). Tab oculta. -->
+      <div class="tab" data-tab="faturamento-prev" onclick="navGo('faturamento-prev',this)" style="display:none">📅 Faturamento Previsto</div>
       <div class="tab" data-tab="boletins" onclick="navGo('boletins',this)">📄 Boletins</div>
       <div class="tab" data-tab="pag" onclick="navGo('pag',this);setTimeout(()=>compListar&&compListar(),50)">🧾 Comprovantes de Pagamento</div>
       <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
@@ -436,6 +438,33 @@
   <!-- Painel de Saúde dos Contratos -->
   <div id="cont-saude-panel" style="margin-bottom:16px"></div>
   <div id="cont-cards"></div>
+</div>
+
+<!-- Faturamento Previsto (sub-aba de Contratos) -->
+<div id="pg-faturamento-prev" class="pg">
+  <div id="pg-faturamento-prev__subnav"></div>
+  <div class="toolbar" style="margin-bottom:14px">
+    <span style="font-size:16px">📅</span>
+    <span class="toolbar-title">FATURAMENTO PREVISTO POR COMPETÊNCIA</span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+      <label style="font-size:11px;color:#e2e8f0;font-weight:600">Horizonte</label>
+      <select id="fp-meses" onchange="loadFaturamentoPrevisto()"
+        style="padding:4px 10px;border:1px solid #475569;border-radius:6px;background:#1e293b;color:#e2e8f0;font-size:12px">
+        <option value="3">3 meses</option>
+        <option value="6" selected>6 meses</option>
+        <option value="12">12 meses</option>
+      </select>
+      <button onclick="loadFaturamentoPrevisto()"
+        style="background:#3b82f6;color:#fff;border:none;padding:5px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">
+        🔄 Atualizar
+      </button>
+    </div>
+  </div>
+  <div style="font-size:11px;color:#64748b;margin-bottom:10px">
+    NFs que <strong>devem ser emitidas</strong> em cada competência, detalhadas por contrato e posto/anexo.
+    Origem: contratos cadastrados em <strong>📄 Boletins</strong> (postos + itens). Contratos sem postos cadastrados usam <code>valor_mensal_liquido</code> como fallback.
+  </div>
+  <div id="fp-content"><div class="loading" style="padding:30px;text-align:center;color:#94a3b8">Aguardando carregar…</div></div>
 </div>
 
 <!-- Adimplência por Contrato (antes: Painel de Pagamentos) -->

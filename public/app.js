@@ -208,6 +208,7 @@ function showTab(id,el){
   if(id==='supervisor')window.supervisorInit && window.supervisorInit();
   if(id==='painel-pgto') window.painelPgtoInit && window.painelPgtoInit();
   if(id==='patrimonio')  window.patrimonioInit && window.patrimonioInit();
+  if(id==='faturamento-prev') loadFaturamentoPrevisto();
   // Sub-nav consistente entre páginas relacionadas (introduzido em 2026-04
   // para reduzir clutter do menu lateral). Páginas no mapa abaixo recebem
   // uma faixa de sub-abas no topo que navega entre os irmãos.
@@ -220,8 +221,9 @@ const _SUBNAV_GRUPO_NFS = [
   { tab: 'nf-modelos',  label: '🧰 Modelos' },
 ];
 const _SUBNAV_GRUPO_CONTRATOS = [
-  { tab: 'cont',         label: '📋 Contratos' },
-  { tab: 'painel-pgto',  label: '💰 Adimplência' },
+  { tab: 'cont',              label: '📋 Contratos' },
+  { tab: 'painel-pgto',       label: '💰 Adimplência' },
+  { tab: 'faturamento-prev',  label: '📅 Faturamento Previsto' },
 ];
 const _SUBNAV_GRUPO_CAIXA = [
   { tab: 'fluxo',        label: '📈 Fluxo de Caixa' },
@@ -237,6 +239,7 @@ const _PAGE_SUBNAVS = {
   'nf-modelos':       _SUBNAV_GRUPO_NFS,
   cont:               _SUBNAV_GRUPO_CONTRATOS,
   'painel-pgto':      _SUBNAV_GRUPO_CONTRATOS,
+  'faturamento-prev': _SUBNAV_GRUPO_CONTRATOS,
   fluxo:              _SUBNAV_GRUPO_CAIXA,
   'caixa-livre':      _SUBNAV_GRUPO_CAIXA,
   'fluxo-proj':       _SUBNAV_GRUPO_CAIXA,
@@ -4091,6 +4094,95 @@ async function verTimelineContrato(id) {
     </div>`;
 
   document.body.insertAdjacentHTML('beforeend', html);
+}
+
+// ─── FATURAMENTO PREVISTO POR MÊS ────────────────────────────────
+async function loadFaturamentoPrevisto() {
+  const meses = parseInt(document.getElementById('fp-meses')?.value, 10) || 6;
+  const cont  = document.getElementById('fp-content');
+  if (!cont) return;
+  cont.innerHTML = '<div class="loading" style="padding:30px;text-align:center;color:#94a3b8">Carregando faturamento previsto…</div>';
+
+  try {
+    const d = await api(`/contratos/faturamento-previsto?meses=${meses}`);
+    if (!d.ok) throw new Error(d.error || 'Erro');
+
+    if (!d.qtd_contratos_cadastrados) {
+      cont.innerHTML = `
+        <div style="padding:30px;text-align:center;background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;color:#92400e;font-size:13px">
+          ⚠ Nenhum contrato cadastrado no módulo Boletins.<br>
+          <span style="font-size:11px;color:#b45309">Cadastre contratos+postos em <strong>📄 Boletins</strong> para o faturamento previsto aparecer aqui.</span>
+        </div>`;
+      return;
+    }
+
+    const brl = v => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    let html = '';
+    for (const m of d.meses) {
+      const mes_label_upper = (m.mes_label || '').toUpperCase();
+      html += `
+        <details open style="margin-bottom:14px;border:1px solid #e2e8f0;border-radius:10px;background:#fff;overflow:hidden">
+          <summary style="padding:12px 16px;cursor:pointer;background:linear-gradient(to right,#f1f5f9,#fff);display:flex;justify-content:space-between;align-items:center;font-weight:700;color:#0f172a">
+            <span>📅 ${mes_label_upper} <span style="font-size:10px;color:#94a3b8;font-weight:600;margin-left:8px">${m.contratos.length} contrato(s)</span></span>
+            <span style="color:#1d4ed8;font-size:14px">${brl(m.total_geral)}</span>
+          </summary>
+          <div style="padding:0 14px 14px">
+      `;
+
+      if (m.contratos.length === 0) {
+        html += `<div style="padding:16px;color:#94a3b8;font-size:12px;text-align:center">Sem contratos ativos nesta competência.</div>`;
+      } else {
+        html += `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px">
+          <thead>
+            <tr style="background:#1e293b;color:#fff;font-size:10px;text-transform:uppercase">
+              <th style="padding:7px 10px;text-align:left">Contrato</th>
+              <th style="padding:7px 10px;text-align:left">Posto / Anexo</th>
+              <th style="padding:7px 10px;text-align:left">Município</th>
+              <th style="padding:7px 10px;text-align:right">Valor Mensal</th>
+            </tr>
+          </thead>
+          <tbody>`;
+
+        for (const c of m.contratos) {
+          const postoCount = c.postos.length;
+          c.postos.forEach((p, idx) => {
+            const isFirst = idx === 0;
+            const isLast  = idx === postoCount - 1;
+            html += `<tr style="border-bottom:${isLast ? '2px solid #cbd5e1' : '1px solid #f1f5f9'}">
+              ${isFirst
+                ? `<td rowspan="${postoCount + 1}" style="padding:8px 10px;vertical-align:top;background:#f8fafc;font-weight:700;color:#0f172a;border-right:1px solid #e2e8f0">
+                     <div>${(c.nome || '').toUpperCase()}</div>
+                     <div style="font-size:9px;color:#64748b;font-weight:500;margin-top:2px">${c.numero_contrato || c.contrato_ref || ''}</div>
+                   </td>`
+                : ''}
+              <td style="padding:6px 10px;color:#334155">${p.campus_nome || '—'}</td>
+              <td style="padding:6px 10px;color:#64748b;font-size:11px">${p.municipio || '—'}</td>
+              <td style="padding:6px 10px;text-align:right;font-family:monospace;color:#0f766e">${brl(p.valor_mensal)}</td>
+            </tr>`;
+          });
+          // Linha de total do contrato
+          html += `<tr style="border-bottom:2px solid #cbd5e1;background:#f0fdfa">
+            <td colspan="2" style="padding:6px 10px;text-align:right;font-weight:700;color:#0f766e;font-size:11px">Total ${(c.nome || '').toUpperCase()}</td>
+            <td style="padding:6px 10px;text-align:right;font-family:monospace;font-weight:800;color:#0f766e">${brl(c.total_mensal)}</td>
+          </tr>`;
+        }
+
+        // Linha de total geral da competência
+        html += `<tr style="background:#dbeafe">
+          <td colspan="3" style="padding:9px 10px;text-align:right;font-weight:800;color:#1e40af;font-size:12px;text-transform:uppercase">⊳ Total da Competência</td>
+          <td style="padding:9px 10px;text-align:right;font-family:monospace;font-weight:800;color:#1e40af;font-size:13px">${brl(m.total_geral)}</td>
+        </tr>`;
+        html += `</tbody></table>`;
+      }
+
+      html += `</div></details>`;
+    }
+
+    cont.innerHTML = html;
+  } catch (e) {
+    cont.innerHTML = `<div style="padding:20px;color:#dc2626;text-align:center">Erro: ${e.message || e}</div>`;
+  }
 }
 
 // ─── CORREÇÃO DE NFs ──────────────────────────────────────────────

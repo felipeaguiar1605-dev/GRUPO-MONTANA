@@ -4200,6 +4200,93 @@ router.get('/contratos/:num/detalhe', async (req, res) => {
   } catch(e) { errRes(res, e); }
 });
 
+// ─── FATURAMENTO PREVISTO POR MÊS (sub-aba "Previsto" em Contratos) ──
+// Gera quadro de faturamento esperado por competência, quebrando por
+// contrato e posto. Usa bol_contratos/bol_postos/bol_itens (módulo Boletins)
+// quando disponível; cai pra contratos.valor_mensal_liquido quando não.
+router.get('/contratos/faturamento-previsto', async (req, res) => {
+  try {
+    const meses = Math.min(Math.max(parseInt(req.query.meses, 10) || 6, 1), 24);
+
+    // 1) Contratos da empresa (bol_contratos = catálogo do módulo Boletins).
+    //    Faz LEFT JOIN com `contratos` via contrato_ref para puxar vigência/status
+    //    e detectar contratos encerrados ou fora de vigência em cada mês.
+    const contratosBol = await req.db.prepare(`
+      SELECT bc.id, bc.nome, bc.contratante, bc.contrato_ref, bc.numero_contrato,
+             c.vigencia_inicio, c.vigencia_fim, c.status, c.valor_mensal_liquido
+      FROM bol_contratos bc
+      LEFT JOIN contratos c ON c.numContrato = bc.contrato_ref
+      WHERE COALESCE(bc.ativo, TRUE) = TRUE
+      ORDER BY bc.nome
+    `).all();
+
+    // 2) Para cada contrato, busca postos + soma de itens (qtd × valor_unitario)
+    for (const contrato of contratosBol) {
+      const postos = await req.db.prepare(`
+        SELECT bp.id, bp.campus_key, bp.campus_nome, bp.municipio, bp.label_resumo,
+               COALESCE(SUM(bi.quantidade * bi.valor_unitario), 0) AS valor_mensal
+        FROM bol_postos bp
+        LEFT JOIN bol_itens bi ON bi.posto_id = bp.id
+        WHERE bp.contrato_id = ?
+        GROUP BY bp.id, bp.campus_key, bp.campus_nome, bp.municipio, bp.label_resumo, bp.ordem
+        ORDER BY bp.ordem
+      `).all(contrato.id);
+      contrato.postos = (postos || []).map(p => ({
+        ...p,
+        valor_mensal: Number(p.valor_mensal || 0),
+      }));
+      contrato.total_mensal = contrato.postos.reduce((s, p) => s + p.valor_mensal, 0);
+      // Fallback: se não há postos cadastrados mas o contrato financeiro tem
+      // valor mensal, usa esse valor sem detalhamento de postos.
+      if (contrato.total_mensal === 0 && Number(contrato.valor_mensal_liquido || 0) > 0) {
+        contrato.total_mensal = Number(contrato.valor_mensal_liquido);
+        contrato.postos = [{
+          id: null, campus_nome: '(sem postos cadastrados)',
+          municipio: '', valor_mensal: contrato.total_mensal,
+        }];
+      }
+    }
+
+    // 3) Gera array de meses partindo do mês atual e filtra contratos ativos
+    const hoje = new Date();
+    const mesesArr = [];
+    const MESES_PT = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    for (let i = 0; i < meses; i++) {
+      const d = new Date(hoje.getFullYear(), hoje.getMonth() + i, 1);
+      const ano = d.getFullYear();
+      const mes = String(d.getMonth() + 1).padStart(2, '0');
+      const mes_iso = `${ano}-${mes}`;
+      const fim_mes = new Date(ano, d.getMonth() + 1, 0).toISOString().slice(0, 10);
+      const ini_mes = `${mes_iso}-01`;
+
+      const contratosAtivos = contratosBol.filter(c => {
+        if (c.status && /ENCERRADO|RESCINDIDO/i.test(c.status)) return false;
+        if (c.vigencia_fim && c.vigencia_fim !== '' && c.vigencia_fim < ini_mes) return false;
+        if (c.vigencia_inicio && c.vigencia_inicio !== '' && c.vigencia_inicio > fim_mes) return false;
+        return c.total_mensal > 0;
+      });
+
+      mesesArr.push({
+        mes_iso,
+        mes_label: `${MESES_PT[d.getMonth()]}/${ano}`,
+        contratos: contratosAtivos.map(c => ({
+          id: c.id, nome: c.nome, contratante: c.contratante,
+          contrato_ref: c.contrato_ref, numero_contrato: c.numero_contrato,
+          postos: c.postos, total_mensal: +c.total_mensal.toFixed(2),
+        })),
+        total_geral: +contratosAtivos.reduce((s, c) => s + c.total_mensal, 0).toFixed(2),
+      });
+    }
+
+    res.json({
+      ok: true,
+      horizonte_meses: meses,
+      meses: mesesArr,
+      qtd_contratos_cadastrados: contratosBol.length,
+    });
+  } catch (e) { errRes(res, e); }
+});
+
 // ─── TIMELINE DE CONTRATO (modal acionado pelo botão "📅 Timeline") ──
 // Implementado em 2026-04 — antes o botão chamava esta rota mas ela não
 // existia, mostrando "Erro ao carregar timeline" e nada acontecia.
