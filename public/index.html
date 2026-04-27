@@ -139,10 +139,6 @@
       <div class="tab" data-tab="boletins" onclick="navGo('boletins',this)">📄 Boletins</div>
       <div class="tab" data-tab="pag" onclick="navGo('pag',this);setTimeout(()=>compListar&&compListar(),50)">🧾 Comprovantes de Pagamento</div>
       <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
-      <div class="tab" data-tab="fluxo" onclick="navGo('fluxo',this)">📈 Fluxo de Caixa</div>
-      <!-- Caixa Livre e Fluxo Projetado viraram sub-abas de Fluxo (2026-04). Tabs ocultas mas rotas mantidas. -->
-      <div class="tab" data-tab="fluxo-proj" onclick="navGo('fluxo-proj',this);setTimeout(()=>fcpCarregar&&fcpCarregar(),50)" style="display:none">🔮 Fluxo Projetado</div>
-      <div class="tab" data-tab="caixa-livre" onclick="navGo('caixa-livre',this);setTimeout(()=>window.caixaLivreInit&&window.caixaLivreInit(),50)" style="display:none">💵 Caixa Livre</div>
       <div class="tab" data-tab="conta-vinculada" onclick="navGo('conta-vinculada',this)">🏦 Conta Vinculada</div>
       <div class="tab" data-tab="conciliacao3v" onclick="navGo('conciliacao3v',this)">🔗 Conciliação</div>
       <!-- Conciliação IA virou sub-aba de Conciliação (2026-04). Tab oculta mas rota mantida. -->
@@ -206,6 +202,10 @@
       <div class="tab" data-tab="dre" onclick="navGo('dre',this)">📊 DRE</div>
       <div class="tab" data-tab="margem" onclick="navGo('margem',this)">💰 Margem</div>
       <div class="tab" data-tab="margem-contrato" onclick="navGo('margem-contrato',this);setTimeout(()=>margemContratoInit&&margemContratoInit(),50)">📊 Margem por Contrato</div>
+      <div class="tab" data-tab="fluxo" onclick="navGo('fluxo',this)">📈 Fluxo de Caixa</div>
+      <!-- Caixa Livre e Fluxo Projetado viraram sub-abas de Fluxo (2026-04). Tabs ocultas mas rotas mantidas. -->
+      <div class="tab" data-tab="fluxo-proj" onclick="navGo('fluxo-proj',this);setTimeout(()=>fcpCarregar&&fcpCarregar(),50)" style="display:none">🔮 Fluxo Projetado</div>
+      <div class="tab" data-tab="caixa-livre" onclick="navGo('caixa-livre',this);setTimeout(()=>window.caixaLivreInit&&window.caixaLivreInit(),50)" style="display:none">💵 Caixa Livre</div>
       <div class="tab" data-tab="relat" onclick="navGo('relat',this)">📄 Relatórios</div>
       <div class="tab" data-tab="calculadora" onclick="navGo('calculadora',this)">🧮 Calculadora</div>
     </div>
