@@ -921,14 +921,47 @@ async function autoVincular(){
 }
 
 // ─── NFs ─────────────────────────────────────────────────────────
+let _nfsBusca = '';
+let _nfsAberto = false;
+function _nfsAplicarBusca() {
+  _nfsBusca = (document.getElementById('nfs-q')?.value || '').trim();
+  _nfsAberto = document.getElementById('nfs-aberto')?.checked || false;
+  _nfsPage = 1;
+  loadNfs();
+}
+function _nfsLimpar() {
+  if (document.getElementById('nfs-q')) document.getElementById('nfs-q').value = '';
+  if (document.getElementById('nfs-aberto')) document.getElementById('nfs-aberto').checked = false;
+  _nfsBusca = ''; _nfsAberto = false; _nfsPage = 1;
+  loadNfs();
+}
 async function loadNfs(){
+  // Renderiza barra de filtros uma vez (idempotente — recria sempre, valores preservados via state)
+  const fbar = document.getElementById('nfs-filters');
+  if (fbar && !fbar.querySelector('#nfs-q')) {
+    fbar.innerHTML = `
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="nfs-q" type="text" placeholder="🔍 Buscar nº NF, tomador, cidade ou contrato..." style="padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;flex:1;min-width:280px">
+        <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#475569;font-weight:600">
+          <input id="nfs-aberto" type="checkbox" style="margin:0"> Apenas em aberto
+        </label>
+        <button onclick="_nfsAplicarBusca()" style="padding:6px 14px;background:#3b82f6;color:#fff;border:0;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Buscar</button>
+        <button onclick="_nfsLimpar()" style="padding:6px 12px;background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;border-radius:6px;font-size:11px;cursor:pointer">Limpar</button>
+      </div>`;
+    document.getElementById('nfs-q').addEventListener('keydown', e => { if (e.key === 'Enter') _nfsAplicarBusca(); });
+    if (_nfsBusca) document.getElementById('nfs-q').value = _nfsBusca;
+    if (_nfsAberto) document.getElementById('nfs-aberto').checked = true;
+  }
+
   let url=`/nfs?page=${_nfsPage}&limit=${PAGE_SIZE}`;
   if(_from) url+='&from='+_from;
   if(_to)   url+='&to='+_to;
+  if(_nfsBusca) url+='&q='+encodeURIComponent(_nfsBusca);
+  if(_nfsAberto) url+='&aberto=1';
   const d=await api(url);
 
   // Alerta de NFs sem data
-  const semData = await api('/nfs/sem-data');
+  const semData = await api('/nfs/sem-data').catch(()=>({total:0}));
   const alertEl  = document.getElementById('nfs-alerta-sem-data');
   const textoEl  = document.getElementById('nfs-alerta-sem-data-texto');
   if (alertEl && textoEl) {
@@ -940,20 +973,27 @@ async function loadNfs(){
     }
   }
   document.getElementById('nfs-head').innerHTML=`<tr><th>NF</th><th>Competência</th><th>Cidade</th><th>Tomador</th><th class="r">V. Bruto</th><th class="r">V. Líquido</th><th class="r">Retenção</th><th style="width:50px">Ação</th></tr>`;
-  document.getElementById('nfs-body').innerHTML=(d.data||[]).map(r=>`<tr>
-    <td class="mono" style="color:#7c3aed;font-weight:600">NF ${r.numero}</td>
-    <td style="font-size:10px;color:#64748b">${r.competencia||''}</td>
-    <td style="font-size:10px;color:#475569">${r.cidade||''}</td>
-    <td style="font-size:10px;color:#475569">${(r.tomador||'').substring(0,40)}</td>
-    <td class="r mono" style="color:#b45309;font-weight:600">${brl(r.valor_bruto)}</td>
-    <td class="r mono green" style="font-weight:600">${brl(r.valor_liquido)}</td>
-    <td class="r mono red">${brl(r.retencao)}</td>
-    <td><button onclick="excluirNf(${r.id},'${(r.numero||'').replace(/'/g,"\\'")}')" style="padding:2px 6px;font-size:9px;border:1px solid #fca5a5;border-radius:4px;background:#fee2e2;color:#dc2626;cursor:pointer" title="Excluir NF">✕</button></td>
-  </tr>`).join('');
-  document.getElementById('nfs-counter').textContent=`${d.total} notas fiscais`;
+  const linhas = d.data || [];
+  if (linhas.length === 0) {
+    document.getElementById('nfs-body').innerHTML = `<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px">Nenhuma NF encontrada${_nfsBusca?` para "${_nfsBusca}"`:''}.</td></tr>`;
+  } else {
+    document.getElementById('nfs-body').innerHTML=linhas.map(r=>`<tr>
+      <td class="mono" style="color:#7c3aed;font-weight:600">NF ${r.numero}</td>
+      <td style="font-size:10px;color:#64748b">${r.competencia||''}</td>
+      <td style="font-size:10px;color:#475569">${r.cidade||''}</td>
+      <td style="font-size:10px;color:#475569" title="${(r.tomador||'').replace(/"/g,'&quot;')}">${(r.tomador||'').substring(0,40)}${(r.tomador||'').length>40?'…':''}</td>
+      <td class="r mono" style="color:#b45309;font-weight:600">${brl(r.valor_bruto)}</td>
+      <td class="r mono green" style="font-weight:600">${brl(r.valor_liquido)}</td>
+      <td class="r mono red">${brl(r.retencao)}</td>
+      <td><button onclick="excluirNf(${r.id},'${(r.numero||'').replace(/'/g,"\\'")}')" style="padding:2px 6px;font-size:9px;border:1px solid #fca5a5;border-radius:4px;background:#fee2e2;color:#dc2626;cursor:pointer" title="Excluir NF">✕</button></td>
+    </tr>`).join('');
+  }
+  const totalNum = (d.total != null) ? d.total : linhas.length;
+  const somaInfo = (d.soma_bruto || d.soma_liquido) ? ` · Bruto ${brl(d.soma_bruto)} · Líquido ${brl(d.soma_liquido)}` : '';
+  document.getElementById('nfs-counter').textContent=`${totalNum} nota${totalNum===1?'':'s'} fiscai${totalNum===1?'l':'s'}${_nfsBusca?` (filtro: "${_nfsBusca}")`:''}${somaInfo}`;
   document.getElementById('nfs-pag').innerHTML=`
     <button ${d.page<=1?'disabled':''} onclick="_nfsPage--;loadNfs()">← Anterior</button>
-    <span>Página ${d.page} de ${d.pages}</span>
+    <span>Página ${d.page||1} de ${d.pages||1}</span>
     <button ${d.page>=d.pages?'disabled':''} onclick="_nfsPage++;loadNfs()">Próxima →</button>
     <button onclick="exportarExcel('nfs')" style="margin-left:10px;padding:4px 12px;font-size:10px;border:1px solid #7c3aed;border-radius:5px;background:#f5f3ff;color:#7c3aed;cursor:pointer;font-weight:600">⬇ Excel</button>`;
 }

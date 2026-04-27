@@ -1317,26 +1317,46 @@ router.patch('/parcelas/:id', async (req, res) => {
 
 // ─── NOTAS FISCAIS ───────────────────────────────────────────────
 router.get('/nfs', async (req, res) => {
-  const { cidade, tomador, from, to, aberto, page = 1, limit = 100 } = req.query;
-  let where = '1=1';
-  const params = {};
-  if (cidade) { where += ' AND cidade = @cidade'; params.cidade = cidade; }
-  if (tomador) { where += ' AND tomador = @tomador'; params.tomador = tomador; }
-  if (from) { where += ' AND data_emissao >= @from'; params.from = from; }
-  if (to)   { where += ' AND data_emissao <= @to';   params.to = to; }
-  // aberto=1 → só NFs em aberto (não conciliadas e valor_liquido > 0)
-  if (aberto === '1' || aberto === 'true') {
-    where += ` AND (status_conciliacao IS NULL OR status_conciliacao NOT IN ('CONCILIADO','CONCILIADA','ASSESSORIA'))
-               AND COALESCE(valor_liquido,0) > 0`;
-  }
-  const offset = (parseInt(page) - 1) * parseInt(limit);
-  params.limit = parseInt(limit); params.offset = offset;
+  try {
+    const { cidade, tomador, from, to, aberto, q, page = 1, limit = 100 } = req.query;
+    let where = '1=1';
+    const params = {};
+    if (cidade)  { where += ' AND cidade = @cidade'; params.cidade = cidade; }
+    if (tomador) { where += ' AND tomador = @tomador'; params.tomador = tomador; }
+    if (from)    { where += ' AND data_emissao >= @from'; params.from = from; }
+    if (to)      { where += ' AND data_emissao <= @to';   params.to = to; }
+    // q = busca livre — número da NF, tomador, cidade, contrato
+    if (q && String(q).trim()) {
+      const term = String(q).trim();
+      where += ` AND (
+        CAST(numero AS TEXT) ILIKE @q
+        OR UPPER(COALESCE(tomador,'')) LIKE UPPER(@q)
+        OR UPPER(COALESCE(cidade,'')) LIKE UPPER(@q)
+        OR UPPER(COALESCE(contrato_ref,'')) LIKE UPPER(@q)
+      )`;
+      params.q = '%' + term + '%';
+    }
+    // aberto=1 → só NFs em aberto (não conciliadas e valor_liquido > 0)
+    if (aberto === '1' || aberto === 'true') {
+      where += ` AND (status_conciliacao IS NULL OR status_conciliacao NOT IN ('CONCILIADO','CONCILIADA','ASSESSORIA'))
+                 AND COALESCE(valor_liquido,0) > 0`;
+    }
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    params.limit = parseInt(limit); params.offset = offset;
 
-  const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM notas_fiscais WHERE ${where}`).get(params).cnt;
-  const rows = await req.db.prepare(`SELECT * FROM notas_fiscais WHERE ${where} ORDER BY data_emissao DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
-  // Soma total (útil p/ KPI independente do paginado)
-  const soma = await req.db.prepare(`SELECT COALESCE(SUM(valor_liquido),0) as soma_liq, COALESCE(SUM(valor_bruto),0) as soma_bruto FROM notas_fiscais WHERE ${where}`).get(params);
-  res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows, soma_liquido: soma.soma_liq, soma_bruto: soma.soma_bruto });
+    const totalRow = await req.db.prepare(`SELECT COUNT(*) as cnt FROM notas_fiscais WHERE ${where}`).get(params);
+    const total = (totalRow && totalRow.cnt) || 0;
+    const rowsRaw = await req.db.prepare(`SELECT * FROM notas_fiscais WHERE ${where} ORDER BY data_emissao DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
+    const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+    // Soma total (útil p/ KPI independente do paginado)
+    const soma = await req.db.prepare(`SELECT COALESCE(SUM(valor_liquido),0) as soma_liq, COALESCE(SUM(valor_bruto),0) as soma_bruto FROM notas_fiscais WHERE ${where}`).get(params) || { soma_liq: 0, soma_bruto: 0 };
+    res.json({
+      total, page: parseInt(page),
+      pages: Math.max(1, Math.ceil(total / parseInt(limit))),
+      data: rows,
+      soma_liquido: soma.soma_liq, soma_bruto: soma.soma_bruto,
+    });
+  } catch (e) { errRes(res, e); }
 });
 
 router.delete('/nfs/:id', async (req, res) => {

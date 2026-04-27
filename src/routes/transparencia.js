@@ -238,7 +238,7 @@ router.get('/conciliar', async (req, res) => {
           WHERE ABS(credito - ?) < 0.02
             AND date(data_iso) BETWEEN date(?, '-${tol} days') AND date(?, '+${tol} days')
             AND status_conciliacao != 'CONCILIADO'
-          ORDER BY ABS(credito - ?) ASC, ABS(julianday(data_iso) - julianday(?)) ASC
+          ORDER BY ABS(credito - ?) ASC, ABS((data_iso::date - ?::date)) ASC
           LIMIT 1
         `).get(p.valor_pago, p.data_pagamento, p.data_pagamento, p.valor_pago, p.data_pagamento);
 

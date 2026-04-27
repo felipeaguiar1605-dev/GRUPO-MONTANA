@@ -54,13 +54,13 @@ function lastDayOfMonth(year, month) {
 function calcularSLAs(db) {
   const rows = db.prepare(`
     SELECT tomador,
-           AVG(julianday(data_pagamento) - julianday(data_emissao)) AS dias_medio,
+           AVG((data_pagamento::date - data_emissao::date)) AS dias_medio,
            COUNT(*) AS amostras
     FROM notas_fiscais
     WHERE data_emissao IS NOT NULL
       AND data_pagamento IS NOT NULL
       AND data_pagamento > data_emissao
-      AND (julianday(data_pagamento) - julianday(data_emissao)) BETWEEN 1 AND 365
+      AND ((data_pagamento::date - data_emissao::date)) BETWEEN 1 AND 365
     GROUP BY tomador
   `).all();
   const slaMap = new Map();

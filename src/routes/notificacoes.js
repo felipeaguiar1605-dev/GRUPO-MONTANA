@@ -295,7 +295,7 @@ async function enviarAlertasEmpresa(db, company) {
     reajusteAlertas = await db.prepare(`
       SELECT numContrato, contrato, data_proximo_reajuste, indice_reajuste,
              pct_reajuste_ultimo, valor_mensal_bruto,
-             CAST((julianday(data_proximo_reajuste) - julianday('now')) AS INTEGER) as dias_faltam
+             CAST(((data_proximo_reajuste)::date - CURRENT_DATE::date) AS INTEGER) as dias_faltam
       FROM contratos
       WHERE data_proximo_reajuste IS NOT NULL
         AND data_proximo_reajuste != ''
@@ -363,7 +363,7 @@ router.post('/alertar-reajustes', async (req, res) => {
     const reajustes = await req.db.prepare(`
       SELECT numContrato, contrato, data_proximo_reajuste, indice_reajuste,
              pct_reajuste_ultimo, valor_mensal_bruto,
-             CAST((julianday(data_proximo_reajuste) - julianday('now')) AS INTEGER) as dias_faltam
+             CAST(((data_proximo_reajuste)::date - CURRENT_DATE::date) AS INTEGER) as dias_faltam
       FROM contratos
       WHERE data_proximo_reajuste IS NOT NULL
         AND data_proximo_reajuste != ''
