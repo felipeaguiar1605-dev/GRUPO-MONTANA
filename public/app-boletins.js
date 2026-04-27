@@ -975,11 +975,17 @@ const _BOL_TEMPLATES = {
 function abrirImportarTemplate() {
   const old = document.getElementById('modal-bol-template');
   if (old) old.remove();
-  const empresaAtual = window.currentCompany;
-
+  // Sem filtro por empresa — o backend (POST /boletins/seed-template)
+  // direciona automaticamente pra empresa atual via companyMiddleware.
+  // O campo `empresa` no template é apenas informativo (dica de UX).
+  const empresaAtual = window.currentCompany || '(empresa atual)';
   const opcoes = Object.entries(_BOL_TEMPLATES)
-    .filter(([k, t]) => !t.empresa || t.empresa === empresaAtual)
-    .map(([k, t]) => `<option value="${k}">${t.label}</option>`)
+    .map(([k, t]) => {
+      const aviso = t.empresa && t.empresa !== window.currentCompany
+        ? ` ⚠ desenhado para ${t.empresa}`
+        : '';
+      return `<option value="${k}">${t.label}${aviso}</option>`;
+    })
     .join('');
 
   const modal = document.createElement('div');
