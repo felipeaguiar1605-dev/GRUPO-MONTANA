@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5  # Node 24 (Node 20 deprecated em 16/Set/2026)
 
       - name: Configurar chave SSH
         run: |

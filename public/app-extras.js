@@ -3382,74 +3382,74 @@ function initPisCofinsSeg() {
   }
 }
 
+// Helpers de null-safety (evita "Cannot set properties of null" em DOM ausente)
+function _pcSetText(id, txt)  { const el = document.getElementById(id); if (el) el.textContent = txt; }
+function _pcSetHTML(id, html) { const el = document.getElementById(id); if (el) el.innerHTML   = html; }
+function _pcShow(id, display = 'block') { const el = document.getElementById(id); if (el) el.style.display = display; }
+function _pcHide(id) { _pcShow(id, 'none'); }
+
 async function loadPisCofinsSeg() {
   const anoMes = document.getElementById('pc-mes')?.value;
   if (!anoMes) return;
 
-  document.getElementById('pc-loading').textContent = 'Calculando…';
-  document.getElementById('pc-loading').style.display = 'block';
-  document.getElementById('pc-cards').style.display = 'none';
-  document.getElementById('pc-aviso-nao-aplicavel').style.display = 'none';
+  _pcSetText('pc-loading', 'Calculando…');
+  _pcShow('pc-loading');
+  _pcHide('pc-cards');
+  _pcHide('pc-aviso-nao-aplicavel');
 
   try {
     const data = await api(`/piscofins-seguranca/${anoMes}`);
     if (!data.ok) throw new Error(data.error || 'Erro');
-    _pcDados = data.dados;
+    _pcDados = data.dados || {};
+    const resumo = _pcDados.resumo || {};
 
     // Título + subtítulo dinâmicos por empresa
-    const tituloEl = document.getElementById('pc-titulo');
-    const subEl    = document.getElementById('pc-subtitulo');
-    if (tituloEl) tituloEl.textContent = `💰 Apuração PIS/COFINS — ${_pcDados.empresa_nome_curto || ''}`.trim();
-    if (subEl && _pcDados.aplicavel) {
-      const pct = (v) => (v*100).toLocaleString('pt-BR',{minimumFractionDigits:2});
-      subEl.textContent =
-        `Regime: ${_pcDados.regime} (PIS ${pct(_pcDados.aliq_pis)}% + COFINS ${pct(_pcDados.aliq_cofins)}%) · Base de caixa a partir de jan/2026`;
+    _pcSetText('pc-titulo', `💰 Apuração PIS/COFINS — ${_pcDados.empresa_nome_curto || ''}`.trim());
+    if (_pcDados.aplicavel) {
+      const pct = (v) => (Number(v)*100).toLocaleString('pt-BR',{minimumFractionDigits:2});
+      _pcSetText('pc-subtitulo',
+        `Regime: ${_pcDados.regime} (PIS ${pct(_pcDados.aliq_pis)}% + COFINS ${pct(_pcDados.aliq_cofins)}%) · Base de caixa a partir de jan/2026`);
     }
 
     // Empresas Simples: mostra aviso e não renderiza cards
     if (!_pcDados.aplicavel) {
-      document.getElementById('pc-loading').style.display = 'none';
-      const av = document.getElementById('pc-aviso-nao-aplicavel');
-      av.style.display = 'block';
-      av.textContent = _pcDados.aviso || `${_pcDados.empresa_nome_curto} — ${_pcDados.regime}. PIS/COFINS recolhidos via DAS unificado; apuração separada não se aplica.`;
-      if (subEl) subEl.textContent = `Regime: ${_pcDados.regime}`;
-      document.getElementById('pc-btn-excel').style.display = 'none';
+      _pcHide('pc-loading');
+      _pcShow('pc-aviso-nao-aplicavel');
+      _pcSetText('pc-aviso-nao-aplicavel',
+        _pcDados.aviso || `${_pcDados.empresa_nome_curto || ''} — ${_pcDados.regime || ''}. PIS/COFINS recolhidos via DAS unificado; apuração separada não se aplica.`);
+      _pcSetText('pc-subtitulo', `Regime: ${_pcDados.regime || ''}`);
+      _pcHide('pc-btn-excel');
       return;
     }
 
-    document.getElementById('pc-loading').style.display = 'none';
-    document.getElementById('pc-cards').style.display = 'block';
-    document.getElementById('pc-btn-excel').style.display = '';
+    _pcHide('pc-loading');
+    _pcShow('pc-cards');
+    _pcShow('pc-btn-excel', '');
 
     renderPcKpis(_pcDados);
-    renderPcTabela('tributaveis', _pcDados.tributaveis);
-    renderPcTabela('excluidos',   _pcDados.excluidos);
-    renderPcTabela('nao_tributa', _pcDados.nao_tributa);
-    renderPcTabela('pendentes',   _pcDados.pendentes);
+    renderPcTabela('tributaveis', _pcDados.tributaveis || []);
+    renderPcTabela('excluidos',   _pcDados.excluidos   || []);
+    renderPcTabela('nao_tributa', _pcDados.nao_tributa || []);
+    renderPcTabela('pendentes',   _pcDados.pendentes   || []);
 
     // Atualiza labels dos botões com contagens
-    document.getElementById('pc-tab-tributaveis').textContent =
-      `✅ Tributáveis (${_pcDados.resumo.qtd_tributaveis})`;
-    document.getElementById('pc-tab-excluidos').textContent =
-      `🚫 Excluídos (${_pcDados.resumo.qtd_excluidos})`;
-    document.getElementById('pc-tab-nao_tributa').textContent =
-      `⛔ Não Tributa (${_pcDados.resumo.qtd_nao_tributa})`;
-    document.getElementById('pc-tab-pendentes').textContent =
-      `⚠ Pendentes (${_pcDados.resumo.qtd_pendentes})`;
+    _pcSetText('pc-tab-tributaveis', `✅ Tributáveis (${resumo.qtd_tributaveis || 0})`);
+    _pcSetText('pc-tab-excluidos',   `🚫 Excluídos (${resumo.qtd_excluidos || 0})`);
+    _pcSetText('pc-tab-nao_tributa', `⛔ Não Tributa (${resumo.qtd_nao_tributa || 0})`);
+    _pcSetText('pc-tab-pendentes',   `⚠ Pendentes (${resumo.qtd_pendentes || 0})`);
 
     // Alerta pendentes
-    const alertEl = document.getElementById('pc-alerta-pendentes');
-    if (_pcDados.resumo.tem_pendentes) {
-      alertEl.style.display = 'block';
-      alertEl.textContent =
-        `⚠ ${_pcDados.resumo.qtd_pendentes} crédito(s) sem NF vinculada — verifique no Portal da Transparência e vincule no ERP antes de emitir o DARF.`;
+    if (resumo.tem_pendentes) {
+      _pcShow('pc-alerta-pendentes');
+      _pcSetText('pc-alerta-pendentes',
+        `⚠ ${resumo.qtd_pendentes} crédito(s) sem NF vinculada — verifique no Portal da Transparência e vincule no ERP antes de emitir o DARF.`);
     } else {
-      alertEl.style.display = 'none';
+      _pcHide('pc-alerta-pendentes');
     }
 
     pcShowTab('tributaveis');
   } catch (e) {
-    document.getElementById('pc-loading').textContent = 'Erro: ' + e.message;
+    _pcSetText('pc-loading', 'Erro: ' + (e?.message || e));
   }
 }
 
@@ -3462,12 +3462,12 @@ function renderPcKpis(d) {
     { label: 'Total a Recolher',      val: brl(d.total_darf),      bg: '#d1fae5', bold: true },
     { label: 'Vencimento DARF',       val: d.vencimento,           bg: '#fef3c7' },
   ];
-  document.getElementById('pc-kpis').innerHTML = cards.map(c => `
+  _pcSetHTML('pc-kpis', cards.map(c => `
     <div style="background:${c.bg};border-radius:10px;padding:12px 14px;border:1px solid #e2e8f0">
       <div style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px">${c.label}</div>
       <div style="font-size:${c.bold?'17px':'15px'};font-weight:${c.bold?800:600};color:#0f172a">${c.val}</div>
     </div>
-  `).join('');
+  `).join(''));
 }
 
 const PC_COLS = [
