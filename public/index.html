@@ -153,7 +153,7 @@
       <span class="ng-icon">📑</span><span class="ng-label">Fiscal / Legal</span><span class="ng-chevron">▾</span>
     </div>
     <div class="nav-group-items" style="display:none">
-      <div class="tab" data-tab="pref" onclick="navGo('pref',this)">🏛️ Prefeitura / NFS-e</div>
+      <div class="tab" data-tab="pref" onclick="navGo('pref',this)">🧾 NFS-e</div>
       <div class="tab" data-tab="certidoes" onclick="navGo('certidoes',this)">📋 Certidões</div>
       <div class="tab" data-tab="licitacoes" onclick="navGo('licitacoes',this)">🏛️ Licitações</div>
       <div class="tab" data-tab="piscofins-seg" onclick="navGo('piscofins-seg',this)">💰 PIS/COFINS</div>
@@ -881,43 +881,19 @@
   </div>
 </div>
 
-<!-- Prefeitura de Palmas -->
+<!-- NFS-e (WebISS Palmas) -->
 <div id="pg-pref" class="pg">
-  <div class="kpis" id="pref-kpis"><div class="loading">Carregando dados da Prefeitura</div></div>
 
-  <!-- Sub-tabs -->
+  <!-- Sub-tabs (simplificado em 2026-04: removidas abas de controle de dívidas/Prefeitura) -->
   <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin:10px 0 14px">
-    <div class="pref-stab active" data-stab="gestoes" onclick="showPrefSub('gestoes',this)" style="padding:8px 16px;font-size:11px;font-weight:600;color:#64748b;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px">📋 Gestões/Contratos</div>
-    <div class="pref-stab" data-stab="pgtos" onclick="showPrefSub('pgtos',this)" style="padding:8px 16px;font-size:11px;font-weight:600;color:#64748b;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px">💵 Pagamentos</div>
-    <div class="pref-stab" data-stab="nfs" onclick="showPrefSub('nfs',this)" style="padding:8px 16px;font-size:11px;font-weight:600;color:#64748b;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px">🧾 Notas Fiscais</div>
-    <div class="pref-stab" data-stab="conc" onclick="showPrefSub('conc',this)" style="padding:8px 16px;font-size:11px;font-weight:600;color:#64748b;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px">🔗 Conciliação</div>
+    <div class="pref-stab active" data-stab="nfs" onclick="showPrefSub('nfs',this)" style="padding:8px 16px;font-size:11px;font-weight:600;color:#7c3aed;cursor:pointer;border-bottom:2px solid #7c3aed;margin-bottom:-2px">🧾 Notas Fiscais</div>
     <div class="pref-stab" data-stab="webiss" onclick="showPrefSub('webiss',this)" style="padding:8px 16px;font-size:11px;font-weight:600;color:#64748b;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px">🌐 WebISS</div>
-    <div class="pref-stab" data-stab="transp" onclick="showPrefSub('transp',this)" style="padding:8px 16px;font-size:11px;font-weight:600;color:#0369a1;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px">🏛️ Portal Transparência</div>
   </div>
 
-  <!-- Sub: Gestões -->
-  <div id="pref-sub-gestoes" class="pref-sub active" style="display:block">
-    <div class="tw"><table id="tbl-pref-gestoes"><thead id="pref-gestoes-head"></thead><tbody id="pref-gestoes-body"></tbody></table></div>
-  </div>
-
-  <!-- Sub: Pagamentos -->
-  <div id="pref-sub-pgtos" class="pref-sub" style="display:none">
-    <div class="fbar" id="pref-pgtos-filters"></div>
-    <div class="counter" id="pref-pgtos-counter"></div>
-    <div class="tw" style="max-height:600px;overflow-y:auto"><table id="tbl-pref-pgtos"><thead id="pref-pgtos-head"></thead><tbody id="pref-pgtos-body"></tbody></table></div>
-    <div class="pag" id="pref-pgtos-pag"></div>
-  </div>
-
-  <!-- Sub: NFs -->
-  <div id="pref-sub-nfs" class="pref-sub" style="display:none">
+  <!-- Sub: NFs (default ativa) -->
+  <div id="pref-sub-nfs" class="pref-sub active" style="display:block">
     <div class="counter" id="pref-nfs-counter"></div>
     <div class="tw"><table id="tbl-pref-nfs"><thead id="pref-nfs-head"></thead><tbody id="pref-nfs-body"></tbody></table></div>
-  </div>
-
-  <!-- Sub: Conciliação -->
-  <div id="pref-sub-conc" class="pref-sub" style="display:none">
-    <div class="fbar" id="pref-conc-filters"></div>
-    <div id="pref-conc-content"></div>
   </div>
 
   <!-- Sub: WebISS -->
@@ -957,56 +933,6 @@
         <button onclick="abrirModalEmitirNfse()" style="font-size:11px;padding:6px 16px;border-radius:6px;border:none;background:#d97706;color:#fff;cursor:pointer;font-weight:600">✏️ Emitir NFS-e</button>
       </div>
     </div>
-  </div>
-
-  <!-- Sub: Portal Transparência -->
-  <div id="pref-sub-transp" class="pref-sub" style="display:none">
-
-    <!-- Barra de ações -->
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px">
-      <div style="display:flex;align-items:center;gap:8px">
-        <span style="font-size:11px;font-weight:700;color:#1e40af">🏛️ Portal Transparência — Prefeitura de Palmas</span>
-        <span id="transp-status-badge" style="font-size:10px;padding:2px 8px;border-radius:12px;background:#e2e8f0;color:#64748b">—</span>
-        <button onclick="transpDescobrir()" style="font-size:10px;padding:3px 10px;border-radius:6px;border:1px solid #93c5fd;background:#fff;cursor:pointer;color:#1d4ed8">🔍 Auto-Detectar API</button>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
-        <label style="font-size:11px;color:#64748b">De</label>
-        <input type="date" id="transp-dt-ini" style="font-size:11px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px">
-        <label style="font-size:11px;color:#64748b">Até</label>
-        <input type="date" id="transp-dt-fim" style="font-size:11px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px">
-        <button onclick="transpConsultar()" style="font-size:11px;padding:5px 14px;border-radius:6px;border:none;background:#1d4ed8;color:#fff;cursor:pointer;font-weight:600">📋 Consultar</button>
-        <button onclick="transpImportar()" style="font-size:11px;padding:5px 14px;border-radius:6px;border:none;background:#15803d;color:#fff;cursor:pointer;font-weight:600">📥 Importar</button>
-        <button onclick="transpConciliar()" style="font-size:11px;padding:5px 14px;border-radius:6px;border:none;background:#7c3aed;color:#fff;cursor:pointer;font-weight:600">🔗 Conciliar</button>
-      </div>
-    </div>
-
-    <!-- Aviso de configuração manual -->
-    <div id="transp-aviso-config" style="display:none;background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:11px">
-      <strong style="color:#713f12">⚠ API não detectada automaticamente.</strong>
-      Para configurar manualmente:<br>
-      1. Abra o portal em outra aba e faça uma pesquisa<br>
-      2. Abra DevTools (F12) → Aba Network → filtre por "pesquisar" ou "pagamento"<br>
-      3. Copie a URL da requisição e cole abaixo:<br>
-      <div style="display:flex;gap:6px;margin-top:6px">
-        <input id="transp-url-manual" type="text" placeholder="https://prodata.palmas.to.gov.br/sig/rest/..." style="flex:1;font-size:11px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px">
-        <button onclick="transpConfigurarManual()" style="font-size:11px;padding:5px 12px;border-radius:6px;border:none;background:#d97706;color:#fff;cursor:pointer;font-weight:600">Usar esta URL</button>
-      </div>
-    </div>
-
-    <!-- KPIs -->
-    <div id="transp-kpis" style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap"></div>
-
-    <!-- Mensagem / loading -->
-    <div id="transp-msg" style="font-size:12px;color:#64748b;padding:4px 0"></div>
-
-    <!-- Tabela de pagamentos -->
-    <div class="tw" id="transp-table-wrap" style="display:none;max-height:520px;overflow-y:auto">
-      <table id="tbl-transp" style="width:100%;border-collapse:collapse;font-size:11px">
-        <thead id="transp-head"></thead>
-        <tbody id="transp-body"></tbody>
-      </table>
-    </div>
-    <div class="pag" id="transp-pag"></div>
   </div>
 
   <!-- Modal: Emitir NFS-e -->

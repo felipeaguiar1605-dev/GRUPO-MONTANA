@@ -193,7 +193,7 @@ function showTab(id,el){
   if(id==='pag') loadPagamentos();
   if(id==='desp') loadDespesas();
   if(id==='import'){ loadImportHist(); setTimeout(initDragDrop,100); }
-  if(id==='pref') loadPrefeitura();
+  if(id==='pref') loadPrefNfs();  // antes carregava dashboard de prefeitura; agora só NFS-e
   if(id==='fluxo') loadFluxoProjetado();
   if(id==='usuarios') loadUsuarios();
   // Novos módulos (extras) — também tratados em app-extras.js via override
@@ -2681,112 +2681,19 @@ async function showAReceberContrato(){
   document.getElementById('modal-a-receber').style.display = 'block';
 }
 
-// ─── Prefeitura de Palmas ─────────────────────────────────────
-let _prefPgPage=1, _prefGestao='', _prefAno='', _prefStatus='';
-let _prefConcMes='';
+// ─── NFS-e (WebISS Palmas) ────────────────────────────────────
+// Histórico: era "Prefeitura de Palmas" com sub-abas de controle de dívidas
+// (Gestões, Pagamentos, Conciliação, Portal Transparência). Removidas em
+// 2026-04 a pedido do usuário — escopo reduzido pra apenas a parte fiscal.
 
 function showPrefSub(id, el){
   document.querySelectorAll('.pref-sub').forEach(s=>s.style.display='none');
   document.querySelectorAll('.pref-stab').forEach(t=>{t.style.color='#64748b';t.style.borderBottomColor='transparent'});
-  document.getElementById('pref-sub-'+id).style.display='block';
+  const sub = document.getElementById('pref-sub-'+id);
+  if (sub) sub.style.display='block';
   if(el){el.style.color='#7c3aed';el.style.borderBottomColor='#7c3aed';}
-  if(id==='pgtos') loadPrefPagamentos();
   if(id==='nfs') loadPrefNfs();
-  if(id==='conc') loadPrefConciliacao();
   if(id==='webiss') { initWebissFilters(); checkWebissStatus(); }
-}
-
-async function loadPrefeitura(){
-  const d = await api('/prefeitura/dashboard');
-  const t = d.totais||{};
-  const pctConc = t.total_pgtos>0?((t.recebidos/t.total_pgtos)*100).toFixed(1):0;
-
-  document.getElementById('pref-kpis').innerHTML=`
-    <div class="kpi" style="border-left:4px solid #7c3aed"><div class="kpi-l">🏛️ Total Pagamentos</div><div class="kpi-v" style="color:#7c3aed">${t.total_pgtos||0}</div><div class="kpi-s">ordens bancárias da Prefeitura</div></div>
-    <div class="kpi" style="border-left:4px solid #15803d"><div class="kpi-l">💰 Total Bruto</div><div class="kpi-v green">${brl(t.total_bruto)}</div><div class="kpi-s">valor bruto pago</div></div>
-    <div class="kpi" style="border-left:4px solid #1d4ed8"><div class="kpi-l">📋 Gestões</div><div class="kpi-v blue">${d.gestoes||0}</div><div class="kpi-s">contratos ativos</div></div>
-    <div class="kpi" style="border-left:4px solid #d97706"><div class="kpi-l">🧾 NFs</div><div class="kpi-v amber">${d.nfs||0}</div><div class="kpi-s">notas fiscais</div></div>
-    <div class="kpi" style="border-left:4px solid #15803d"><div class="kpi-l">✅ Recebidos</div><div class="kpi-v green">${t.recebidos||0}</div><div class="kpi-s">${pctConc}% conciliados</div></div>
-    <div class="kpi" style="border-left:4px solid #dc2626"><div class="kpi-l">⏳ Pendentes</div><div class="kpi-v red">${t.pendentes||0}</div><div class="kpi-s">aguardando identificação</div></div>
-  `;
-  loadPrefGestoes();
-}
-
-async function loadPrefGestoes(){
-  const d = await api('/prefeitura/gestoes');
-  document.getElementById('pref-gestoes-head').innerHTML=`<tr>
-    <th>Gestão</th><th>Código</th><th class="r">Total Pago</th><th class="r">Qtd Pgtos</th>
-    <th>Primeiro Pgto</th><th>Último Pgto</th><th>Status</th>
-  </tr>`;
-  document.getElementById('pref-gestoes-body').innerHTML=(d.data||[]).map(r=>{
-    const st = r.status==='ATIVO'?badge('ATIVO','green'):badge(r.status||'—','gray');
-    return `<tr>
-      <td style="font-size:10px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.gestao}">${r.gestao}</td>
-      <td class="mono" style="font-size:10px;color:#7c3aed;font-weight:600">${r.gestao_codigo||''}</td>
-      <td class="r mono green" style="font-weight:700">${brl(r.total_pago)}</td>
-      <td class="r mono" style="color:#475569">${r.qtd_pagamentos}</td>
-      <td style="font-size:10px;color:#64748b">${r.primeiro_pg||''}</td>
-      <td style="font-size:10px;color:#64748b">${r.ultimo_pg||''}</td>
-      <td>${st}</td>
-    </tr>`;
-  }).join('');
-}
-
-let _prefPgFiltersRendered=false;
-async function loadPrefPagamentos(){
-  if(!_prefPgFiltersRendered){
-    const g = await api('/prefeitura/gestoes');
-    const gestOpts = (g.data||[]).map(r=>`<option value="${r.gestao_codigo}">${r.gestao_codigo} — ${(r.gestao||'').substring(0,40)}</option>`).join('');
-    document.getElementById('pref-pgtos-filters').innerHTML=`
-      <div><label>Gestão</label><select id="pf-gestao" onchange="_prefPgPage=1;loadPrefPgData()"><option value="">Todas</option>${gestOpts}</select></div>
-      <div><label>Ano Empenho</label><select id="pf-ano" onchange="_prefPgPage=1;loadPrefPgData()"><option value="">Todos</option><option value="2026">2026</option><option value="2025">2025</option><option value="2024">2024</option></select></div>
-      <div><label>Status</label><select id="pf-status" onchange="_prefPgPage=1;loadPrefPgData()"><option value="">Todos</option><option value="RECEBIDO">Recebido</option><option value="PENDENTE">Pendente</option></select></div>
-    `;
-    _prefPgFiltersRendered=true;
-  }
-  await loadPrefPgData();
-}
-
-async function loadPrefPgData(){
-  const gestao=document.getElementById('pf-gestao')?.value||'';
-  const ano=document.getElementById('pf-ano')?.value||'';
-  const status=document.getElementById('pf-status')?.value||'';
-  let url=`/prefeitura/pagamentos?limit=100&offset=${(_prefPgPage-1)*100}`;
-  if(gestao) url+='&gestao='+encodeURIComponent(gestao);
-  if(ano) url+='&ano='+ano;
-  if(status) url+='&status='+status;
-  const d = await api(url);
-  const pages = Math.ceil((d.total||0)/100)||1;
-  const sm = d.sumario||{};
-  document.getElementById('pref-pgtos-counter').innerHTML=`
-    <span>${d.total} pagamentos</span> ·
-    <span style="color:#15803d;font-weight:700">Bruto: ${brl(sm.bruto)}</span> ·
-    <span style="color:#1d4ed8;font-weight:700">Líquido OB: ${brl(sm.liquido)}</span> ·
-    <span style="color:#d97706;font-weight:700">Retenção: ${brl(sm.ret)}</span>
-  `;
-  document.getElementById('pref-pgtos-head').innerHTML=`<tr>
-    <th>Data Pgto</th><th>Gestão</th><th>Fornecedor</th><th>Ano Emp.</th>
-    <th class="r">Valor Bruto</th><th class="r">Líquido OB</th><th class="r">Retenção</th>
-    <th>NF</th><th>Status</th>
-  </tr>`;
-  document.getElementById('pref-pgtos-body').innerHTML=(d.data||[]).map(r=>{
-    const stBg = r.status_conciliacao==='RECEBIDO'?'green':'amber';
-    return `<tr style="${r.status_conciliacao==='RECEBIDO'?'background:#f0fdf4':''}">
-      <td style="font-size:10px;color:#64748b;white-space:nowrap">${r.data_pagamento||''}</td>
-      <td style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.gestao}">${r.gestao_codigo||''}</td>
-      <td style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.fornecedor}">${(r.fornecedor||'').substring(0,35)}</td>
-      <td class="mono" style="font-size:10px;color:#64748b;text-align:center">${r.ano_empenho||''}</td>
-      <td class="r mono" style="font-weight:600">${brl(r.valor_pago)}</td>
-      <td class="r mono" style="color:#1d4ed8;font-weight:600">${r.valor_liquido_ob?brl(r.valor_liquido_ob):'<span class="muted">—</span>'}</td>
-      <td class="r mono" style="color:#d97706">${r.retencao?brl(r.retencao):'<span class="muted">—</span>'}</td>
-      <td style="font-size:10px;color:#7c3aed;font-weight:600">${r.nf_vinculada||'<span class="muted">—</span>'}</td>
-      <td>${badge(r.status_conciliacao||'PENDENTE',stBg)}</td>
-    </tr>`;
-  }).join('');
-  document.getElementById('pref-pgtos-pag').innerHTML=`
-    <button ${_prefPgPage<=1?'disabled':''} onclick="_prefPgPage--;loadPrefPgData()">← Anterior</button>
-    <span>Página ${_prefPgPage} de ${pages} (${d.total} registros)</span>
-    <button ${_prefPgPage>=pages?'disabled':''} onclick="_prefPgPage++;loadPrefPgData()">Próxima →</button>`;
 }
 
 async function loadPrefNfs(){
@@ -2813,84 +2720,6 @@ async function loadPrefNfs(){
       <td style="font-size:10px;color:#64748b">${r.pagamento_id?'#'+r.pagamento_id:'<span class="muted">—</span>'}</td>
     </tr>`;
   }).join('');
-}
-
-async function loadPrefConciliacao(){
-  document.getElementById('pref-conc-filters').innerHTML=`
-    <div><label>Mês</label>
-      <select id="pc-mes" onchange="loadPrefConcData()">
-        <option value="">Todos</option>
-        <option value="2026-03">Mar/2026</option><option value="2026-02">Fev/2026</option><option value="2026-01">Jan/2026</option>
-        <option value="2025-12">Dez/2025</option><option value="2025-11">Nov/2025</option><option value="2025-10">Out/2025</option>
-        <option value="2025-09">Set/2025</option><option value="2025-08">Ago/2025</option><option value="2025-07">Jul/2025</option>
-        <option value="2025-06">Jun/2025</option><option value="2025-05">Mai/2025</option><option value="2025-04">Abr/2025</option>
-        <option value="2024-12">Dez/2024</option><option value="2024-11">Nov/2024</option><option value="2024-10">Out/2024</option>
-        <option value="2024-09">Set/2024</option><option value="2024-08">Ago/2024</option><option value="2024-07">Jul/2024</option>
-        <option value="2024-06">Jun/2024</option><option value="2024-05">Mai/2024</option><option value="2024-04">Abr/2024</option>
-      </select>
-    </div>
-  `;
-  loadPrefConcData();
-}
-
-async function loadPrefConcData(){
-  const mes = document.getElementById('pc-mes')?.value||'';
-  let url = '/prefeitura/conciliacao';
-  if(mes) url += '?mes='+mes;
-  const d = await api(url);
-  const pgtos = d.pagamentos||[];
-  const nfsLivres = d.nfs_livres||[];
-  const recebidos = pgtos.filter(p=>p.status_conciliacao==='RECEBIDO').length;
-  const pendentes = pgtos.length - recebidos;
-  const totalBruto = pgtos.reduce((s,p)=>s+p.valor_pago,0);
-  const totalLiq = pgtos.filter(p=>p.valor_liquido_ob>0).reduce((s,p)=>s+p.valor_liquido_ob,0);
-
-  let html = `
-    <div class="kpis" style="margin-bottom:14px">
-      <div class="kpi"><div class="kpi-l">Pagamentos</div><div class="kpi-v blue">${pgtos.length}</div></div>
-      <div class="kpi"><div class="kpi-l">Total Bruto</div><div class="kpi-v" style="color:#7c3aed">${brl(totalBruto)}</div></div>
-      <div class="kpi"><div class="kpi-l">Líquido OB</div><div class="kpi-v green">${brl(totalLiq)}</div></div>
-      <div class="kpi"><div class="kpi-l">Recebidos</div><div class="kpi-v green">${recebidos}</div></div>
-      <div class="kpi"><div class="kpi-l">Pendentes</div><div class="kpi-v red">${pendentes}</div></div>
-      <div class="kpi"><div class="kpi-l">NFs Livres</div><div class="kpi-v amber">${nfsLivres.length}</div></div>
-    </div>
-  `;
-
-  html += `<div class="tw" style="max-height:500px;overflow-y:auto"><table>
-    <thead><tr>
-      <th>Data Pgto</th><th>Gestão</th><th class="r">Valor Bruto</th>
-      <th class="r">Líquido OB</th><th>NFs Vinculadas</th><th>Status</th><th>Data OB</th>
-    </tr></thead><tbody>`;
-  pgtos.forEach(p=>{
-    const stBadge = p.status_conciliacao==='RECEBIDO'?badge('RECEBIDO','green'):badge('PENDENTE','amber');
-    const nfs = p.nfs_vinculadas||'';
-    html += `<tr style="${p.status_conciliacao==='RECEBIDO'?'background:#f0fdf4':''}">
-      <td style="font-size:10px;color:#64748b;white-space:nowrap">${p.data_pagamento||''}</td>
-      <td style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${p.gestao}">${p.gestao_codigo||''}</td>
-      <td class="r mono" style="font-weight:600">${brl(p.valor_pago)}</td>
-      <td class="r mono" style="color:#1d4ed8;font-weight:600">${p.valor_liquido_ob?brl(p.valor_liquido_ob):'<span class="muted">—</span>'}</td>
-      <td style="font-size:10px;color:#7c3aed;font-weight:600">${nfs?'NF '+nfs.replace(/,/g,', NF '):'<span class="muted">—</span>'}</td>
-      <td>${stBadge}</td>
-      <td style="font-size:10px;color:#64748b">${p.data_ob||''}</td>
-    </tr>`;
-  });
-  html += '</tbody></table></div>';
-
-  if(nfsLivres.length){
-    html += `<div style="margin-top:16px"><h3 style="font-size:13px;font-weight:700;color:#475569;margin-bottom:8px">🧾 NFs Não Vinculadas (${nfsLivres.length})</h3>
-    <div class="tw"><table>
-      <thead><tr><th>NF</th><th>Cidade</th><th>Gestão</th><th class="r">V. Bruto</th><th class="r">V. Líquido</th><th>Status</th></tr></thead>
-      <tbody>${nfsLivres.map(n=>`<tr>
-        <td class="mono" style="color:#7c3aed;font-weight:600">NF ${n.numero}</td>
-        <td style="font-size:10px;color:#475569">${n.cidade||''}</td>
-        <td style="font-size:10px" title="${n.gestao}">${n.gestao_codigo||''}</td>
-        <td class="r mono" style="font-weight:600">${brl(n.valor_bruto)}</td>
-        <td class="r mono green">${brl(n.valor_liquido)}</td>
-        <td>${badge(n.status||'EMITIDA','amber')}</td>
-      </tr>`).join('')}</tbody>
-    </table></div></div>`;
-  }
-  document.getElementById('pref-conc-content').innerHTML=html;
 }
 
 // ─── Init ────────────────────────────────────────────────────────
