@@ -348,7 +348,7 @@ router.get('/posicao-atual', async (req, res) => {
         SELECT COALESCE(SUM(credito), 0) - COALESCE(SUM(debito), 0) AS saldo,
                MAX(data_iso) AS ultima
           FROM extratos
-         WHERE data_iso <= CURRENT_DATE
+         WHERE data_iso <= to_char(CURRENT_DATE, 'YYYY-MM-DD')
       `).get();
       saldoAtual = parseFloat(r?.saldo || 0);
       ultimaData = r?.ultima || null;
@@ -363,7 +363,7 @@ router.get('/posicao-atual', async (req, res) => {
                COALESCE(SUM(COALESCE(valor_mensal_liquido, valor_mensal_bruto, 0)), 0) AS total
           FROM contratos
          WHERE COALESCE(vigencia_fim,'') = ''
-            OR vigencia_fim >= CURRENT_DATE
+            OR vigencia_fim >= to_char(CURRENT_DATE, 'YYYY-MM-DD')
       `).get();
       projContratos = parseInt(r?.qtd || 0);
       projEntradas  = parseFloat(r?.total || 0);
