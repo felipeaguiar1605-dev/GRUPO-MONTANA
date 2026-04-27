@@ -1012,6 +1012,18 @@ function abrirImportarTemplate() {
         <label style="font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;display:block;margin-bottom:4px">Competência (gera boletim em rascunho)</label>
         <input id="bt-comp" type="month" value="${(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;})()}" style="width:100%;padding:8px;font-size:12px;border:1px solid #cbd5e1;border-radius:6px">
       </div>
+      <div style="margin-bottom:14px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px">
+        <div style="font-size:10px;font-weight:700;color:#c2410c;text-transform:uppercase;margin-bottom:6px">⚠ Opções avançadas (use só se houve duplicação)</div>
+        <label style="font-size:11px;display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:4px">
+          <input type="checkbox" id="bt-reset-postos">
+          <span><strong>Resetar postos + items</strong> antes de importar (apaga estrutura existente do contrato)</span>
+        </label>
+        <label style="font-size:11px;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="bt-reset-boletim">
+          <span><strong>Resetar boletim</strong> da competência (apaga rascunho/aprovado; protege EMITIDA)</span>
+        </label>
+        <div style="font-size:9px;color:#9a3412;margin-top:6px">Ative ambos pra fazer um clean reset desse contrato.</div>
+      </div>
       <div id="bt-result" style="display:none;padding:10px 12px;border-radius:8px;font-size:11px;margin-bottom:10px"></div>
       <div style="display:flex;justify-content:flex-end;gap:8px">
         <button onclick="document.getElementById('modal-bol-template').remove()" style="padding:8px 16px;font-size:12px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;color:#475569;cursor:pointer">Cancelar</button>
@@ -1036,8 +1048,24 @@ async function confirmarImportTemplate() {
   const tpl = _BOL_TEMPLATES[sel.value];
   if (!tpl) return;
   const competencia = compEl.value || null;
+  const resetPostos  = document.getElementById('bt-reset-postos')?.checked || false;
+  const resetBoletim = document.getElementById('bt-reset-boletim')?.checked || false;
 
-  const body = { ...tpl.payload, gerar_boletim_competencia: competencia };
+  // Confirmação extra se reset estiver ativado (perigoso)
+  if (resetPostos || resetBoletim) {
+    const aviso = [
+      resetPostos  && 'apagar TODOS os postos+items existentes do contrato',
+      resetBoletim && `apagar o boletim da competência ${competencia || ''}`,
+    ].filter(Boolean).join(' E ');
+    if (!confirm(`⚠ Você marcou opções de reset.\n\nIsso vai ${aviso}.\n\n(Não apaga boletim com NFS-e EMITIDA — proteção.)\n\nProsseguir?`)) return;
+  }
+
+  const body = {
+    ...tpl.payload,
+    gerar_boletim_competencia: competencia,
+    reset_postos: resetPostos,
+    reset_boletim: resetBoletim,
+  };
   resEl.style.display = 'block';
   resEl.style.background = '#f8fafc';
   resEl.style.color = '#334155';
@@ -1055,8 +1083,11 @@ async function confirmarImportTemplate() {
     resEl.style.background = '#dcfce7';
     resEl.style.color = '#15803d';
     resEl.style.border = '1px solid #86efac';
+    const resetLine = (r.reset && (r.reset.postos_deletados || r.reset.itens_deletados || r.reset.boletim_deletado))
+      ? `<br>🧹 Reset: ${r.reset.postos_deletados} posto(s), ${r.reset.itens_deletados} item(ns)${r.reset.boletim_deletado ? ', boletim apagado' : ''}`
+      : '';
     resEl.innerHTML = `
-      ✅ <strong>Template importado.</strong><br>
+      ✅ <strong>Template importado.</strong>${resetLine}<br>
       Contrato: ${r.contrato_existia_antes ? 'já existia (id=' + r.contrato_id + ')' : 'criado (id=' + r.contrato_id + ')'}<br>
       Postos novos: ${r.postos_criados}, Itens novos: ${r.itens_criados}<br>
       Boletim ${competencia || ''}: ${r.boletim?.status === 'criado' ? '<strong>rascunho criado</strong> (id=' + r.boletim.id + ')' : (r.boletim?.status === 'ja_existia' ? 'já existia' : '—')}

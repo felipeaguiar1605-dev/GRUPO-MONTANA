@@ -237,11 +237,16 @@ router.delete('/itens/:id', async (req, res) => {
 });
 
 // ─── SEED: Importar template de contrato (idempotente) ────────
-// Recebe { contrato: {...}, postos: [{...campos, itens: [...]}], gerar_boletim_competencia?: 'YYYY-MM' }
+// Recebe { contrato: {...}, postos: [{...campos, itens: [...]}], gerar_boletim_competencia?: 'YYYY-MM',
+//          reset_postos?: bool, reset_boletim?: bool }
 // e cria/atualiza tudo. Se já existir, NÃO duplica — só completa o que faltar.
+// Flags reset_postos / reset_boletim deletam o existente antes de recriar
+// (útil quando contrato foi cadastrado antes com estrutura diferente e está
+// duplicando valores no boletim).
 router.post('/seed-template', async (req, res) => {
   try {
-    const { contrato, postos = [], gerar_boletim_competencia } = req.body;
+    const { contrato, postos = [], gerar_boletim_competencia,
+            reset_postos = false, reset_boletim = false } = req.body;
     if (!contrato || !contrato.numero_contrato || !contrato.nome) {
       return res.status(400).json({ error: 'contrato.numero_contrato e contrato.nome obrigatórios' });
     }
@@ -267,6 +272,27 @@ router.post('/seed-template', async (req, res) => {
       contratoId = r.lastInsertRowid;
     } else {
       contratoId = bc.id;
+    }
+
+    // ── RESET (opt-in): limpa postos+items+boletim antes de recriar ──
+    let resetSummary = { postos_deletados: 0, itens_deletados: 0, boletim_deletado: false };
+    if (reset_postos) {
+      const itensRes = await db.prepare(`
+        DELETE FROM bol_itens WHERE posto_id IN (SELECT id FROM bol_postos WHERE contrato_id = ?)
+      `).run(contratoId);
+      const postosRes = await db.prepare(`DELETE FROM bol_postos WHERE contrato_id = ?`).run(contratoId);
+      resetSummary.postos_deletados = postosRes.changes || 0;
+      resetSummary.itens_deletados = itensRes.changes || 0;
+    }
+    if (reset_boletim && gerar_boletim_competencia) {
+      // Não deleta boletim com NFS-e EMITIDA (proteção)
+      const bolExistente = await db.prepare(`
+        SELECT id, nfse_status FROM bol_boletins WHERE contrato_id = ? AND competencia = ?
+      `).get(contratoId, gerar_boletim_competencia);
+      if (bolExistente && bolExistente.nfse_status !== 'EMITIDA') {
+        await db.prepare(`DELETE FROM bol_boletins WHERE id = ?`).run(bolExistente.id);
+        resetSummary.boletim_deletado = true;
+      }
     }
 
     // 2) Postos + Items
@@ -343,6 +369,7 @@ router.post('/seed-template', async (req, res) => {
       ok: true,
       contrato_id: contratoId,
       contrato_existia_antes: !!bc,
+      reset: resetSummary,
       postos_criados: postosCriados,
       itens_criados: itensCriados,
       boletim: { id: boletimId, status: boletimStatus, competencia: gerar_boletim_competencia || null },
