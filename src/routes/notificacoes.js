@@ -214,7 +214,7 @@ router.post('/enviar', async (req, res) => {
 // ─── Função reutilizável exportada para o cron do server.js ──────
 /**
  * enviarAlertasEmpresa(db, company) — verifica alertas e envia email se houver.
- * @param {import('better-sqlite3').Database} db  — instância do banco da empresa
+ * @param {object} db                              — pool PG da empresa (db_pg.js)
  * @param {{ nome, nomeAbrev }} company            — objeto da empresa (de COMPANIES)
  * @returns {Promise<{ enviado: boolean, total: number }>}
  */
