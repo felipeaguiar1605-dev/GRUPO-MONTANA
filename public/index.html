@@ -138,6 +138,7 @@
       <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)" style="display:none">💰 Adimplência por Contrato</div>
       <div class="tab" data-tab="margem-contrato" onclick="navGo('margem-contrato',this);setTimeout(()=>margemContratoInit&&margemContratoInit(),50)">📊 Margem por Contrato</div>
       <div class="tab" data-tab="boletins" onclick="navGo('boletins',this)">📄 Boletins</div>
+      <div class="tab" data-tab="postos-mapa" onclick="navGo('postos-mapa',this)">🗺️ Mapa de Postos</div>
       <div class="tab" data-tab="pag" onclick="navGo('pag',this);setTimeout(()=>compListar&&compListar(),50)">🧾 Comprovantes de Pagamento</div>
       <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
       <div class="tab" data-tab="fluxo" onclick="navGo('fluxo',this)">📈 Fluxo de Caixa</div>
@@ -2145,6 +2146,14 @@
   </div>
 </div>
 
+<div id="pg-postos-mapa" class="pg">
+  <div style="margin-bottom:14px">
+    <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">🗺️ Mapa de Postos Concomitantes</h2>
+    <p style="font-size:11px;color:#94a3b8">Quantos postos de serviço estiveram simultaneamente ativos a cada mês — janela móvel dos últimos 60 meses</p>
+  </div>
+  <div id="pm-content"><div class="loading">Carregando...</div></div>
+</div>
+
 <div id="pg-boletins" class="pg">
   <div style="margin-bottom:14px;display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px">
     <div>
@@ -3791,6 +3800,7 @@
 <script src="/app.js"></script>
 <script src="/app-extras.js"></script>
 <script src="/app-boletins.js"></script>
+<script src="/app-postos-mapa.js"></script>
 <script src="/app-compras-supervisor.js"></script>
 <script src="/app-ia.js"></script>
 <script src="/app-bb.js"></script>
