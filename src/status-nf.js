@@ -129,7 +129,7 @@ const LABELS = {
  *   → só persiste quando triplo-match (CONCILIADO) e recebido > 0
  *   → caso contrário fica NULL e DRE cai no fallback `retencao` declarada
  */
-function recalcularNF(db, nfId) {
+async function recalcularNF(db, nfId) {
   const nf = db.prepare(
     'SELECT id, extrato_id, valor_bruto, status_conciliacao FROM notas_fiscais WHERE id = ?'
   ).get(nfId);
@@ -161,11 +161,11 @@ function recalcularNF(db, nfId) {
   }
 
   try {
-    db.prepare('UPDATE notas_fiscais SET status_conciliacao = ?, retencao_efetiva = ? WHERE id = ?')
+    await db.prepare('UPDATE notas_fiscais SET status_conciliacao = ?, retencao_efetiva = ? WHERE id = ?')
       .run(novoStatus, retEfet, nfId);
   } catch (_) {
     // Coluna retencao_efetiva ainda não migrada — grava só status
-    db.prepare('UPDATE notas_fiscais SET status_conciliacao = ? WHERE id = ?').run(novoStatus, nfId);
+    await db.prepare('UPDATE notas_fiscais SET status_conciliacao = ? WHERE id = ?').run(novoStatus, nfId);
   }
 
   return {

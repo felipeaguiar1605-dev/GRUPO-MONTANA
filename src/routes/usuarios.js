@@ -175,7 +175,7 @@ router.patch('/:id', soAdmin, (req, res) => {
 
 // ─── DELETE /api/usuarios/:id — remover (admin only) ─────────────
 
-router.delete('/:id', soAdmin, (req, res) => {
+router.delete('/:id', soAdmin, async (req, res) => {
   const { id } = req.params;
   ensureTable(req.db);
   const user = req.db.prepare('SELECT * FROM usuarios WHERE id = ?').get(id);
@@ -183,7 +183,7 @@ router.delete('/:id', soAdmin, (req, res) => {
   if (user.usuario === req.usuario.usuario) {
     return res.status(400).json({ error: 'Você não pode remover sua própria conta' });
   }
-  req.db.prepare('DELETE FROM usuarios WHERE id = ?').run(id);
+  await req.db.prepare('DELETE FROM usuarios WHERE id = ?').run(id);
   res.json({ ok: true });
 });
 

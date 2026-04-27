@@ -205,7 +205,7 @@ router.post('/importar', async (req, res) => {
 
 // ─── GET /conciliar — cruza transparência com extratos ───────────────────────
 
-router.get('/conciliar', (req, res) => {
+router.get('/conciliar', async (req, res) => {
   const db = req.db;
   if (!db) return res.status(400).json({ error: 'Empresa não informada' });
 
@@ -228,7 +228,7 @@ router.get('/conciliar', (req, res) => {
       UPDATE transparencia_palmas SET status_conciliacao=?, extrato_id=? WHERE id=?
     `);
 
-    const conciliarTodos = db.transaction(() => {
+    const conciliarTodos = db.transaction(async () => {
       for (const p of pendentes) {
         if (!p.data_pagamento || !p.valor_pago) continue;
 
@@ -243,8 +243,8 @@ router.get('/conciliar', (req, res) => {
         `).get(p.valor_pago, p.data_pagamento, p.data_pagamento, p.valor_pago, p.data_pagamento);
 
         if (match) {
-          updateStatus.run('CONCILIADO', match.id, p.id);
-          db.prepare(`UPDATE extratos SET status_conciliacao='CONCILIADO' WHERE id=?`).run(match.id);
+          await updateStatus.run('CONCILIADO', match.id, p.id);
+          await db.prepare(`UPDATE extratos SET status_conciliacao='CONCILIADO' WHERE id=?`).run(match.id);
           conciliados++;
         }
       }

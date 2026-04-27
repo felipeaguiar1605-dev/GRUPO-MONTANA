@@ -88,8 +88,8 @@ router.patch('/cargos/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete('/cargos/:id', (req, res) => {
-  req.db.prepare('DELETE FROM rh_cargos WHERE id=?').run(req.params.id);
+router.delete('/cargos/:id', async (req, res) => {
+  await req.db.prepare('DELETE FROM rh_cargos WHERE id=?').run(req.params.id);
   res.json({ ok: true });
 });
 
@@ -195,7 +195,7 @@ router.post('/folha', (req, res) => {
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 
-router.post('/folha/:id/calcular', (req, res) => {
+router.post('/folha/:id/calcular', async (req, res) => {
   const folha = req.db.prepare('SELECT * FROM rh_folha WHERE id=?').get(req.params.id);
   if (!folha) return res.status(404).json({ erro: 'Folha não encontrada' });
 
@@ -222,8 +222,8 @@ router.post('/folha/:id/calcular', (req, res) => {
 
   let totalBruto = 0, totalDescontos = 0, totalLiquido = 0;
 
-  const processar = req.db.transaction(() => {
-    req.db.prepare('DELETE FROM rh_folha_itens WHERE folha_id=?').run(folha.id);
+  const processar = req.db.transaction(async () => {
+    await req.db.prepare('DELETE FROM rh_folha_itens WHERE folha_id=?').run(folha.id);
     for (const f of funcionarios) {
       const calc = calcFolhaItem(f);
       calcItem.run(folha.id, f.id, f.salario_base, 30, 0, 0,
