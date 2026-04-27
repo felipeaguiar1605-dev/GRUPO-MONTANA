@@ -139,8 +139,9 @@
       <!-- Faturamento Previsto: sub-aba de Contratos (2026-04). Tab oculta. -->
       <div class="tab" data-tab="faturamento-prev" onclick="navGo('faturamento-prev',this)" style="display:none">📅 Faturamento Previsto</div>
       <div class="tab" data-tab="boletins" onclick="navGo('boletins',this)">📄 Boletins</div>
-      <div class="tab" data-tab="pag" onclick="navGo('pag',this);setTimeout(()=>compListar&&compListar(),50)">🧾 Comprovantes de Pagamento</div>
       <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
+      <!-- Comprovantes de Pagamento virou sub-aba de Despesas (2026-04). Tab oculta mas rota mantida. -->
+      <div class="tab" data-tab="pag" onclick="navGo('pag',this);setTimeout(()=>compListar&&compListar(),50)" style="display:none">🧾 Comprovantes de Pagamento</div>
       <div class="tab" data-tab="conta-vinculada" onclick="navGo('conta-vinculada',this)">🏦 Conta Vinculada</div>
       <div class="tab" data-tab="conciliacao3v" onclick="navGo('conciliacao3v',this)">🔗 Conciliação</div>
       <!-- Conciliação IA virou sub-aba de Conciliação (2026-04). Tab oculta mas rota mantida. -->
@@ -796,6 +797,7 @@
 
 <!-- Comprovantes de Pagamento -->
 <div id="pg-pag" class="pg">
+  <div id="pg-pag__subnav"></div>
   <div class="toolbar" style="margin-bottom:10px">
     <span style="font-size:16px">🧾</span>
     <span class="toolbar-title">COMPROVANTES DE PAGAMENTO</span>
@@ -887,6 +889,7 @@
 
 <!-- Despesas -->
 <div id="pg-desp" class="pg">
+  <div id="pg-desp__subnav"></div>
   <div class="kpis" id="desp-kpis"></div>
   <div id="desp-compensacao"></div>
   <div id="desp-rateio"></div>

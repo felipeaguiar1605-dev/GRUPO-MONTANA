@@ -234,6 +234,10 @@ const _SUBNAV_GRUPO_CONCILIA = [
   { tab: 'conciliacao3v',    label: '📊 3 Vias' },
   { tab: 'concilia-robusta', label: '🧩 IA / Pendentes' },
 ];
+const _SUBNAV_GRUPO_DESPESAS = [
+  { tab: 'desp', label: '💸 Despesas / Contas a Pagar' },
+  { tab: 'pag',  label: '🧾 Comprovantes' },
+];
 const _PAGE_SUBNAVS = {
   nfs:                _SUBNAV_GRUPO_NFS,
   'nf-modelos':       _SUBNAV_GRUPO_NFS,
@@ -245,6 +249,8 @@ const _PAGE_SUBNAVS = {
   'fluxo-proj':       _SUBNAV_GRUPO_CAIXA,
   conciliacao3v:      _SUBNAV_GRUPO_CONCILIA,
   'concilia-robusta': _SUBNAV_GRUPO_CONCILIA,
+  desp:               _SUBNAV_GRUPO_DESPESAS,
+  pag:                _SUBNAV_GRUPO_DESPESAS,
 };
 function _renderPageSubnav(active) {
   const items = _PAGE_SUBNAVS[active];
