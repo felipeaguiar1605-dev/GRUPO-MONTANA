@@ -166,7 +166,7 @@ router.patch('/:id', soAdmin, (req, res) => {
       role       = COALESCE(?, role),
       ativo      = COALESCE(?, ativo),
       lotacao    = COALESCE(?, lotacao),
-      updated_at = datetime('now')
+      updated_at = NOW()
     WHERE id = ?
   `).run(nome ?? null, email ?? null, senhaHash, role ?? null, ativo ?? null, lotacao ?? null, id);
 
@@ -195,7 +195,7 @@ router.post('/:id/reset-senha', soAdmin, (req, res) => {
   const user = req.db.prepare('SELECT id FROM usuarios WHERE id=?').get(id);
   if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
   const hash = bcrypt.hashSync('Montana@2026', 10);
-  req.db.prepare('UPDATE usuarios SET senha_hash=?, updated_at=datetime("now") WHERE id=?').run(hash, id);
+  req.db.prepare('UPDATE usuarios SET senha_hash=?, updated_at=NOW() WHERE id=?').run(hash, id);
   res.json({ ok: true });
 });
 

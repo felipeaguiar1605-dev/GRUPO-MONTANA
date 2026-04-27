@@ -27,7 +27,10 @@ router.get('/smtp', async (req, res) => {
 // PUT /api/notificacoes/smtp
 router.put('/smtp', async (req, res) => {
   const { host, port, user, pass, from, to } = req.body;
-  const upsert = req.db.prepare(`INSERT INTO configuracoes (chave,valor,updated_at) VALUES (@chave,@valor,NOW())`);
+  const upsert = req.db.prepare(`
+    INSERT INTO configuracoes (chave,valor,updated_at) VALUES (@chave,@valor,NOW())
+    ON CONFLICT (chave) DO UPDATE SET valor=EXCLUDED.valor, updated_at=NOW()
+  `);
   const trans = req.db.transaction(async () => {
     if (host !== undefined) upsert.run({ chave:'smtp_host',  valor: host       || '' });
     if (port !== undefined) upsert.run({ chave:'smtp_port',  valor: String(port|| 587) });

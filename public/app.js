@@ -190,6 +190,7 @@ function showTab(id,el){
   if(id==='compras')   window.comprasInit    && window.comprasInit();
   if(id==='supervisor')window.supervisorInit && window.supervisorInit();
   if(id==='painel-pgto') window.painelPgtoInit && window.painelPgtoInit();
+  if(id==='patrimonio')  window.patrimonioInit && window.patrimonioInit();
 }
 
 // ─── Global Period Filter ────────────────────────────────────────

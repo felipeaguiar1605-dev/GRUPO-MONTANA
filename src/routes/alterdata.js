@@ -142,7 +142,7 @@ router.post('/importar-funcionarios', (req, res) => {
            cargo, lotacao, salario_base, status, created_at, updated_at)
         VALUES
           (@matricula, @nome, @cpf, @pis, @data_admissao, @data_demissao,
-           @cargo, @lotacao, @salario_base, @status, datetime('now'), datetime('now'))
+           @cargo, @lotacao, @salario_base, @status, NOW(), NOW())
       `);
       const stmtUpdate  = db.prepare(`
         UPDATE rh_funcionarios SET
@@ -155,7 +155,7 @@ router.post('/importar-funcionarios', (req, res) => {
           lotacao       = @lotacao,
           salario_base  = @salario_base,
           status        = @status,
-          updated_at    = datetime('now')
+          updated_at    = NOW()
         WHERE cpf = @cpf AND cpf != ''
       `);
 

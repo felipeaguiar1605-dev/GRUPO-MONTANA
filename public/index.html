@@ -133,10 +133,13 @@
       <div class="tab" data-tab="nfs" onclick="navGo('nfs',this)">🧾 Notas Fiscais</div>
       <div class="tab" data-tab="cont" onclick="navGo('cont',this)">📋 Contratos</div>
       <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)">💰 Adimplência por Contrato</div>
+      <div class="tab" data-tab="margem-contrato" onclick="navGo('margem-contrato',this);setTimeout(()=>margemContratoInit&&margemContratoInit(),50)">📊 Margem por Contrato</div>
+      <div class="tab" data-tab="patrimonio" onclick="navGo('patrimonio',this)">🏗️ Patrimônio</div>
       <div class="tab" data-tab="pag" onclick="navGo('pag',this);setTimeout(()=>compListar&&compListar(),50)">🧾 Comprovantes de Pagamento</div>
       <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
       <div class="tab" data-tab="fluxo" onclick="navGo('fluxo',this)">📈 Fluxo de Caixa</div>
       <div class="tab" data-tab="fluxo-proj" onclick="navGo('fluxo-proj',this);setTimeout(()=>fcpCarregar&&fcpCarregar(),50)">🔮 Fluxo Projetado</div>
+      <div class="tab" data-tab="caixa-livre" onclick="navGo('caixa-livre',this);setTimeout(()=>window.caixaLivreInit&&window.caixaLivreInit(),50)">💵 Caixa Livre</div>
       <div class="tab" data-tab="conta-vinculada" onclick="navGo('conta-vinculada',this)">🏦 Conta Vinculada</div>
       <div class="tab" data-tab="conciliacao3v" onclick="navGo('conciliacao3v',this)">🔗 Conciliação 3V</div>
       <div class="tab" data-tab="concilia-robusta" onclick="navGo('concilia-robusta',this);setTimeout(()=>crInit&&crInit(),50)">🧩 Conciliação IA</div>
@@ -507,6 +510,238 @@
         </thead>
         <tbody id="pgto-inadim-body">
           <tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px">Carregando…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Margem Real por Contrato -->
+<div id="pg-margem-contrato" class="pg">
+  <div class="toolbar">
+    <span style="font-size:16px">📊</span>
+    <span class="toolbar-title">MARGEM REAL POR CONTRATO</span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+      <label style="font-size:11px;color:#e2e8f0;font-weight:600">Competência</label>
+      <input type="month" id="mc-comp"
+        style="padding:4px 8px;border:1px solid #475569;border-radius:6px;background:#1e293b;color:#e2e8f0;font-size:12px">
+      <button onclick="mcCarregar()"
+        style="background:#3b82f6;color:#fff;border:none;padding:5px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">
+        🔄 Atualizar
+      </button>
+    </div>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="kpis" id="mc-kpis" style="margin-bottom:14px">
+    <div class="kpi"><div class="kpi-v green" id="mc-k-melhor">—</div><div class="kpi-l" id="mc-k-melhor-l">Melhor margem</div></div>
+    <div class="kpi"><div class="kpi-v red"   id="mc-k-pior">—</div><div class="kpi-l" id="mc-k-pior-l">Pior margem</div></div>
+    <div class="kpi"><div class="kpi-v"       id="mc-k-media">—</div><div class="kpi-l">Média do portfólio</div></div>
+    <div class="kpi"><div class="kpi-v"       id="mc-k-total">—</div><div class="kpi-l">Contratos analisados</div></div>
+  </div>
+
+  <!-- Sub-tabs -->
+  <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:14px">
+    <button class="mc-subtab active" data-tab="tabela" onclick="mcSubtab('tabela')"
+      style="padding:6px 18px;border:none;border-bottom:2px solid #3b82f6;background:transparent;font-size:12px;font-weight:700;color:#3b82f6;cursor:pointer;margin-bottom:-2px">
+      📋 Por Contrato
+    </button>
+    <button class="mc-subtab" data-tab="grafico" onclick="mcSubtab('grafico')"
+      style="padding:6px 18px;border:none;border-bottom:2px solid transparent;background:transparent;font-size:12px;font-weight:700;color:#64748b;cursor:pointer;margin-bottom:-2px">
+      📊 Gráfico de Barras
+    </button>
+    <button class="mc-subtab" data-tab="ranking" onclick="mcSubtab('ranking')"
+      style="padding:6px 18px;border:none;border-bottom:2px solid transparent;background:transparent;font-size:12px;font-weight:700;color:#64748b;cursor:pointer;margin-bottom:-2px">
+      🏆 Ranking
+    </button>
+  </div>
+
+  <!-- Aba: Tabela -->
+  <div id="mc-tab-tabela">
+    <div class="tw">
+      <table>
+        <thead>
+          <tr style="font-size:11px">
+            <th>Contrato</th>
+            <th>Tomador</th>
+            <th class="r">Receita</th>
+            <th class="r">Despesas</th>
+            <th class="r">Folha</th>
+            <th class="r">Margem R$</th>
+            <th class="r">Margem %</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="mc-body">
+          <tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px">Selecione a competência e clique em Atualizar</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Diagnóstico de alocação -->
+    <div id="mc-diagnostico" style="margin-top:10px;font-size:10px;color:#64748b"></div>
+
+    <!-- Detalhe inline -->
+    <div id="mc-detalhe-panel" style="display:none;margin-top:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span id="mc-detalhe-title" style="font-size:14px;font-weight:800;color:#0f172a"></span>
+        <button onclick="mcFecharDetalhe()"
+          style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;color:#64748b">
+          ✕ Fechar
+        </button>
+      </div>
+      <div id="mc-detalhe-body"></div>
+    </div>
+  </div>
+
+  <!-- Aba: Gráfico -->
+  <div id="mc-tab-grafico" style="display:none">
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px">
+      <div style="font-size:11px;color:#64748b;margin-bottom:8px">
+        Linha vermelha tracejada = margem mínima saudável (15%).
+        <span style="margin-left:8px">🟢 ≥ 20%</span>
+        <span style="margin-left:6px">🟡 10–20%</span>
+        <span style="margin-left:6px">🔴 &lt; 10%</span>
+      </div>
+      <div id="mc-bars" style="display:flex;flex-direction:column;gap:6px;padding-top:6px"></div>
+    </div>
+  </div>
+
+  <!-- Aba: Ranking -->
+  <div id="mc-tab-ranking" style="display:none">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div style="background:#fff;border:1px solid #d1fae5;border-radius:12px;padding:14px">
+        <div style="font-size:13px;font-weight:800;color:#15803d;margin-bottom:10px">🏆 Top 3 — Mais Rentáveis</div>
+        <div id="mc-rank-top"></div>
+      </div>
+      <div style="background:#fff;border:1px solid #fecaca;border-radius:12px;padding:14px">
+        <div style="font-size:13px;font-weight:800;color:#991b1b;margin-bottom:10px">⚠️ Bottom 3 — Menos Rentáveis</div>
+        <div id="mc-rank-bottom"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Patrimônio (Ativos Fixos + Depreciação) -->
+<div id="pg-patrimonio" class="pg">
+  <div class="toolbar">
+    <span style="font-size:16px">🏗️</span>
+    <span class="toolbar-title">PATRIMÔNIO — ATIVOS FIXOS</span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+      <label style="font-size:11px;color:#e2e8f0;font-weight:600">Competência</label>
+      <input type="month" id="patr-competencia" onchange="patrCarregar()"
+        style="padding:4px 8px;border:1px solid #475569;border-radius:6px;background:#1e293b;color:#e2e8f0;font-size:12px">
+      <button onclick="patrCarregar()"
+        style="background:#3b82f6;color:#fff;border:none;padding:5px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">
+        🔄 Atualizar
+      </button>
+      <button onclick="patrAbrirCadastro()"
+        style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:5px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">
+        ➕ Novo Ativo
+      </button>
+      <button onclick="patrExportarCSV()"
+        style="background:#fef9c3;color:#854d0e;border:1px solid #fde68a;padding:5px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">
+        📥 CSV
+      </button>
+    </div>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="kpis" id="patr-kpis" style="margin-bottom:14px">
+    <div class="kpi"><div class="kpi-v" id="patr-k-total">—</div><div class="kpi-l">Total de Ativos</div></div>
+    <div class="kpi"><div class="kpi-v" id="patr-k-aquisicao">—</div><div class="kpi-l">Valor de Aquisição</div></div>
+    <div class="kpi"><div class="kpi-v green" id="patr-k-atual">—</div><div class="kpi-l">Valor Contábil Atual</div></div>
+    <div class="kpi"><div class="kpi-v" id="patr-k-deprmes" style="color:#0ea5e9">—</div><div class="kpi-l">Depreciação Mensal</div></div>
+  </div>
+
+  <!-- Cards por categoria -->
+  <div id="patr-categorias" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
+
+  <!-- Sub-tabs -->
+  <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:14px">
+    <button class="patr-subtab active" data-tab="ativos" onclick="patrSubtab('ativos')"
+      style="padding:6px 18px;border:none;border-bottom:2px solid #3b82f6;background:transparent;font-size:12px;font-weight:700;color:#3b82f6;cursor:pointer;margin-bottom:-2px">
+      📋 Lista de Ativos
+    </button>
+    <button class="patr-subtab" data-tab="contratos" onclick="patrSubtab('contratos')"
+      style="padding:6px 18px;border:none;border-bottom:2px solid transparent;background:transparent;font-size:12px;font-weight:700;color:#64748b;cursor:pointer;margin-bottom:-2px">
+      📊 Por Contrato
+    </button>
+  </div>
+
+  <!-- Aba: Lista de Ativos -->
+  <div id="patr-tab-ativos">
+    <!-- Filtros -->
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+      <label style="font-size:11px;color:#475569;display:flex;align-items:center;gap:4px">
+        Categoria
+        <select id="patr-f-categoria" onchange="patrFiltrar()" style="padding:4px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:11px">
+          <option value="todos">Todos</option>
+          <option value="Veículo">Veículo</option>
+          <option value="Equipamento">Equipamento</option>
+          <option value="Fardamento">Fardamento</option>
+          <option value="Mobiliário">Mobiliário</option>
+          <option value="TI">TI</option>
+          <option value="Outro">Outro</option>
+        </select>
+      </label>
+      <label style="font-size:11px;color:#475569;display:flex;align-items:center;gap:4px">
+        Status
+        <select id="patr-f-status" onchange="patrFiltrar()" style="padding:4px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:11px">
+          <option value="ativo" selected>Ativos</option>
+          <option value="baixado">Baixados</option>
+          <option value="alienado">Alienados</option>
+          <option value="todos">Todos</option>
+        </select>
+      </label>
+      <label style="font-size:11px;color:#475569;display:flex;align-items:center;gap:4px">
+        Contrato ID
+        <input id="patr-f-contrato" type="number" placeholder="#"
+          onchange="patrFiltrar()" style="padding:4px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:11px;width:80px">
+      </label>
+    </div>
+
+    <div class="tw">
+      <table id="tbl-patr">
+        <thead>
+          <tr style="font-size:11px">
+            <th>Descrição</th>
+            <th>Categoria</th>
+            <th>Contrato</th>
+            <th>Aquisição</th>
+            <th class="r">Valor Atual</th>
+            <th class="r">Depr/Mês</th>
+            <th>% Depreciado</th>
+            <th class="r">Vida Rest.</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="patr-body">
+          <tr><td colspan="9" style="text-align:center;color:#94a3b8;padding:24px">Carregando…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Aba: Por Contrato -->
+  <div id="patr-tab-contratos" style="display:none">
+    <div style="font-size:11px;color:#64748b;margin-bottom:10px">
+      Depreciação mensal alocada por contrato — competência <b id="patr-comp-label-extra"></b>.
+      Integração com o módulo Margem por Contrato (rateio de custos fixos).
+    </div>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr style="font-size:11px">
+            <th>Contrato</th>
+            <th class="r">Qtd Ativos</th>
+            <th class="r">Valor Aquisição</th>
+            <th class="r">Valor Atual</th>
+            <th class="r">Depreciação Mensal</th>
+          </tr>
+        </thead>
+        <tbody id="patr-contratos-body">
+          <tr><td colspan="5" style="text-align:center;padding:14px;color:#94a3b8">Carregando…</td></tr>
         </tbody>
       </table>
     </div>
@@ -3527,6 +3762,45 @@
   <div id="ia-drive-results" style="flex:1;padding:8px 12px;overflow-y:auto"></div>
 </div>
 
+<!-- 💵 Caixa Livre Consolidado -->
+<div id="pg-caixa-livre" class="pg">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div>
+      <h2 style="margin:0;font-size:18px;color:#1e293b;font-weight:800">💵 Caixa Livre Consolidado</h2>
+      <div style="font-size:11px;color:#64748b;margin-top:2px">Visão do dinheiro real disponível por empresa e do grupo — entradas menos folha, despesas e impostos estimados.</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:12px;color:#64748b">Empresa:</label>
+      <select id="cl-empresa" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;background:#fff">
+        <option value="assessoria">🏢 Assessoria</option>
+        <option value="seguranca">🔒 Segurança</option>
+        <option value="portodovau">🛡️ Porto do Vau</option>
+        <option value="mustang">🐎 Mustang</option>
+        <option value="__grupo__">🏛️ Todas — Consolidado</option>
+      </select>
+      <label style="font-size:12px;color:#64748b">Período:</label>
+      <select id="cl-meses" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;background:#fff">
+        <option value="3">3 meses</option>
+        <option value="6" selected>6 meses</option>
+        <option value="12">12 meses</option>
+      </select>
+      <button onclick="window.caixaLivreCarregar&&caixaLivreCarregar()" style="padding:6px 14px;background:#3b82f6;color:#fff;border:0;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">🔄 Atualizar</button>
+    </div>
+  </div>
+  <style>
+    #pg-caixa-livre .cl-margem-bom   td { background:#f0fdf4 }
+    #pg-caixa-livre .cl-margem-medio td { background:#fffbeb }
+    #pg-caixa-livre .cl-margem-ruim  td { background:#fef2f2 }
+    #pg-caixa-livre .tw table { width:100%; border-collapse:collapse; font-size:12px }
+    #pg-caixa-livre .tw th,
+    #pg-caixa-livre .tw td { padding:8px 10px; border-bottom:1px solid #f1f5f9; text-align:left }
+    #pg-caixa-livre .tw th { background:#f8fafc; color:#475569; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.4px }
+    #pg-caixa-livre .tw .r { text-align:right }
+    #pg-caixa-livre .tw .mono { font-variant-numeric:tabular-nums; font-feature-settings:"tnum" }
+  </style>
+  <div id="cl-body"><div class="loading" style="padding:30px;text-align:center;color:#94a3b8">Selecione uma empresa para carregar o caixa livre.</div></div>
+</div>
+
 <script src="/app.js"></script>
 <script src="/app-extras.js"></script>
 <script src="/app-boletins.js"></script>
@@ -3535,7 +3809,10 @@
 <script src="/app-bb.js"></script>
 <script src="/app-concilia-robusta.js"></script>
 <script src="/app-pagamentos-contrato.js"></script>
+<script src="/app-margem-contrato.js"></script>
+<script src="/app-patrimonio.js"></script>
 <script src="/app-comprovantes.js"></script>
 <script src="/app-ciclo.js"></script>
+<script src="/app-caixa-livre.js"></script>
 </body>
 </html>

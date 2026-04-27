@@ -115,7 +115,7 @@ router.post('/pedidos', async (req, res) => {
   `);
 
   let imported = 0;
-  req.db.transaction(async () => {
+  await req.db.transaction(async () => {
     for (const p of pedidos) {
       const dept = (p.departamento || '').toUpperCase().trim();
       ins.run({
@@ -197,7 +197,7 @@ router.post('/funcionarios', async (req, res) => {
   `);
 
   let imported = 0;
-  req.db.transaction(async () => {
+  await req.db.transaction(async () => {
     for (const f of funcionarios) {
       const dept = (f.departamento || '').toUpperCase().trim();
       ins.run({
@@ -274,7 +274,7 @@ router.post('/auto-categorizar', async (req, res) => {
   let categorizados = 0;
   const detalhes = [];
 
-  req.db.transaction(async () => {
+  await req.db.transaction(async () => {
     for (const deb of debitos) {
       const comp = deb.data_iso.substring(0, 7);
       // Tenta casar com pedido Volus do mesmo mês pelo valor

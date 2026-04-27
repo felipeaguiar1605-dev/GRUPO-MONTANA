@@ -218,7 +218,7 @@ router.post('/vincular', async (req, res) => {
       const tag = `manual NFs:${nf_ids.join(',')}`;
       updExt.run(tag, tag, ext.id);
     });
-    trx();
+    await trx();
     res.json({ ok: true, vinculadas: nf_ids.length, status: statusResults });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -238,7 +238,7 @@ router.post('/desvincular', async (req, res) => {
       e; await db.prepare(`UPDATE extratos SET status_conciliacao='PENDENTE', obs='' WHERE id = ?`).run(extrato_id);
       for (const { id } of nfRows) recalcularNF(e.db, id);
     });
-    trx();
+    await trx();
     res.json({ ok: true, nfs_recalculadas: nfRows.length });
   } catch (err) {
     res.status(500).json({ error: err.message });

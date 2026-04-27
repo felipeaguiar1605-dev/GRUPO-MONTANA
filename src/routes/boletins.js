@@ -1270,7 +1270,7 @@ router.post('/gerar-mes', async (req, res) => {
         criados++;
       }
     });
-    criar();
+    await criar();
 
     res.json({ ok: true, mes, criados, existentes, total: contratos.length });
   } catch (err) {

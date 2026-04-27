@@ -105,7 +105,7 @@ function ensureTable(db) {
       extrato_id       INTEGER REFERENCES extratos(id),
       status_conciliacao TEXT DEFAULT 'PENDENTE',
       raw              TEXT,
-      created_at       TEXT DEFAULT (datetime('now'))
+      created_at       TIMESTAMP DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_transp_data ON transparencia_palmas(data_pagamento);
     CREATE INDEX IF NOT EXISTS idx_transp_valor ON transparencia_palmas(valor_pago);

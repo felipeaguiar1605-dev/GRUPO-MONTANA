@@ -40,7 +40,7 @@ function parseBothFormats(comp) {
 }
 
 async function calcNFs(db, p) {
-  const nfs = await db.prepare(`
+  const nfsRaw = await db.prepare(`
     SELECT id, numero, data_emissao, competencia, tomador, cnpj_tomador,
            valor_bruto, inss, ir, iss, retencao, valor_liquido, status_conciliacao
     FROM notas_fiscais
@@ -48,6 +48,7 @@ async function calcNFs(db, p) {
     ORDER BY tomador, data_emissao, numero
   `).all(p.novo, p.antigo);
 
+  const nfs = Array.isArray(nfsRaw) ? nfsRaw : [];
   let total_bruto = 0, total_inss = 0, total_esperado = 0;
   const tomadoresMap = {};
 
@@ -107,13 +108,14 @@ async function calcNFs(db, p) {
 router.get('/competencias', async (req, res) => {
   try {
     const db   = req.db;
-    const rows = await db.prepare(`
+    const rowsRaw = await db.prepare(`
       SELECT DISTINCT competencia, COUNT(*) cnt
       FROM notas_fiscais
       WHERE competencia IS NOT NULL AND competencia != ''
       GROUP BY competencia
     `).all();
 
+    const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
     const seen   = new Set();
     const result = [];
     for (const r of rows) {
@@ -144,7 +146,8 @@ router.get('/apuracao', async (req, res) => {
     const cfgRow            = await db.prepare(`SELECT valor FROM configuracoes WHERE chave = ?`).get(cfgKey);
     const dctfweb_declarado = cfgRow ? parseFloat(cfgRow.valor) || 0 : 0;
 
-    const { nfs, por_tomador, total_bruto, total_inss, total_esperado } = calcNFs(db, p);
+    const { nfs, por_tomador, total_bruto, total_inss, total_esperado } = await calcNFs(db, p);
+    const nfsArr = Array.isArray(nfs) ? nfs : [];
 
     const gap = +Number(total_inss - dctfweb_declarado).toFixed(2);
 
@@ -152,9 +155,9 @@ router.get('/apuracao', async (req, res) => {
       ok: true,
       competencia:     p.label,
       competencia_iso: p.novo,
-      nfs,
+      nfs: nfsArr,
       resumo: {
-        total_nfs:                nfs.length,
+        total_nfs:                nfsArr.length,
         total_bruto,
         total_inss_declarado:     total_inss,
         total_inss_esperado_11pct: total_esperado,
@@ -182,6 +185,7 @@ router.post('/dctfweb', async (req, res) => {
     await db.prepare(`
       INSERT INTO configuracoes (chave, valor, updated_at)
       VALUES (?, ?, NOW())
+      ON CONFLICT (chave) DO UPDATE SET valor=EXCLUDED.valor, updated_at=NOW()
     `).run(`inss_dctfweb_${p.novo}`, String(v));
 
     res.json({ ok: true, competencia: p.novo, valor: v });
@@ -202,7 +206,8 @@ router.get('/relatorio', async (req, res) => {
     const cfgRow            = await db.prepare(`SELECT valor FROM configuracoes WHERE chave = ?`).get(`inss_dctfweb_${p.novo}`);
     const dctfweb_declarado = cfgRow ? parseFloat(cfgRow.valor) || 0 : 0;
 
-    const { nfs, por_tomador, total_bruto, total_inss } = calcNFs(db, p);
+    const { nfs, por_tomador, total_bruto, total_inss } = await calcNFs(db, p);
+    const nfsArr = Array.isArray(nfs) ? nfs : [];
     const rr = v => +Number(v).toFixed(2);
 
     res.json({
@@ -213,13 +218,13 @@ router.get('/relatorio', async (req, res) => {
       regime:            'Lucro Real',
       competencia:       p.label,
       competencia_iso:   p.novo,
-      total_nfs:         nfs.length,
+      total_nfs:         nfsArr.length,
       total_bruto,
       total_inss,
       dctfweb_declarado,
       gap:               rr(total_inss - dctfweb_declarado),
-      por_tomador,
-      nfs,
+      por_tomador:       Array.isArray(por_tomador) ? por_tomador : [],
+      nfs:               nfsArr,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

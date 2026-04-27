@@ -141,6 +141,15 @@ app.use('/api/inss-retido', require('./routes/inss-retido'));
 // ─── Painel de Pagamentos por Contrato ───────────────────────
 app.use('/api/pagamentos-contrato', require('./routes/pagamentos-contrato'));
 
+// ─── Margem Real por Contrato ────────────────────────────────
+app.use('/api/margem-contrato', require('./routes/margem-contrato'));
+
+// ─── Patrimônio (Ativos Fixos + Depreciação) ─────────────────
+app.use('/api/patrimonio', require('./routes/patrimonio'));
+
+// ─── Caixa Livre Consolidado (KPI por empresa + grupo) ───────
+app.use('/api/caixa-livre', require('./routes/caixa-livre'));
+
 // ─── Diagnóstico Noturno ──────────────────────────────────────
 app.get('/api/diagnostico/ultimo', (req, res) => {
   const diagFile = path.join(__dirname, '..', 'data', 'diagnostico_noturno.json');
@@ -400,7 +409,7 @@ try {
       try {
         const db = getDb(key);
 
-        db.prepare(`CREATE TABLE IF NOT EXISTS apuracao_mensal (
+        await db.prepare(`CREATE TABLE IF NOT EXISTS apuracao_mensal (
           id BIGSERIAL PRIMARY KEY,
           competencia TEXT UNIQUE,
           receita_bruta REAL DEFAULT 0,
@@ -408,7 +417,6 @@ try {
           receita_liquida REAL DEFAULT 0,
           despesas_total REAL DEFAULT 0,
           resultado REAL DEFAULT 0,
-          qtd_nfs
           qtd_nfs INTEGER DEFAULT 0,
           pis_a_pagar REAL DEFAULT 0,
           cofins_a_pagar REAL DEFAULT 0,
@@ -418,8 +426,8 @@ try {
           obs TEXT
         )`).run();
 
-        const receita  = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) total, COALESCE(SUM(retencao),0) ret, COUNT(*) qtd, COALESCE(SUM(pis),0) pis, COALESCE(SUM(cofins),0) cofins FROM notas_fiscais WHERE data_emissao BETWEEN ? AND ?`).get(from, to);
-        const despesas = db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) total FROM despesas WHERE data_iso BETWEEN ? AND ?`).get(from, to);
+        const receita  = await db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) total, COALESCE(SUM(retencao),0) ret, COUNT(*) qtd, COALESCE(SUM(pis),0) pis, COALESCE(SUM(cofins),0) cofins FROM notas_fiscais WHERE data_emissao BETWEEN ? AND ?`).get(from, to);
+        const despesas = await db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) total FROM despesas WHERE data_iso BETWEEN ? AND ?`).get(from, to);
 
         const recBruta  = receita.total || 0;
         const retencoes = receita.ret || 0;
@@ -432,10 +440,22 @@ try {
         const irpjEstimado = Math.max(+(lucroPresumido * 0.15).toFixed(2), 0);
         const csllEstimado = Math.max(+(recBruta * 0.32 * 0.09).toFixed(2), 0);
 
-        db.prepare(`INSERT OR REPLACE INTO apuracao_mensal
+        await db.prepare(`INSERT INTO apuracao_mensal
           (competencia, receita_bruta, retencoes, receita_liquida, despesas_total,
            resultado, qtd_nfs, pis_a_pagar, cofins_a_pagar, irpj_estimado, csll_estimado)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (competencia) DO UPDATE SET
+            receita_bruta   = EXCLUDED.receita_bruta,
+            retencoes       = EXCLUDED.retencoes,
+            receita_liquida = EXCLUDED.receita_liquida,
+            despesas_total  = EXCLUDED.despesas_total,
+            resultado       = EXCLUDED.resultado,
+            qtd_nfs         = EXCLUDED.qtd_nfs,
+            pis_a_pagar     = EXCLUDED.pis_a_pagar,
+            cofins_a_pagar  = EXCLUDED.cofins_a_pagar,
+            irpj_estimado   = EXCLUDED.irpj_estimado,
+            csll_estimado   = EXCLUDED.csll_estimado,
+            gerado_em       = NOW()
         `).run(comp, recBruta, retencoes, recLiq, despesas.total || 0,
                resultado, receita.qtd || 0, pisAPagar, cofinsAPagar, irpjEstimado, csllEstimado);
 

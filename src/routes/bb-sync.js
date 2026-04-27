@@ -348,7 +348,7 @@ async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim, co
       let lista = data.listaLancamento || data.lancamentos || data.data || [];
       if (!Array.isArray(lista)) lista = Object.values(lista);
 
-      db.transaction(async () => {
+      await db.transaction(async () => {
         for (const l of lista) {
           if (!isLancamentoReal(l)) { skipped++; continue; }
           const ext = lancamentoToExtrato(l);

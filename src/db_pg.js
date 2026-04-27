@@ -28,7 +28,20 @@ const PG_CONF = {
 };
 
 // ── Conversão SQL: SQLite → PostgreSQL ──────────────────────────
+// IMPORTANTE: INSERT OR REPLACE NÃO é mais convertido automaticamente.
+// A semântica anterior (→ ON CONFLICT DO NOTHING) era oposta à esperada
+// e causava perda silenciosa de updates. Cada caso deve ser convertido
+// manualmente para `ON CONFLICT (col) DO UPDATE SET ...`.
 function convertSql(sql) {
+  // P0: detecta INSERT OR REPLACE residual e dispara erro claro
+  if (/INSERT\s+OR\s+REPLACE/i.test(sql)) {
+    const trecho = sql.replace(/\s+/g, ' ').slice(0, 200);
+    throw new Error(
+      `[db_pg] INSERT OR REPLACE não é suportado no PostgreSQL. ` +
+      `Converta manualmente para "ON CONFLICT (coluna) DO UPDATE SET ...". ` +
+      `Trecho: ${trecho}`
+    );
+  }
   return sql
     // datetime('now') e datetime("now") → NOW()
     .replace(/datetime\(['"']now['"']\)/gi, 'NOW()')
@@ -37,13 +50,10 @@ function convertSql(sql) {
     .replace(/strftime\s*\(\s*'%Y'\s*,\s*/gi,    "to_char(")
     .replace(/strftime\s*\(\s*'%m'\s*,\s*/gi,    "to_char(")
     .replace(/strftime\s*\(\s*'%d'\s*,\s*/gi,    "to_char(")
-    // Corrige o segundo argumento do to_char (não tem o formato ainda)
-    // INSERT OR IGNORE INTO → INSERT INTO ... ON CONFLICT DO NOTHING
+    // INSERT OR IGNORE INTO → INSERT INTO (+ ON CONFLICT DO NOTHING via finalizeInsert)
     .replace(/INSERT\s+OR\s+IGNORE\s+INTO/gi, 'INSERT INTO')
-    .replace(/INSERT\s+OR\s+REPLACE\s+INTO/gi, 'INSERT INTO')
     // AUTOINCREMENT → (PG usa SERIAL/BIGSERIAL no schema, ignorar em queries)
     .replace(/AUTOINCREMENT/gi, '')
-    // Tipo INTEGER PRIMARY KEY → já tratado no schema
     // PRAGMA → ignorar (não deve aparecer em queries runtime)
     .replace(/PRAGMA\s+\w+\s*=\s*\w+;?/gi, '')
     // Trim extra spaces
@@ -107,10 +117,12 @@ function buildQuery(rawSql, params) {
 }
 
 // ── Adiciona ON CONFLICT DO NOTHING se foi INSERT OR IGNORE ─────
+// NOTA: INSERT OR REPLACE foi removido daqui — a semântica DO NOTHING
+// era oposta à do SQLite e causava perda de updates. Os calls residuais
+// passam a falhar em convertSql() com mensagem explicativa.
 function finalizeInsert(sql, rawSql) {
   const wasIgnore = /INSERT\s+OR\s+IGNORE/i.test(rawSql);
-  const wasReplace = /INSERT\s+OR\s+REPLACE/i.test(rawSql);
-  if ((wasIgnore || wasReplace) && !/ON CONFLICT/i.test(sql)) {
+  if (wasIgnore && !/ON CONFLICT/i.test(sql)) {
     return sql + ' ON CONFLICT DO NOTHING';
   }
   return sql;
@@ -133,9 +145,18 @@ class PgDb {
     const exec = this._exec;
     const self = this;
 
+    // Compat better-sqlite3: aceita varargs .get(a, b, c) e converte para array.
+    // Mantém comportamento existente para 0 ou 1 argumento (escalar/array/object).
+    const normalizeArgs = (args) => {
+      if (args.length === 0) return undefined;
+      if (args.length === 1) return args[0];
+      return args; // varargs → trata como array posicional
+    };
+
     return {
       /** SELECT que retorna 1 linha (ou null) */
-      async get(params) {
+      async get(...args) {
+        const params = normalizeArgs(args);
         const { sql, values } = buildQuery(rawSql, params);
         try {
           const res = await exec.query(sql, values);
@@ -147,7 +168,8 @@ class PgDb {
       },
 
       /** SELECT que retorna todas as linhas */
-      async all(params) {
+      async all(...args) {
+        const params = normalizeArgs(args);
         const { sql, values } = buildQuery(rawSql, params);
         try {
           const res = await exec.query(sql, values);
@@ -159,7 +181,8 @@ class PgDb {
       },
 
       /** INSERT / UPDATE / DELETE */
-      async run(params) {
+      async run(...args) {
+        const params = normalizeArgs(args);
         let { sql, values } = buildQuery(rawSql, params);
         sql = finalizeInsert(sql, rawSql);
 
@@ -247,6 +270,10 @@ function _logQueryError(e, sql, values) {
 }
 
 // ── Factory: retorna PgDb por empresa ───────────────────────────
+const SAFE_DATE_DDL = `CREATE OR REPLACE FUNCTION safe_date(txt TEXT) RETURNS DATE AS $$
+BEGIN RETURN txt::DATE; EXCEPTION WHEN OTHERS THEN RETURN NULL; END;
+$$ LANGUAGE plpgsql IMMUTABLE`;
+
 function getDb(companyKey) {
   if (!COMPANIES[companyKey]) throw new Error('Empresa desconhecida: ' + companyKey);
   if (_pools.has(companyKey)) return _pools.get(companyKey);
@@ -263,6 +290,12 @@ function getDb(companyKey) {
 
   pool.on('connect', () => {
     // já configurado via options no connect string
+  });
+
+  // Cria a função safe_date() no schema da empresa (idempotente).
+  // Substitui a builtin do SQLite usada em 10+ queries (segura contra strings inválidas).
+  pool.query(SAFE_DATE_DDL).catch(e => {
+    console.error(`[db_pg][${companyKey}] safe_date init falhou:`, e.message);
   });
 
   const db = new PgDb(companyKey, pool);

@@ -1455,7 +1455,7 @@ router.post('/nfs/auto-vincular', async (req, res) => {
       WHERE id = @id
     `);
 
-    req.db.transaction(async () => {
+    await req.db.transaction(async () => {
       for (const regra of REGRAS) {
         let where = `tomador LIKE @like`;
         const params = { like: regra.like };
@@ -1859,14 +1859,14 @@ router.get('/relatorios/lucro-por-contrato', async (req, res) => {
     SELECT n.contrato_ref, substr(n.data_emissao,1,7) as mes,
            COALESCE(SUM(n.valor_bruto),0) as receita,
            0 as despesa
-    FROM notas_fiscais n WHERE n.data_emissao >= CURRENT_DATE + INTERVAL '-6 months' AND n.contrato_ref != ''
+    FROM notas_fiscais n WHERE n.data_emissao >= CURRENT_DATE - INTERVAL '6 months' AND n.contrato_ref != ''
     GROUP BY n.contrato_ref, substr(n.data_emissao,1,7)
     ORDER BY mes
   `).all();
   const despMensal = await req.db.prepare(`
     SELECT d.contrato_ref, substr(d.data_iso,1,7) as mes,
            COALESCE(SUM(d.valor_bruto),0) as despesa
-    FROM despesas d WHERE d.data_iso >= CURRENT_DATE + INTERVAL '-6 months' AND d.contrato_ref != ''
+    FROM despesas d WHERE d.data_iso >= CURRENT_DATE - INTERVAL '6 months' AND d.contrato_ref != ''
     GROUP BY d.contrato_ref, substr(d.data_iso,1,7)
   `).all();
 
@@ -2913,7 +2913,7 @@ router.post('/import/ofx', (req, res, next) => getUpload(req).single("file")(req
       "VALUES (@id, @mes, @data, @data_iso, @tipo, @historico, @debito, @credito, 'PENDENTE')"
     );
     let imported = 0, skipped = 0;
-    req.db.transaction(async () => {
+    await req.db.transaction(async () => {
       for (const t of txs) {
         const [y, m, d] = t.data_iso.split('-').map(Number);
         const r = ins.run({
@@ -3090,7 +3090,7 @@ ${amostra}`,
       VALUES (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito, 'PENDENTE')
     `);
     let imported = 0, skipped = 0;
-    req.db.transaction(async () => {
+    await req.db.transaction(async () => {
       for (const t of txs) {
         const r = ins.run({
           mes:      t.data.mes,
@@ -3280,13 +3280,13 @@ router.get('/fluxo-projetado', async (req, res) => {
     const despMedia = req.db.prepare(
       "SELECT COALESCE(AVG(mensal),0) as media FROM (" +
         "SELECT to_char(safe_date(data_iso), 'YYYY-MM') as mes, SUM(valor_bruto) as mensal " +
-        "FROM despesas WHERE data_iso >= CURRENT_DATE + INTERVAL '-3 months' AND data_iso != '' " +
+        "FROM despesas WHERE data_iso >= CURRENT_DATE - INTERVAL '3 months' AND data_iso != '' " +
         "GROUP BY to_char(safe_date(data_iso), 'YYYY-MM') ORDER BY mes DESC LIMIT 3)"
     ).get().media || 0;
 
     const extR = req.db.prepare(
       "SELECT COUNT(CASE WHEN credito > 0 AND status_conciliacao IN ('PENDENTE','A_IDENTIFICAR','') THEN 1 END) as pendentes, " +
-      "COUNT(CASE WHEN credito > 0 THEN 1 END) as total FROM extratos WHERE data_iso >= CURRENT_DATE + INTERVAL '-3 months'"
+      "COUNT(CASE WHEN credito > 0 THEN 1 END) as total FROM extratos WHERE data_iso >= CURRENT_DATE - INTERVAL '3 months'"
     ).get();
     const pctInadimplencia = extR.total > 0 ? +((extR.pendentes / extR.total) * 100).toFixed(1) : 0;
 
@@ -3350,7 +3350,7 @@ router.get('/fluxo-parcelas', async (req, res) => {
     const despMedia = await req.db.prepare(`
       SELECT COALESCE(AVG(mensal), 0) as media FROM (
         SELECT SUM(valor_bruto) as mensal FROM despesas
-        WHERE data_iso >= CURRENT_DATE + INTERVAL '-3 months' AND data_iso != ''
+        WHERE data_iso >= CURRENT_DATE - INTERVAL '3 months' AND data_iso != ''
         GROUP BY to_char(safe_date(data_iso), 'YYYY-MM') ORDER BY 1 DESC LIMIT 3
       )
     `).get().media || 0;
@@ -4407,7 +4407,7 @@ router.post('/extratos/classificar-todos', async (req, res) => {
       }
     });
 
-    updateMany();
+    await updateMany();
 
     // Resumo pós-classificação
     const contagens = await db.prepare(`

@@ -151,7 +151,7 @@ router.patch('/funcionarios/:id', (req, res) => {
       nome=?,cpf=?,rg=?,data_nascimento=?,data_admissao=?,data_demissao=?,cargo_id=?,
       contrato_ref=?,lotacao=?,salario_base=?,status=?,pis=?,ctps_numero=?,ctps_serie=?,
       banco=?,agencia=?,conta_banco=?,tipo_conta=?,email=?,telefone=?,obs=?,
-      updated_at=datetime('now')
+      updated_at=NOW()
     WHERE id=?
   `).run(nome,cpf||'',rg||'',data_nascimento||'',data_admissao,data_demissao||'',cargo_id||null,
          contrato_ref||'',lotacao||'',salario_base,status||'ATIVO',pis||'',ctps_numero||'',ctps_serie||'',
@@ -162,7 +162,7 @@ router.patch('/funcionarios/:id', (req, res) => {
 router.delete('/funcionarios/:id', (req, res) => {
   // Soft delete — registra demissão
   req.db.prepare(`
-    UPDATE rh_funcionarios SET status='DEMITIDO', data_demissao=CURRENT_DATE, updated_at=datetime('now')
+    UPDATE rh_funcionarios SET status='DEMITIDO', data_demissao=CURRENT_DATE, updated_at=NOW()
     WHERE id=?
   `).run(req.params.id);
   res.json({ ok: true });
@@ -204,10 +204,20 @@ router.post('/folha/:id/calcular', (req, res) => {
   ).all();
 
   const calcItem = req.db.prepare(`
-    INSERT OR REPLACE INTO rh_folha_itens
+    INSERT INTO rh_folha_itens
       (folha_id,funcionario_id,salario_base,dias_trabalhados,horas_extras,valor_he,
        inss,irrf,total_bruto,total_descontos,total_liquido)
     VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT (folha_id, funcionario_id) DO UPDATE SET
+      salario_base     = EXCLUDED.salario_base,
+      dias_trabalhados = EXCLUDED.dias_trabalhados,
+      horas_extras     = EXCLUDED.horas_extras,
+      valor_he         = EXCLUDED.valor_he,
+      inss             = EXCLUDED.inss,
+      irrf             = EXCLUDED.irrf,
+      total_bruto      = EXCLUDED.total_bruto,
+      total_descontos  = EXCLUDED.total_descontos,
+      total_liquido    = EXCLUDED.total_liquido
   `);
 
   let totalBruto = 0, totalDescontos = 0, totalLiquido = 0;
