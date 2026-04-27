@@ -2434,6 +2434,7 @@ function calcRetencoes(categoria, valor_bruto) {
 }
 
 router.get('/despesas', async (req, res) => {
+  await ensureDespesasVinculoCols(req.db);
   const { categoria, fornecedor, status, from, to, contrato_ref, centro_custo, page = 1, limit = 100 } = req.query;
   let where = '1=1';
   const params = {};
@@ -2867,6 +2868,94 @@ router.post('/despesas', async (req, res) => {
   }
 
   res.json({ ok: true, id: despesaId, retencoes: ret, vinculo });
+});
+
+// ─── PROMOVER despesa existente para Estoque ─────────────────────
+// Permite "promover" uma despesa que já foi salva como simples para
+// virar uma entrada de estoque, criando o vínculo retroativamente.
+router.post('/despesas/:id/promover-estoque', async (req, res) => {
+  try {
+    await ensureDespesasVinculoCols(req.db);
+    const id = parseInt(req.params.id, 10);
+    const desp = await req.db.prepare('SELECT * FROM despesas WHERE id = ?').get(id);
+    if (!desp) return res.status(404).json({ error: 'Despesa não encontrada' });
+    if (desp.vinculo_tipo) return res.status(400).json({ error: `Despesa já vinculada a ${desp.vinculo_tipo} #${desp.vinculo_id}` });
+
+    const { item_id, novo_nome, categoria, unidade, quantidade } = req.body;
+    const qtd = parseFloat(quantidade);
+    if (!qtd || qtd <= 0) return res.status(400).json({ error: 'Quantidade obrigatória' });
+
+    let itemId = item_id ? parseInt(item_id, 10) : null;
+    if (!itemId && novo_nome) {
+      const novo = await req.db.prepare(`
+        INSERT INTO estoque_itens (nome, categoria, descricao, unidade, estoque_minimo, valor_unitario, estoque_atual, contrato_ref)
+        VALUES (?, ?, ?, ?, 0, ?, 0, ?)
+      `).run(
+        novo_nome, categoria || 'OUTROS', desp.descricao || '', unidade || 'UN',
+        +(desp.valor_bruto / qtd).toFixed(2), desp.contrato_ref || null
+      );
+      itemId = novo.lastInsertRowid;
+    }
+    if (!itemId) return res.status(400).json({ error: 'Informe item_id existente ou novo_nome' });
+
+    const vunit = +(desp.valor_bruto / qtd).toFixed(2);
+    await req.db.prepare(`
+      INSERT INTO estoque_movimentos
+        (item_id, tipo, quantidade, valor_unitario, total, data_movimento, motivo, fornecedor, nota_fiscal, contrato_ref)
+      VALUES (?, 'ENTRADA', ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(itemId, qtd, vunit, desp.valor_bruto, desp.data_iso || new Date().toISOString().slice(0,10),
+           `Promoção retroativa de Despesa #${id}`, desp.fornecedor || '', desp.nf_numero || '',
+           desp.contrato_ref || null);
+    await req.db.prepare(`UPDATE estoque_itens SET estoque_atual = estoque_atual + ?, updated_at = NOW() WHERE id = ?`).run(qtd, itemId);
+    await req.db.prepare(`UPDATE despesas SET vinculo_tipo = 'estoque', vinculo_id = ? WHERE id = ?`).run(itemId, id);
+
+    res.json({ ok: true, vinculo: { tipo: 'estoque', id: itemId, quantidade: qtd, valor_unitario: vunit } });
+  } catch (e) { errRes(res, e); }
+});
+
+// ─── PROMOVER despesa existente para Patrimônio ──────────────────
+router.post('/despesas/:id/promover-patrimonio', async (req, res) => {
+  try {
+    await ensureDespesasVinculoCols(req.db);
+    const id = parseInt(req.params.id, 10);
+    const desp = await req.db.prepare('SELECT * FROM despesas WHERE id = ?').get(id);
+    if (!desp) return res.status(404).json({ error: 'Despesa não encontrada' });
+    if (desp.vinculo_tipo) return res.status(400).json({ error: `Despesa já vinculada a ${desp.vinculo_tipo} #${desp.vinculo_id}` });
+
+    const { categoria, vida_util_meses, valor_residual, numero_serie } = req.body;
+
+    const pr = await req.db.prepare(`
+      INSERT INTO patrimonio
+        (empresa, descricao, categoria, numero_serie, contrato_ref,
+         valor_aquisicao, data_aquisicao, vida_util_meses, valor_residual, observacoes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      req.companyKey,
+      desp.descricao || `Aquisição via despesa #${id}`,
+      categoria || 'Outro',
+      numero_serie || null,
+      desp.contrato_ref || null,
+      desp.valor_bruto,
+      desp.data_iso || new Date().toISOString().slice(0,10),
+      parseInt(vida_util_meses, 10) || 60,
+      +(parseFloat(valor_residual) || 0),
+      `Promoção retroativa de Despesa #${id}` + (desp.fornecedor ? ` · Fornecedor: ${desp.fornecedor}` : '')
+    );
+    const patId = pr.lastInsertRowid;
+    await req.db.prepare(`UPDATE despesas SET vinculo_tipo = 'patrimonio', vinculo_id = ? WHERE id = ?`).run(patId, id);
+
+    res.json({ ok: true, vinculo: { tipo: 'patrimonio', id: patId } });
+  } catch (e) { errRes(res, e); }
+});
+
+// ─── DESVINCULAR despesa (remove vínculo, mantém despesa+item) ───
+router.post('/despesas/:id/desvincular', async (req, res) => {
+  try {
+    await ensureDespesasVinculoCols(req.db);
+    const id = parseInt(req.params.id, 10);
+    await req.db.prepare(`UPDATE despesas SET vinculo_tipo = NULL, vinculo_id = NULL WHERE id = ?`).run(id);
+    res.json({ ok: true });
+  } catch (e) { errRes(res, e); }
 });
 
 router.patch('/despesas/:id', async (req, res) => {

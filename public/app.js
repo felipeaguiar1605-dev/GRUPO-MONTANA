@@ -2256,11 +2256,18 @@ async function loadDespData(){
                   : cc==='DIVIDENDOS'  ? `<span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#dcfce7;color:#15803d;font-weight:600">💰 Dividendos</span>`
                   : '';
     const cName = cc ? '' : (r.contrato_ref||r.contrato_vinculado||'').replace(/\s*—.*$/,'');
+    // Badge de vínculo Estoque/Patrimônio (Opção B)
+    let vincBadge = '';
+    if (r.vinculo_tipo === 'estoque' && r.vinculo_id) {
+      vincBadge = `<span title="Vinculado ao item de estoque #${r.vinculo_id}" style="font-size:9px;padding:1px 6px;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:700;border:1px solid #fcd34d;margin-left:6px;white-space:nowrap">📦 ESTOQUE #${r.vinculo_id}</span>`;
+    } else if (r.vinculo_tipo === 'patrimonio' && r.vinculo_id) {
+      vincBadge = `<span title="Cadastrado em patrimônio #${r.vinculo_id}" style="font-size:9px;padding:1px 6px;border-radius:4px;background:#dcfce7;color:#15803d;font-weight:700;border:1px solid #86efac;margin-left:6px;white-space:nowrap">🏗️ PATRIM #${r.vinculo_id}</span>`;
+    }
     return `<tr>
     <td style="font-size:10px;color:#64748b;white-space:nowrap">${r.data_despesa||''}</td>
     <td>${despCatBadge(r.categoria)}</td>
     <td style="font-size:10px;font-weight:600;color:#1d4ed8;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.contrato_ref||r.contrato_vinculado||cc}">${ccBadge||cName||'—'}</td>
-    <td style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.descricao||'').replace(/"/g,'&quot;')}">${r.descricao||'—'}</td>
+    <td style="font-size:10px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.descricao||'').replace(/"/g,'&quot;')}">${r.descricao||'—'}${vincBadge}</td>
     <td class="r mono" style="font-weight:600">${brl(r.valor_bruto)}</td>
     <td class="r mono" style="color:#d97706;font-size:10px" title="IRRF ${brl(r.irrf)} · CSLL ${brl(r.csll)} · PIS ${brl(r.pis_retido)} · COFINS ${brl(r.cofins_retido)} · INSS ${brl(r.inss_retido)}">${brl(r.total_retencao)}</td>
     <td class="r mono" style="font-weight:700;color:#15803d">${brl(r.valor_liquido)}</td>
@@ -2272,6 +2279,10 @@ async function loadDespData(){
         <option value="PAGO" ${r.status==='PAGO'?'selected':''}>Pago</option>
         <option value="VENCIDO" ${r.status==='VENCIDO'?'selected':''}>Vencido</option>
       </select>
+      ${r.vinculo_tipo
+        ? `<button onclick="desvincularDesp(${r.id})" style="padding:2px 6px;font-size:9px;border:1px solid #cbd5e1;border-radius:4px;background:#f1f5f9;color:#475569;cursor:pointer;margin-left:4px" title="Remover vínculo">🔗✕</button>`
+        : `<button onclick="abrirPromocaoDesp(${r.id}, ${JSON.stringify(r.descricao||'').replace(/"/g,'&quot;')}, ${r.valor_bruto||0})" style="padding:2px 6px;font-size:9px;border:1px solid #fcd34d;border-radius:4px;background:#fef3c7;color:#92400e;cursor:pointer;margin-left:4px" title="Promover para Estoque ou Patrimônio">🔗</button>`
+      }
       <button onclick="delDesp(${r.id})" style="padding:2px 6px;font-size:9px;border:1px solid #fca5a5;border-radius:4px;background:#fee2e2;color:#dc2626;cursor:pointer;margin-left:4px" title="Excluir">✕</button>
     </td>
   </tr>`;}).join('');
@@ -2291,6 +2302,191 @@ async function delDesp(id){
   if(!confirm('Excluir esta despesa?'))return;
   await api('/despesas/'+id,{method:'DELETE'});
   loadDespData();
+}
+
+async function desvincularDesp(id){
+  if(!confirm('Remover o vínculo desta despesa com Estoque/Patrimônio?\n\n(O item de estoque ou patrimônio NÃO é apagado — apenas o link com a despesa.)'))return;
+  await api(`/despesas/${id}/desvincular`,{method:'POST'});
+  toast('Vínculo removido');
+  loadDespData();
+}
+
+// Modal de promoção: permite "promover" uma despesa simples existente para
+// Estoque ou Patrimônio retroativamente (Opção B + opção 2 do roadmap).
+async function abrirPromocaoDesp(id, descricao, valorBruto) {
+  // Carrega itens de estoque pra dropdown
+  let estoqueOpts = '';
+  try {
+    const eRes = await api('/estoque/itens?todos=1');
+    estoqueOpts = (eRes.itens || eRes || []).map(it =>
+      `<option value="${it.id}">${(it.nome || '').replace(/"/g,'')} ${it.categoria ? '· ' + it.categoria : ''}${it.estoque_atual!=null ? ' (' + it.estoque_atual + ' ' + (it.unidade||'UN') + ')' : ''}</option>`
+    ).join('');
+  } catch (_) {}
+
+  const old = document.getElementById('modal-promo-desp');
+  if (old) old.remove();
+  const modal = document.createElement('div');
+  modal.id = 'modal-promo-desp';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:680px;width:100%;max-height:90vh;overflow-y:auto;padding:24px">
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:14px">
+        <div>
+          <div style="font-size:16px;font-weight:800;color:#0f172a">🔗 Promover Despesa</div>
+          <div style="font-size:11px;color:#64748b;margin-top:2px">${(descricao||'').slice(0,80)} · R$ ${valorBruto.toLocaleString('pt-BR',{minimumFractionDigits:2})}</div>
+        </div>
+        <button onclick="document.getElementById('modal-promo-desp').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#64748b">✕</button>
+      </div>
+
+      <!-- Tabs -->
+      <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:14px">
+        <button id="mp-tab-estoque" onclick="_mpSwitchTab('estoque')" style="padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;border:none;border-bottom:2px solid #92400e;background:#fef3c7;color:#92400e;margin-bottom:-2px">📦 Estoque</button>
+        <button id="mp-tab-patrim" onclick="_mpSwitchTab('patrim')" style="padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;border:none;border-bottom:2px solid transparent;background:transparent;color:#64748b;margin-bottom:-2px">🏗️ Patrimônio</button>
+      </div>
+
+      <!-- Painel Estoque -->
+      <div id="mp-painel-estoque" style="display:block">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+          <div>
+            <label style="font-size:9px;color:#92400e;font-weight:700;display:block;margin-bottom:2px">ITEM EXISTENTE</label>
+            <select id="mp-est-item" onchange="_mpToggleNovo()" style="width:100%;padding:6px;font-size:11px;border:1px solid #fcd34d;border-radius:6px">
+              <option value="">— Cadastrar novo item abaixo —</option>
+              ${estoqueOpts}
+            </select>
+          </div>
+          <div id="mp-est-novo-wrap">
+            <label style="font-size:9px;color:#92400e;font-weight:700;display:block;margin-bottom:2px">NOME (NOVO ITEM)</label>
+            <input id="mp-est-novo" placeholder="Ex: Luva Nitrílica G" style="width:100%;padding:6px;font-size:11px;border:1px solid #fcd34d;border-radius:6px">
+          </div>
+          <div id="mp-est-cat-wrap">
+            <label style="font-size:9px;color:#92400e;font-weight:700;display:block;margin-bottom:2px">CATEGORIA</label>
+            <select id="mp-est-cat" style="width:100%;padding:6px;font-size:11px;border:1px solid #fcd34d;border-radius:6px">
+              <option>EPI</option><option>FARDAMENTO</option><option>FERRAMENTA</option>
+              <option>MATERIAL</option><option>LIMPEZA</option><option>EXPEDIENTE</option><option>OUTROS</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:9px;color:#92400e;font-weight:700;display:block;margin-bottom:2px">QUANTIDADE</label>
+            <input id="mp-est-qtd" type="number" step="0.01" min="0" placeholder="0" style="width:100%;padding:6px;font-size:11px;border:1px solid #fcd34d;border-radius:6px">
+          </div>
+          <div id="mp-est-un-wrap">
+            <label style="font-size:9px;color:#92400e;font-weight:700;display:block;margin-bottom:2px">UNIDADE</label>
+            <select id="mp-est-un" style="width:100%;padding:6px;font-size:11px;border:1px solid #fcd34d;border-radius:6px">
+              <option>UN</option><option>CX</option><option>PAR</option><option>KG</option><option>L</option><option>MT</option><option>PCT</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top:12px;text-align:right">
+          <button onclick="_mpConfirmarEstoque(${id})" style="padding:8px 20px;font-size:12px;font-weight:700;background:#92400e;color:#fff;border:none;border-radius:6px;cursor:pointer">✓ Promover para Estoque</button>
+        </div>
+      </div>
+
+      <!-- Painel Patrimônio -->
+      <div id="mp-painel-patrim" style="display:none">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+          <div>
+            <label style="font-size:9px;color:#15803d;font-weight:700;display:block;margin-bottom:2px">CATEGORIA</label>
+            <select id="mp-pat-cat" style="width:100%;padding:6px;font-size:11px;border:1px solid #86efac;border-radius:6px">
+              <option>Veículo</option><option>Equipamento</option><option>TI</option>
+              <option>Mobiliário</option><option>Fardamento</option><option>Outro</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:9px;color:#15803d;font-weight:700;display:block;margin-bottom:2px">VIDA ÚTIL (MESES)</label>
+            <input id="mp-pat-vida" type="number" min="1" max="600" value="60" style="width:100%;padding:6px;font-size:11px;border:1px solid #86efac;border-radius:6px">
+          </div>
+          <div>
+            <label style="font-size:9px;color:#15803d;font-weight:700;display:block;margin-bottom:2px">VALOR RESIDUAL (R$)</label>
+            <input id="mp-pat-residual" type="number" min="0" step="0.01" value="0" style="width:100%;padding:6px;font-size:11px;border:1px solid #86efac;border-radius:6px">
+          </div>
+          <div>
+            <label style="font-size:9px;color:#15803d;font-weight:700;display:block;margin-bottom:2px">Nº SÉRIE / TOMBO</label>
+            <input id="mp-pat-serie" placeholder="Ex: ABC-1234" style="width:100%;padding:6px;font-size:11px;border:1px solid #86efac;border-radius:6px">
+          </div>
+        </div>
+        <div style="margin-top:12px;text-align:right">
+          <button onclick="_mpConfirmarPatrim(${id})" style="padding:8px 20px;font-size:12px;font-weight:700;background:#15803d;color:#fff;border:none;border-radius:6px;cursor:pointer">✓ Cadastrar em Patrimônio</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+function _mpSwitchTab(tab) {
+  const isEst = tab === 'estoque';
+  const tabEst = document.getElementById('mp-tab-estoque');
+  const tabPat = document.getElementById('mp-tab-patrim');
+  if (tabEst) {
+    tabEst.style.background = isEst ? '#fef3c7' : 'transparent';
+    tabEst.style.color = isEst ? '#92400e' : '#64748b';
+    tabEst.style.borderBottomColor = isEst ? '#92400e' : 'transparent';
+  }
+  if (tabPat) {
+    tabPat.style.background = !isEst ? '#dcfce7' : 'transparent';
+    tabPat.style.color = !isEst ? '#15803d' : '#64748b';
+    tabPat.style.borderBottomColor = !isEst ? '#15803d' : 'transparent';
+  }
+  const pe = document.getElementById('mp-painel-estoque');
+  const pp = document.getElementById('mp-painel-patrim');
+  if (pe) pe.style.display = isEst ? 'block' : 'none';
+  if (pp) pp.style.display = isEst ? 'none' : 'block';
+}
+
+function _mpToggleNovo() {
+  const sel = document.getElementById('mp-est-item');
+  const usar = sel && sel.value;
+  ['mp-est-novo-wrap','mp-est-cat-wrap','mp-est-un-wrap'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.opacity = usar ? '0.4' : '1';
+    if (el) el.querySelectorAll('input,select').forEach(i => i.disabled = !!usar);
+  });
+}
+
+async function _mpConfirmarEstoque(despId) {
+  const itemId = document.getElementById('mp-est-item')?.value || '';
+  const novo   = document.getElementById('mp-est-novo')?.value?.trim() || '';
+  const qtd    = parseFloat(document.getElementById('mp-est-qtd')?.value || '0');
+  if (!qtd || qtd <= 0) { alert('Informe a quantidade.'); return; }
+  if (!itemId && !novo) { alert('Escolha um item OU informe nome do novo item.'); return; }
+  const body = {
+    item_id: itemId || null,
+    novo_nome: itemId ? '' : novo,
+    categoria: document.getElementById('mp-est-cat')?.value || 'OUTROS',
+    unidade: document.getElementById('mp-est-un')?.value || 'UN',
+    quantidade: qtd,
+  };
+  const r = await api(`/despesas/${despId}/promover-estoque`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (r.ok) {
+    document.getElementById('modal-promo-desp')?.remove();
+    toast(`📦 Promovida para Estoque (item #${r.vinculo.id})`);
+    loadDespData();
+  } else {
+    alert('Erro: ' + (r.error || 'desconhecido'));
+  }
+}
+
+async function _mpConfirmarPatrim(despId) {
+  const body = {
+    categoria: document.getElementById('mp-pat-cat')?.value || 'Outro',
+    vida_util_meses: parseInt(document.getElementById('mp-pat-vida')?.value, 10) || 60,
+    valor_residual: parseFloat(document.getElementById('mp-pat-residual')?.value) || 0,
+    numero_serie: document.getElementById('mp-pat-serie')?.value || '',
+  };
+  const r = await api(`/despesas/${despId}/promover-patrimonio`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (r.ok) {
+    document.getElementById('modal-promo-desp')?.remove();
+    toast(`🏗️ Cadastrada em Patrimônio (#${r.vinculo.id})`);
+    loadDespData();
+  } else {
+    alert('Erro: ' + (r.error || 'desconhecido'));
+  }
 }
 
 async function excluirNf(id, numero){
