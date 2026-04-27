@@ -155,12 +155,20 @@
     <div class="nav-group-items" style="display:none">
       <div class="tab" data-tab="pref" onclick="navGo('pref',this)">🧾 NFS-e</div>
       <div class="tab" data-tab="certidoes" onclick="navGo('certidoes',this)">📋 Certidões</div>
-      <div class="tab" data-tab="licitacoes" onclick="navGo('licitacoes',this)">🏛️ Licitações</div>
       <div class="tab" data-tab="piscofins-seg" onclick="navGo('piscofins-seg',this)">💰 PIS/COFINS</div>
       <div class="tab" data-tab="inss-retido" onclick="navGo('inss-retido',this)">🏛️ INSS Retido S-1300</div>
       <div class="tab" data-tab="retencoes" onclick="navGo('retencoes',this)">🏛️ Retenções</div>
       <div class="tab" data-tab="reajuste" onclick="navGo('reajuste',this)">📈 Reajuste</div>
       <div class="tab" data-tab="boletins" onclick="navGo('boletins',this)">📄 Boletins</div>
+    </div>
+  </div>
+
+  <div class="nav-group" id="ng-licitacoes">
+    <div class="nav-group-hdr" onclick="toggleNavGroup('ng-licitacoes')">
+      <span class="ng-icon">🏛️</span><span class="ng-label">Licitações</span><span class="ng-chevron">▾</span>
+    </div>
+    <div class="nav-group-items" style="display:none">
+      <div class="tab" data-tab="licitacoes" onclick="navGo('licitacoes',this)">📋 Acompanhamento</div>
     </div>
   </div>
 
