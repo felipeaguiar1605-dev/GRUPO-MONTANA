@@ -85,15 +85,30 @@ function toast(msg,type='success'){
 
 // ─── Loading overlay ─────────────────────────────────────────────
 let _loadingCount=0;
+let _loadingTimeoutId=null;
 function showLoading(msg){
   _loadingCount++;
   const el=document.getElementById('loading-overlay');
   if(el){ el.style.display='flex'; const m=el.querySelector('.loading-msg'); if(m&&msg)m.textContent=msg; }
+  // Auto-fechamento de segurança após 30s — evita ficar preso se um handler
+  // não chamar hideLoading() (bug em rede, exceção não-capturada, etc).
+  if(_loadingTimeoutId) clearTimeout(_loadingTimeoutId);
+  _loadingTimeoutId=setTimeout(()=>{ console.warn('[loading] timeout 30s — forçando fechar'); resetLoading(); }, 30000);
 }
 function hideLoading(){
   _loadingCount=Math.max(0,_loadingCount-1);
-  if(_loadingCount===0){const el=document.getElementById('loading-overlay'); if(el) el.style.display='none';}
+  if(_loadingCount===0){
+    const el=document.getElementById('loading-overlay'); if(el) el.style.display='none';
+    if(_loadingTimeoutId){ clearTimeout(_loadingTimeoutId); _loadingTimeoutId=null; }
+  }
 }
+// Reset hard — chamado em navGo ao trocar de aba para evitar overlay preso.
+function resetLoading(){
+  _loadingCount=0;
+  const el=document.getElementById('loading-overlay'); if(el) el.style.display='none';
+  if(_loadingTimeoutId){ clearTimeout(_loadingTimeoutId); _loadingTimeoutId=null; }
+}
+window.showLoading=showLoading; window.hideLoading=hideLoading; window.resetLoading=resetLoading;
 
 async function api(url,opts){
   const headers={'X-Company':currentCompany};
@@ -135,6 +150,8 @@ function toggleNavGroup(id){
 }
 // navGo: opens correct group, marks item active, closes sidebar on mobile
 function navGo(id,el){
+  // Reset overlay de loading ao trocar de aba (evita overlay travado de outra tela).
+  try { resetLoading(); } catch(_) {}
   // Close sidebar on mobile
   if(window.innerWidth<=768) closeSidebar();
   // Expand parent group if collapsed

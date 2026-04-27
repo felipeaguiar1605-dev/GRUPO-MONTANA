@@ -10,8 +10,18 @@
  */
 'use strict';
 
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
 const COMPANIES = require('./companies');
+
+// ─── Type parsers ──────────────────────────────────────────────
+// PG retorna NUMERIC/DECIMAL como STRING por default (preserva precisão).
+// O codebase legado (vindo de SQLite) trata esses campos como Number e usa
+// .toFixed(2) em vários lugares. Para compatibilidade, parseamos NUMERIC e
+// BIGINT como float/int. Precisão extrema (>15 dígitos) é improvável aqui —
+// valores monetários em centavos cabem folgadamente em IEEE 754 double.
+//   NUMERIC = OID 1700, BIGINT = OID 20, INT8 = 20
+types.setTypeParser(1700, v => v === null ? null : parseFloat(v));
+types.setTypeParser(20,   v => v === null ? null : parseInt(v, 10));
 
 // ── Pool por empresa ────────────────────────────────────────────
 const _pools = new Map();
@@ -153,6 +163,27 @@ class PgDb {
       return args; // varargs → trata como array posicional
     };
 
+    // Compat case-sensitivity PostgreSQL: PG normaliza identificadores não-quoted
+    // para lowercase, então `SELECT numContrato` retorna chave `numcontrato`. Como
+    // o codebase legado (vindo de SQLite) usa camelCase em vários lugares
+    // (numContrato, dataEmissao, contratoRef), adicionamos os aliases camelCase
+    // automaticamente em qualquer linha de resultado. É idempotente — só cria a
+    // chave se ela não existir.
+    const PG_LOWERCASE_ALIASES = {
+      numcontrato:  'numContrato',
+      // Adicionar aqui outras colunas camelCase do schema legado se aparecerem.
+    };
+    const augmentRow = (row) => {
+      if (!row || typeof row !== 'object') return row;
+      for (const lower in PG_LOWERCASE_ALIASES) {
+        if (row[lower] !== undefined && row[PG_LOWERCASE_ALIASES[lower]] === undefined) {
+          row[PG_LOWERCASE_ALIASES[lower]] = row[lower];
+        }
+      }
+      return row;
+    };
+    const augmentRows = (rows) => Array.isArray(rows) ? rows.map(augmentRow) : rows;
+
     return {
       /** SELECT que retorna 1 linha (ou null) */
       async get(...args) {
@@ -160,7 +191,7 @@ class PgDb {
         const { sql, values } = buildQuery(rawSql, params);
         try {
           const res = await exec.query(sql, values);
-          return res.rows[0] || null;
+          return augmentRow(res.rows[0]) || null;
         } catch (e) {
           _logQueryError(e, sql, values);
           throw e;
@@ -173,7 +204,7 @@ class PgDb {
         const { sql, values } = buildQuery(rawSql, params);
         try {
           const res = await exec.query(sql, values);
-          return res.rows;
+          return augmentRows(res.rows);
         } catch (e) {
           _logQueryError(e, sql, values);
           throw e;
