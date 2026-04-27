@@ -5,11 +5,16 @@
 // ═══════════════════════════════════════════════════════════════
 
 function nfmApi(url, opts) { return api('/nf-modelos' + url, opts); }
-function nfmFmtMoeda(v) { return 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
+function nfmFmtMoeda(v) { return 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',').replace(/B(?=(d{3})+(?!d))/g, '.'); }
 function nfmEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
 window.nfModelosInit = async function() {
-  await nfmListar();
+  try {
+    await nfmListar();
+  } catch (e) {
+    const body = document.getElementById('nfm-body');
+    if (body) body.innerHTML = `<tr><td colspan="6" style="color:#dc2626;padding:24px;text-align:center">Erro ao carregar modelos: ${nfmEsc(e.message)}</td></tr>`;
+  }
 };
 
 async function nfmListar() {

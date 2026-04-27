@@ -3683,6 +3683,83 @@
   </div>
 </div>
 
+
+
+
+
+<!-- 💵 Caixa Livre Consolidado -->
+<div id="pg-caixa-livre" class="pg">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div>
+      <h2 style="margin:0;font-size:18px;color:#1e293b;font-weight:800">💵 Caixa Livre Consolidado</h2>
+      <div style="font-size:11px;color:#64748b;margin-top:2px">Visão do dinheiro real disponível por empresa e do grupo — entradas menos folha, despesas e impostos estimados.</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:12px;color:#64748b">Empresa:</label>
+      <select id="cl-empresa" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;background:#fff">
+        <option value="assessoria">🏢 Assessoria</option>
+        <option value="seguranca">🔒 Segurança</option>
+        <option value="portodovau">🛡️ Porto do Vau</option>
+        <option value="mustang">🐎 Mustang</option>
+        <option value="__grupo__">🏛️ Todas — Consolidado</option>
+      </select>
+      <label style="font-size:12px;color:#64748b">Período:</label>
+      <select id="cl-meses" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;background:#fff">
+        <option value="3">3 meses</option>
+        <option value="6" selected>6 meses</option>
+        <option value="12">12 meses</option>
+      </select>
+      <button onclick="window.caixaLivreCarregar&&caixaLivreCarregar()" style="padding:6px 14px;background:#3b82f6;color:#fff;border:0;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">🔄 Atualizar</button>
+    </div>
+  </div>
+  <style>
+    #pg-caixa-livre .cl-margem-bom   td { background:#f0fdf4 }
+    #pg-caixa-livre .cl-margem-medio td { background:#fffbeb }
+    #pg-caixa-livre .cl-margem-ruim  td { background:#fef2f2 }
+    #pg-caixa-livre .tw table { width:100%; border-collapse:collapse; font-size:12px }
+    #pg-caixa-livre .tw th,
+    #pg-caixa-livre .tw td { padding:8px 10px; border-bottom:1px solid #f1f5f9; text-align:left }
+    #pg-caixa-livre .tw th { background:#f8fafc; color:#475569; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.4px }
+    #pg-caixa-livre .tw .r { text-align:right }
+    #pg-caixa-livre .tw .mono { font-variant-numeric:tabular-nums; font-feature-settings:"tnum" }
+  </style>
+  <div id="cl-body"><div class="loading" style="padding:30px;text-align:center;color:#94a3b8">Selecione uma empresa para carregar o caixa livre.</div></div>
+</div>
+
+
+
+<!-- 🧰 Modelos de NF (templates pré-cadastrados) -->
+<div id="pg-nf-modelos" class="pg">
+  <div class="toolbar" style="margin-bottom:10px">
+    <span style="font-size:16px">🧰</span>
+    <span class="toolbar-title">MODELOS DE NF — TEMPLATES PRÉ-CADASTRADOS</span>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button onclick="nfmListar()" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;padding:5px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">🔄 Atualizar</button>
+      <button onclick="nfmAbrirNovo()" style="background:#3b82f6;color:#fff;border:0;padding:5px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">➕ Novo Modelo</button>
+    </div>
+  </div>
+  <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:#854d0e">
+    💡 <b>Como funciona:</b> cadastre um modelo (tomador, valor, descrição com placeholders, alíquotas).
+    Mês a mês clique em <b>Emitir</b>, escolha a competência e (opcionalmente) ajuste colaboradores e glosas — uma NF nova é gerada como PENDENTE em "Notas Fiscais".
+    Placeholders disponíveis na descrição: <code>{{competencia}}</code>, <code>{{competencia_extenso}}</code>, <code>{{ano}}</code>, <code>{{mes}}</code>, <code>{{colaboradores}}</code>, <code>{{tomador}}</code>, <code>{{valor}}</code>.
+  </div>
+  <div class="tw">
+    <table>
+      <thead>
+        <tr style="font-size:11px">
+          <th>Modelo / Tomador</th>
+          <th>CNPJ</th>
+          <th class="r">Valor base</th>
+          <th>Emissões</th>
+          <th>Mostra colab?</th>
+          <th>Ações</th>
+        </tr>
+      </thead>
+      <tbody id="nfm-body"><tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px">Selecione "🧰 Modelos NF" no menu para carregar</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
 </div><!-- fim main-content -->
 </div><!-- fim app-layout -->
 
@@ -3761,77 +3838,6 @@
     <button id="drive-connect-btn" style="font-size:11px;padding:6px 10px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer">Conectar Drive</button>
   </div>
   <div id="ia-drive-results" style="flex:1;padding:8px 12px;overflow-y:auto"></div>
-</div>
-
-<!-- 💵 Caixa Livre Consolidado -->
-<div id="pg-caixa-livre" class="pg">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
-    <div>
-      <h2 style="margin:0;font-size:18px;color:#1e293b;font-weight:800">💵 Caixa Livre Consolidado</h2>
-      <div style="font-size:11px;color:#64748b;margin-top:2px">Visão do dinheiro real disponível por empresa e do grupo — entradas menos folha, despesas e impostos estimados.</div>
-    </div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <label style="font-size:12px;color:#64748b">Empresa:</label>
-      <select id="cl-empresa" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;background:#fff">
-        <option value="assessoria">🏢 Assessoria</option>
-        <option value="seguranca">🔒 Segurança</option>
-        <option value="portodovau">🛡️ Porto do Vau</option>
-        <option value="mustang">🐎 Mustang</option>
-        <option value="__grupo__">🏛️ Todas — Consolidado</option>
-      </select>
-      <label style="font-size:12px;color:#64748b">Período:</label>
-      <select id="cl-meses" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;background:#fff">
-        <option value="3">3 meses</option>
-        <option value="6" selected>6 meses</option>
-        <option value="12">12 meses</option>
-      </select>
-      <button onclick="window.caixaLivreCarregar&&caixaLivreCarregar()" style="padding:6px 14px;background:#3b82f6;color:#fff;border:0;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">🔄 Atualizar</button>
-    </div>
-  </div>
-  <style>
-    #pg-caixa-livre .cl-margem-bom   td { background:#f0fdf4 }
-    #pg-caixa-livre .cl-margem-medio td { background:#fffbeb }
-    #pg-caixa-livre .cl-margem-ruim  td { background:#fef2f2 }
-    #pg-caixa-livre .tw table { width:100%; border-collapse:collapse; font-size:12px }
-    #pg-caixa-livre .tw th,
-    #pg-caixa-livre .tw td { padding:8px 10px; border-bottom:1px solid #f1f5f9; text-align:left }
-    #pg-caixa-livre .tw th { background:#f8fafc; color:#475569; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.4px }
-    #pg-caixa-livre .tw .r { text-align:right }
-    #pg-caixa-livre .tw .mono { font-variant-numeric:tabular-nums; font-feature-settings:"tnum" }
-  </style>
-  <div id="cl-body"><div class="loading" style="padding:30px;text-align:center;color:#94a3b8">Selecione uma empresa para carregar o caixa livre.</div></div>
-</div>
-
-<!-- 🧰 Modelos de NF (templates pré-cadastrados) -->
-<div id="pg-nf-modelos" class="pg">
-  <div class="toolbar" style="margin-bottom:10px">
-    <span style="font-size:16px">🧰</span>
-    <span class="toolbar-title">MODELOS DE NF — TEMPLATES PRÉ-CADASTRADOS</span>
-    <div style="margin-left:auto;display:flex;gap:8px">
-      <button onclick="nfmListar()" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;padding:5px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">🔄 Atualizar</button>
-      <button onclick="nfmAbrirNovo()" style="background:#3b82f6;color:#fff;border:0;padding:5px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">➕ Novo Modelo</button>
-    </div>
-  </div>
-  <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:#854d0e">
-    💡 <b>Como funciona:</b> cadastre um modelo (tomador, valor, descrição com placeholders, alíquotas).
-    Mês a mês clique em <b>Emitir</b>, escolha a competência e (opcionalmente) ajuste colaboradores e glosas — uma NF nova é gerada como PENDENTE em "Notas Fiscais".
-    Placeholders disponíveis na descrição: <code>{{competencia}}</code>, <code>{{competencia_extenso}}</code>, <code>{{ano}}</code>, <code>{{mes}}</code>, <code>{{colaboradores}}</code>, <code>{{tomador}}</code>, <code>{{valor}}</code>.
-  </div>
-  <div class="tw">
-    <table>
-      <thead>
-        <tr style="font-size:11px">
-          <th>Modelo / Tomador</th>
-          <th>CNPJ</th>
-          <th class="r">Valor base</th>
-          <th>Emissões</th>
-          <th>Mostra colab?</th>
-          <th>Ações</th>
-        </tr>
-      </thead>
-      <tbody id="nfm-body"><tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px">Selecione "🧰 Modelos NF" no menu para carregar</td></tr></tbody>
-    </table>
-  </div>
 </div>
 
 <script src="/app.js"></script>
