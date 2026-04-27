@@ -21,6 +21,8 @@ router.use(async (req, res, next) => {
   // Colunas NFS-e na tabela bol_boletins
   const bolCols = [
     ['valor_base',        'REAL DEFAULT 0'],
+    ['valor_total',       'REAL DEFAULT 0'],   // FIX 2026-04: faltava em alguns schemas
+    ['total_geral',       'REAL DEFAULT 0'],   // legado (algumas instalações usam só esse)
     ['glosas',            'REAL DEFAULT 0'],
     ['acrescimos',        'REAL DEFAULT 0'],
     ['discriminacao',     'TEXT'],
