@@ -86,6 +86,9 @@ app.use('/api/notificacoes', require('./routes/notificacoes'));
 // ─── Módulo Boletins de Medição ─────────────────────────────────
 app.use('/api/boletins',     require('./routes/boletins'));
 
+// ─── Mapa de Postos Concomitantes (série mensal — últimos 5 anos)
+app.use('/api/postos-mapa',  require('./routes/postos-mapa'));
+
 // ─── Módulo RH / Departamento Pessoal ───────────────────────────
 app.use('/api/rh',           require('./routes/rh'));
 
