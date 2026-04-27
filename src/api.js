@@ -2740,9 +2740,27 @@ router.get('/apuracao-caixa', async (req, res) => {
   });
 });
 
+// Garante colunas de vínculo Despesas ↔ Estoque/Patrimônio (idempotente).
+// Disparado em cada POST/GET pra ser auto-curativo se algum schema antigo
+// não tiver as colunas. ALTER TABLE ADD COLUMN IF NOT EXISTS é ignorado se a
+// coluna já existe (PostgreSQL 9.6+).
+async function ensureDespesasVinculoCols(db) {
+  try { await db.prepare(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS vinculo_tipo TEXT`).run(); } catch (_) {}
+  try { await db.prepare(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS vinculo_id INTEGER`).run(); } catch (_) {}
+}
+
 router.post('/despesas', async (req, res) => {
+  await ensureDespesasVinculoCols(req.db);
   const { categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa,
-          competencia, valor_bruto, obs, contrato_ref, centro_custo } = req.body;
+          competencia, valor_bruto, obs, contrato_ref, centro_custo,
+          // ── Opção B: tipo de lançamento + dados pra criar Estoque ou Patrimônio
+          tipo_lancamento,
+          // Estoque
+          estoque_item_id, estoque_item_novo_nome, estoque_item_categoria,
+          estoque_quantidade, estoque_unidade,
+          // Patrimônio
+          patrimonio_categoria, patrimonio_vida_util, patrimonio_residual, patrimonio_serie,
+        } = req.body;
   if (!valor_bruto) return res.status(400).json({ error: 'valor_bruto obrigatório' });
 
   const auto = calcRetencoes(categoria || 'FORNECEDOR', valor_bruto);
@@ -2783,7 +2801,72 @@ router.post('/despesas', async (req, res) => {
     return res.status(409).json({ ok: false, error: 'Despesa duplicada detectada (mesma data, valor, fornecedor e descrição)' });
   }
 
-  res.json({ ok: true, id: r.lastInsertRowid, retencoes: ret });
+  const despesaId = r.lastInsertRowid;
+  let vinculo = null;
+
+  // ── Opção B: cria registro vinculado em Estoque ou Patrimônio ──
+  try {
+    if (tipo_lancamento === 'estoque' && estoque_quantidade > 0) {
+      let itemId = estoque_item_id ? parseInt(estoque_item_id, 10) : null;
+      // Cria item novo se solicitado
+      if (!itemId && estoque_item_novo_nome) {
+        const novoItem = await req.db.prepare(`
+          INSERT INTO estoque_itens (nome, categoria, descricao, unidade, estoque_minimo, valor_unitario, estoque_atual, contrato_ref)
+          VALUES (?, ?, ?, ?, 0, ?, 0, ?)
+        `).run(
+          estoque_item_novo_nome,
+          estoque_item_categoria || 'OUTROS',
+          descricao || '',
+          estoque_unidade || 'UN',
+          +(valor_bruto / Math.max(1, estoque_quantidade)).toFixed(2),
+          contrato_ref || null
+        );
+        itemId = novoItem.lastInsertRowid;
+      }
+      if (itemId) {
+        const qtd = parseFloat(estoque_quantidade);
+        const vunit = +(valor_bruto / Math.max(1, qtd)).toFixed(2);
+        // Movimento ENTRADA + atualiza saldo
+        await req.db.prepare(`
+          INSERT INTO estoque_movimentos
+            (item_id, tipo, quantidade, valor_unitario, total, data_movimento, motivo, fornecedor, nota_fiscal, contrato_ref)
+          VALUES (?, 'ENTRADA', ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(itemId, qtd, vunit, valor_bruto, data_iso_val,
+               'Lançado via Despesa #' + despesaId,
+               fornecedor || '', nf_numero || '', contrato_ref || null);
+        await req.db.prepare(`UPDATE estoque_itens SET estoque_atual = estoque_atual + ?, updated_at = NOW() WHERE id = ?`).run(qtd, itemId);
+        await req.db.prepare(`UPDATE despesas SET vinculo_tipo = 'estoque', vinculo_id = ? WHERE id = ?`).run(itemId, despesaId);
+        vinculo = { tipo: 'estoque', id: itemId, quantidade: qtd, valor_unitario: vunit };
+      }
+    } else if (tipo_lancamento === 'patrimonio') {
+      const pr = await req.db.prepare(`
+        INSERT INTO patrimonio
+          (empresa, descricao, categoria, numero_serie, contrato_ref,
+           valor_aquisicao, data_aquisicao, vida_util_meses, valor_residual, observacoes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        req.companyKey,
+        descricao || (`Aquisição via despesa #${despesaId}`),
+        patrimonio_categoria || 'Outro',
+        patrimonio_serie || null,
+        contrato_ref || null,
+        valor_bruto,
+        data_iso_val || new Date().toISOString().slice(0, 10),
+        parseInt(patrimonio_vida_util, 10) || 60,
+        +(parseFloat(patrimonio_residual) || 0),
+        `Lançado via Despesa #${despesaId}` + (fornecedor ? ` · Fornecedor: ${fornecedor}` : '')
+      );
+      const patId = pr.lastInsertRowid;
+      await req.db.prepare(`UPDATE despesas SET vinculo_tipo = 'patrimonio', vinculo_id = ? WHERE id = ?`).run(patId, despesaId);
+      vinculo = { tipo: 'patrimonio', id: patId };
+    }
+  } catch (vincErr) {
+    // Vínculo é best-effort — falha aqui não derruba a despesa, só loga.
+    console.error('[despesas/vinculo]', vincErr.message);
+    return res.json({ ok: true, id: despesaId, retencoes: ret, vinculo_erro: vincErr.message });
+  }
+
+  res.json({ ok: true, id: despesaId, retencoes: ret, vinculo });
 });
 
 router.patch('/despesas/:id', async (req, res) => {

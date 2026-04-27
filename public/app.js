@@ -2336,10 +2336,95 @@ async function toggleDespForm(){
 
   // Carrega lista de contratos para o select
   const contratosOpts = await _loadContratosForm();
+  // Itens de estoque pra popular dropdown (se ja existirem)
+  let estoqueOpts = '';
+  try {
+    const eRes = await api('/estoque/itens?todos=1');
+    estoqueOpts = (eRes.itens || eRes || []).map(it =>
+      `<option value="${it.id}">${(it.nome || '').replace(/"/g,'')} ${it.categoria ? '· ' + it.categoria : ''}${it.estoque_atual!=null ? ' (' + it.estoque_atual + ' ' + (it.unidade||'UN') + ')' : ''}</option>`
+    ).join('');
+  } catch (_) {}
 
   w.innerHTML=`
     <div style="background:#fff;border:1px solid #93c5fd;border-radius:10px;padding:16px;margin-bottom:12px">
       <div style="font-size:13px;font-weight:700;color:#1d4ed8;margin-bottom:12px">+ Novo Lançamento de Despesa</div>
+
+      <!-- TIPO DE LANÇAMENTO (Opção B: integração com Estoque/Patrimônio) -->
+      <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;margin-bottom:12px">
+        <div style="font-size:10px;font-weight:700;color:#0369a1;text-transform:uppercase;margin-bottom:6px">Tipo de Lançamento</div>
+        <label style="font-size:11px;margin-right:14px;cursor:pointer">
+          <input type="radio" name="nd-tipo" value="simples" checked onchange="onTipoLancamentoChange()"> 💸 Despesa simples
+        </label>
+        <label style="font-size:11px;margin-right:14px;cursor:pointer">
+          <input type="radio" name="nd-tipo" value="estoque" onchange="onTipoLancamentoChange()"> 📦 Compra para Estoque
+        </label>
+        <label style="font-size:11px;cursor:pointer">
+          <input type="radio" name="nd-tipo" value="patrimonio" onchange="onTipoLancamentoChange()"> 🏗️ Aquisição de Patrimônio
+        </label>
+      </div>
+
+      <!-- ── Painel ESTOQUE ── -->
+      <div id="nd-painel-estoque" style="display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px;margin-bottom:12px">
+        <div style="font-size:10px;font-weight:700;color:#92400e;text-transform:uppercase;margin-bottom:6px">Detalhes do Estoque</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px">
+          <div>
+            <label style="font-size:9px;color:#92400e;font-weight:600;display:block;margin-bottom:2px">ITEM EXISTENTE</label>
+            <select id="nd-est-item" onchange="onEstoqueItemChange()" style="width:100%;padding:5px;font-size:11px;border:1px solid #fcd34d;border-radius:5px">
+              <option value="">— Ou cadastrar novo abaixo —</option>
+              ${estoqueOpts}
+            </select>
+          </div>
+          <div id="nd-est-novo-wrap">
+            <label style="font-size:9px;color:#92400e;font-weight:600;display:block;margin-bottom:2px">NOME (NOVO ITEM)</label>
+            <input id="nd-est-novo" placeholder="Ex: Luva Nitrílica G" style="width:100%;padding:5px;font-size:11px;border:1px solid #fcd34d;border-radius:5px">
+          </div>
+          <div id="nd-est-cat-wrap">
+            <label style="font-size:9px;color:#92400e;font-weight:600;display:block;margin-bottom:2px">CATEGORIA</label>
+            <select id="nd-est-cat" style="width:100%;padding:5px;font-size:11px;border:1px solid #fcd34d;border-radius:5px">
+              <option>EPI</option><option>FARDAMENTO</option><option>FERRAMENTA</option>
+              <option>MATERIAL</option><option>LIMPEZA</option><option>EXPEDIENTE</option><option>OUTROS</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:9px;color:#92400e;font-weight:600;display:block;margin-bottom:2px">QUANTIDADE</label>
+            <input id="nd-est-qtd" type="number" step="0.01" min="0" placeholder="0" style="width:100%;padding:5px;font-size:11px;border:1px solid #fcd34d;border-radius:5px">
+          </div>
+          <div id="nd-est-un-wrap">
+            <label style="font-size:9px;color:#92400e;font-weight:600;display:block;margin-bottom:2px">UNIDADE</label>
+            <select id="nd-est-un" style="width:100%;padding:5px;font-size:11px;border:1px solid #fcd34d;border-radius:5px">
+              <option>UN</option><option>CX</option><option>PAR</option><option>KG</option><option>L</option><option>MT</option><option>PCT</option>
+            </select>
+          </div>
+        </div>
+        <div style="font-size:9px;color:#b45309;margin-top:6px">Valor unitário será calculado automaticamente: <code>valor bruto / quantidade</code></div>
+      </div>
+
+      <!-- ── Painel PATRIMÔNIO ── -->
+      <div id="nd-painel-patrimonio" style="display:none;background:#ecfdf5;border:1px solid #86efac;border-radius:8px;padding:10px 12px;margin-bottom:12px">
+        <div style="font-size:10px;font-weight:700;color:#15803d;text-transform:uppercase;margin-bottom:6px">Detalhes do Patrimônio</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px">
+          <div>
+            <label style="font-size:9px;color:#15803d;font-weight:600;display:block;margin-bottom:2px">CATEGORIA</label>
+            <select id="nd-pat-cat" style="width:100%;padding:5px;font-size:11px;border:1px solid #86efac;border-radius:5px">
+              <option>Veículo</option><option>Equipamento</option><option>TI</option>
+              <option>Mobiliário</option><option>Fardamento</option><option>Outro</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:9px;color:#15803d;font-weight:600;display:block;margin-bottom:2px">VIDA ÚTIL (MESES)</label>
+            <input id="nd-pat-vida" type="number" min="1" max="600" value="60" style="width:100%;padding:5px;font-size:11px;border:1px solid #86efac;border-radius:5px">
+          </div>
+          <div>
+            <label style="font-size:9px;color:#15803d;font-weight:600;display:block;margin-bottom:2px">VALOR RESIDUAL (R$)</label>
+            <input id="nd-pat-residual" type="number" min="0" step="0.01" value="0" style="width:100%;padding:5px;font-size:11px;border:1px solid #86efac;border-radius:5px">
+          </div>
+          <div>
+            <label style="font-size:9px;color:#15803d;font-weight:600;display:block;margin-bottom:2px">Nº SÉRIE / TOMBO (OPCIONAL)</label>
+            <input id="nd-pat-serie" placeholder="Ex: ABC-1234" style="width:100%;padding:5px;font-size:11px;border:1px solid #86efac;border-radius:5px">
+          </div>
+        </div>
+        <div style="font-size:9px;color:#166534;margin-top:6px">Depreciação linear será calculada automaticamente: <code>(valor - residual) / vida útil</code> ao mês</div>
+      </div>
 
       <!-- Hint overhead -->
       <div id="nd-overhead-hint" style="display:none;padding:8px 12px;border-radius:7px;background:#fef9c3;border:1px solid #fde68a;font-size:11px;color:#92400e;font-weight:600;margin-bottom:10px"></div>
@@ -2437,6 +2522,27 @@ function calcRetFe(){
   document.getElementById('nd-vliq').textContent=brl(vb-totalRet);
 }
 
+// Mostra/esconde painéis baseado no tipo de lançamento (Opção B)
+function onTipoLancamentoChange() {
+  const tipo = document.querySelector('input[name="nd-tipo"]:checked')?.value || 'simples';
+  const pe = document.getElementById('nd-painel-estoque');
+  const pp = document.getElementById('nd-painel-patrimonio');
+  if (pe) pe.style.display = (tipo === 'estoque')    ? 'block' : 'none';
+  if (pp) pp.style.display = (tipo === 'patrimonio') ? 'block' : 'none';
+}
+
+// Quando user seleciona um item existente do estoque, esconde os campos
+// "novo item" pra evitar confusão (vai usar o item escolhido).
+function onEstoqueItemChange() {
+  const sel = document.getElementById('nd-est-item');
+  const usarExistente = sel && sel.value;
+  ['nd-est-novo-wrap','nd-est-cat-wrap','nd-est-un-wrap'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.opacity = usarExistente ? '0.4' : '1';
+    if (el) el.querySelectorAll('input,select').forEach(i => i.disabled = !!usarExistente);
+  });
+}
+
 async function saveDespesa(){
   const vb=parseValorBR(document.getElementById('nd-vbruto').value);
   if(!vb){alert('Informe o valor bruto');return;}
@@ -2444,6 +2550,8 @@ async function saveDespesa(){
   const dataBR=dataRaw?dataRaw.split('-').reverse().join('/'):'';
   const cat=document.getElementById('nd-cat').value;
   const cc=catToCentroCusto(cat);
+  const tipo = document.querySelector('input[name="nd-tipo"]:checked')?.value || 'simples';
+
   const body={
     categoria:cat,
     centro_custo:cc,
@@ -2461,11 +2569,39 @@ async function saveDespesa(){
     cofins_retido:parseValorBR(document.getElementById('nd-cofins').value),
     inss_retido:parseValorBR(document.getElementById('nd-inss').value),
     iss_retido:parseValorBR(document.getElementById('nd-iss').value),
+    tipo_lancamento: tipo,
   };
-  await api('/despesas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+
+  if (tipo === 'estoque') {
+    const itemId = document.getElementById('nd-est-item')?.value || '';
+    const novoNome = document.getElementById('nd-est-novo')?.value?.trim() || '';
+    const qtd = parseFloat(document.getElementById('nd-est-qtd')?.value || '0');
+    if (!qtd || qtd <= 0) { alert('Informe a quantidade do estoque.'); return; }
+    if (!itemId && !novoNome) { alert('Escolha um item existente OU informe nome do novo item.'); return; }
+    body.estoque_item_id = itemId || null;
+    body.estoque_item_novo_nome = itemId ? '' : novoNome;
+    body.estoque_item_categoria = document.getElementById('nd-est-cat')?.value || 'OUTROS';
+    body.estoque_quantidade = qtd;
+    body.estoque_unidade = document.getElementById('nd-est-un')?.value || 'UN';
+  } else if (tipo === 'patrimonio') {
+    body.patrimonio_categoria = document.getElementById('nd-pat-cat')?.value || 'Outro';
+    body.patrimonio_vida_util = parseInt(document.getElementById('nd-pat-vida')?.value, 10) || 60;
+    body.patrimonio_residual  = parseFloat(document.getElementById('nd-pat-residual')?.value) || 0;
+    body.patrimonio_serie     = document.getElementById('nd-pat-serie')?.value || '';
+  }
+
+  const r = await api('/despesas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if (!r || r.ok === false) {
+    alert('Erro ao salvar: ' + (r?.error || 'desconhecido'));
+    return;
+  }
   document.getElementById('desp-form-wrap').style.display='none';
   const ccLabel={ESCRITORIO:'🏢 Escritório salvo!',OPERACIONAL:'⚙️ Custo operacional salvo!',DIVIDENDOS:'💰 Dividendos salvos!'};
-  toast(ccLabel[cc]||'Despesa salva!');
+  let msg = ccLabel[cc] || 'Despesa salva!';
+  if (r.vinculo?.tipo === 'estoque')    msg += ` 📦 Lançada em Estoque (item #${r.vinculo.id})`;
+  if (r.vinculo?.tipo === 'patrimonio') msg += ` 🏗️ Cadastrada em Patrimônio (#${r.vinculo.id})`;
+  if (r.vinculo_erro) msg += ` ⚠️ Vínculo falhou: ${r.vinculo_erro}`;
+  toast(msg);
   loadDespData();
 }
 
