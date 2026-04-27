@@ -234,6 +234,123 @@ router.delete('/itens/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── SEED: Importar template de contrato (idempotente) ────────
+// Recebe { contrato: {...}, postos: [{...campos, itens: [...]}], gerar_boletim_competencia?: 'YYYY-MM' }
+// e cria/atualiza tudo. Se já existir, NÃO duplica — só completa o que faltar.
+router.post('/seed-template', async (req, res) => {
+  try {
+    const { contrato, postos = [], gerar_boletim_competencia } = req.body;
+    if (!contrato || !contrato.numero_contrato || !contrato.nome) {
+      return res.status(400).json({ error: 'contrato.numero_contrato e contrato.nome obrigatórios' });
+    }
+    const db = req.db;
+
+    // 1) Contrato
+    let bc = await db.prepare(`SELECT * FROM bol_contratos WHERE numero_contrato = ?`).get(contrato.numero_contrato);
+    let contratoId;
+    if (!bc) {
+      const r = await db.prepare(`
+        INSERT INTO bol_contratos (nome, contratante, numero_contrato, processo, pregao,
+          descricao_servico, escala, empresa_razao, empresa_cnpj, empresa_endereco,
+          empresa_email, empresa_telefone, contrato_ref, orgao, insc_municipal)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        contrato.nome, contrato.contratante || '', contrato.numero_contrato,
+        contrato.processo || '', contrato.pregao || '',
+        contrato.descricao_servico || '', contrato.escala || 'Mensal',
+        contrato.empresa_razao || '', contrato.empresa_cnpj || '',
+        contrato.empresa_endereco || '', contrato.empresa_email || '', contrato.empresa_telefone || '',
+        contrato.contrato_ref || '', contrato.orgao || '', contrato.insc_municipal || ''
+      );
+      contratoId = r.lastInsertRowid;
+    } else {
+      contratoId = bc.id;
+    }
+
+    // 2) Postos + Items
+    let postosCriados = 0, itensCriados = 0;
+    for (let i = 0; i < postos.length; i++) {
+      const p = postos[i];
+      const campusKey = p.campus_key || p.key || `POSTO_${i+1}`;
+      let posto = await db.prepare(`SELECT * FROM bol_postos WHERE contrato_id = ? AND campus_key = ?`).get(contratoId, campusKey);
+      let postoId;
+      if (!posto) {
+        const pr = await db.prepare(`
+          INSERT INTO bol_postos (contrato_id, campus_key, campus_nome, municipio, descricao_posto, label_resumo, ordem)
+          VALUES (?,?,?,?,?,?,?)
+        `).run(contratoId, campusKey, p.campus_nome || campusKey, p.municipio || '',
+               p.descricao_posto || '', p.label_resumo || p.campus_nome || campusKey, p.ordem || (i+1));
+        postoId = pr.lastInsertRowid;
+        postosCriados++;
+      } else {
+        postoId = posto.id;
+      }
+
+      // Items: se já tem algum item nesse posto, não duplica (idempotência por posto)
+      const existItens = await db.prepare(`SELECT COUNT(*)::int AS n FROM bol_itens WHERE posto_id = ?`).get(postoId);
+      if (!existItens || existItens.n === 0) {
+        for (let j = 0; j < (p.itens || []).length; j++) {
+          const it = p.itens[j];
+          await db.prepare(`
+            INSERT INTO bol_itens (posto_id, descricao, quantidade, valor_unitario, ordem)
+            VALUES (?,?,?,?,?)
+          `).run(postoId, it.descricao || it.desc || '', it.quantidade || it.qtd || 1,
+                 it.valor_unitario || it.valor || 0, j+1);
+          itensCriados++;
+        }
+      }
+    }
+
+    // 3) Gera boletim de competência (se solicitado e ainda não existe)
+    let boletimId = null;
+    let boletimStatus = 'nao_solicitado';
+    if (gerar_boletim_competencia && /^\d{4}-\d{2}$/.test(gerar_boletim_competencia)) {
+      const existeBol = await db.prepare(`SELECT id FROM bol_boletins WHERE contrato_id=? AND competencia=?`).get(contratoId, gerar_boletim_competencia);
+      if (existeBol) {
+        boletimId = existeBol.id;
+        boletimStatus = 'ja_existia';
+      } else {
+        // Soma dos itens × quantidade
+        const totRow = await db.prepare(`
+          SELECT COALESCE(SUM(bi.quantidade * bi.valor_unitario), 0) AS tot
+          FROM bol_itens bi
+          JOIN bol_postos bp ON bp.id = bi.posto_id
+          WHERE bp.contrato_id = ?
+        `).get(contratoId);
+        const valorBase = +(totRow?.tot || 0);
+
+        const [ano, mes] = gerar_boletim_competencia.split('-');
+        const MESES_NOME = {'01':'JANEIRO','02':'FEVEREIRO','03':'MARÇO','04':'ABRIL','05':'MAIO','06':'JUNHO','07':'JULHO','08':'AGOSTO','09':'SETEMBRO','10':'OUTUBRO','11':'NOVEMBRO','12':'DEZEMBRO'};
+        const mesNome = MESES_NOME[mes] || mes;
+        const numCt = (bc?.contrato_ref || contrato.numero_contrato || '').toUpperCase();
+        const tipoServ = (contrato.descricao_servico || 'SERVIÇOS').toUpperCase();
+        const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServ.slice(0, 200)} CONFORME CONTRATO Nº ${numCt}, COMPETÊNCIA ${mesNome}/${ano}.`;
+
+        const br = await db.prepare(`
+          INSERT INTO bol_boletins
+            (contrato_id, competencia, data_emissao, valor_base, valor_total, glosas, acrescimos,
+             discriminacao, status, nfse_status)
+          VALUES (?, ?, CURRENT_DATE, ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')
+        `).run(contratoId, gerar_boletim_competencia, valorBase, valorBase, discriminacao);
+        boletimId = br.lastInsertRowid;
+        boletimStatus = 'criado';
+      }
+    }
+
+    res.json({
+      ok: true,
+      contrato_id: contratoId,
+      contrato_existia_antes: !!bc,
+      postos_criados: postosCriados,
+      itens_criados: itensCriados,
+      boletim: { id: boletimId, status: boletimStatus, competencia: gerar_boletim_competencia || null },
+    });
+  } catch (e) {
+    console.error('[seed-template]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── BOLETINS — HISTÓRICO ─────────────────────────────────────
 
 router.get('/historico', async (req, res) => {
