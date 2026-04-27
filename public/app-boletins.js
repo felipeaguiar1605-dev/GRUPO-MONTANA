@@ -931,6 +931,145 @@ function abrirPainelFaturamento() {
   renderPainelFaturamento();
 }
 
+// ─── Templates pré-configurados de contratos (Boletins) ─────────
+// Cada template tem o JSON pronto pra POST /boletins/seed-template,
+// idempotente. Cadastra contrato + postos + items + boletim em rascunho
+// pra competência selecionada.
+const _BOL_TEMPLATES = {
+  'SEDUC_016_2023': {
+    label: 'SEDUC 016/2023 — Limpeza/Conservação Palmas (R$ 209.815,61/mês)',
+    empresa: 'assessoria',
+    payload: {
+      contrato: {
+        nome: 'SEDUC',
+        contratante: 'SECRETARIA DA EDUCAÇÃO DO ESTADO DO TOCANTINS',
+        numero_contrato: '016/2023',
+        descricao_servico: 'Prestação de serviços continuados nas áreas de limpeza, asseio e conservação, nas instalações da Secretaria da Educação do Estado do Tocantins e anexos/Palmas - TO. Considerando os serviços de copeiragem, jardinagem, serviços gerais e encarregadas. Com fornecimento de todo material e equipamentos que se fizerem necessários à execução dos serviços.',
+        escala: 'Mensal',
+        empresa_razao: 'MONTANA ASSESSORIA EMPRESARIAL LTDA',
+        empresa_cnpj: '14.092.519/0001-51',
+        empresa_endereco: 'QD. 104 SUL RUA SE 05 LOTE 19 SALA 07 CEP: 77020-018 PALMAS-TO',
+        empresa_email: 'montanaempresarial@gmail.com',
+        empresa_telefone: '(63) 3215-0351',
+        orgao: 'SECRETARIA DA EDUCAÇÃO DO ESTADO DO TOCANTINS',
+        contrato_ref: 'SEDUC 016/2023',
+      },
+      postos: [{
+        campus_key: 'PALMAS_SEDE',
+        campus_nome: 'SEDUC PALMAS - SEDE E ANEXOS',
+        municipio: 'PALMAS/TO',
+        descricao_posto: 'Limpeza, asseio, conservação, copeiragem e jardinagem',
+        label_resumo: 'PALMAS SEDE',
+        ordem: 1,
+        itens: [
+          { descricao: 'AUXILIAR DE SERVIÇO GERAL', quantidade: 24, valor_unitario: 5481.89 },
+          { descricao: 'COPEIRA',                   quantidade: 13, valor_unitario: 4060.53 },
+          { descricao: 'ENCARREGADA',               quantidade:  2, valor_unitario: 5513.62 },
+          { descricao: 'JARDINEIRO',                quantidade:  3, valor_unitario: 4812.04 },
+        ],
+      }],
+    },
+  },
+};
+
+function abrirImportarTemplate() {
+  const old = document.getElementById('modal-bol-template');
+  if (old) old.remove();
+  const empresaAtual = window.currentCompany;
+
+  const opcoes = Object.entries(_BOL_TEMPLATES)
+    .filter(([k, t]) => !t.empresa || t.empresa === empresaAtual)
+    .map(([k, t]) => `<option value="${k}">${t.label}</option>`)
+    .join('');
+
+  const modal = document.createElement('div');
+  modal.id = 'modal-bol-template';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:560px;width:100%;padding:24px">
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:14px">
+        <div>
+          <div style="font-size:17px;font-weight:800;color:#0f172a">📥 Importar Template de Contrato</div>
+          <div style="font-size:11px;color:#64748b;margin-top:2px">Cadastra contrato + postos + items + boletim em rascunho. Idempotente — pode rodar 2x sem duplicar.</div>
+        </div>
+        <button onclick="document.getElementById('modal-bol-template').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#64748b">✕</button>
+      </div>
+
+      ${opcoes ? `
+      <div style="margin-bottom:12px">
+        <label style="font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;display:block;margin-bottom:4px">Template</label>
+        <select id="bt-template" style="width:100%;padding:8px;font-size:12px;border:1px solid #cbd5e1;border-radius:6px">
+          ${opcoes}
+        </select>
+      </div>
+      <div style="margin-bottom:14px">
+        <label style="font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;display:block;margin-bottom:4px">Competência (gera boletim em rascunho)</label>
+        <input id="bt-comp" type="month" value="${(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;})()}" style="width:100%;padding:8px;font-size:12px;border:1px solid #cbd5e1;border-radius:6px">
+      </div>
+      <div id="bt-result" style="display:none;padding:10px 12px;border-radius:8px;font-size:11px;margin-bottom:10px"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button onclick="document.getElementById('modal-bol-template').remove()" style="padding:8px 16px;font-size:12px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;color:#475569;cursor:pointer">Cancelar</button>
+        <button onclick="confirmarImportTemplate()" style="padding:8px 22px;font-size:12px;font-weight:800;border:none;border-radius:6px;background:#d97706;color:#fff;cursor:pointer">✓ Importar</button>
+      </div>
+      ` : `
+      <div style="padding:14px;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;font-size:11px;color:#92400e">
+        Nenhum template disponível para a empresa <strong>${empresaAtual}</strong>.<br>
+        Os templates são pré-configurados por empresa. Quem precisa adicionar templates novos: <code>app-boletins.js → _BOL_TEMPLATES</code>.
+      </div>
+      `}
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+async function confirmarImportTemplate() {
+  const sel = document.getElementById('bt-template');
+  const compEl = document.getElementById('bt-comp');
+  const resEl = document.getElementById('bt-result');
+  if (!sel || !compEl) return;
+  const tpl = _BOL_TEMPLATES[sel.value];
+  if (!tpl) return;
+  const competencia = compEl.value || null;
+
+  const body = { ...tpl.payload, gerar_boletim_competencia: competencia };
+  resEl.style.display = 'block';
+  resEl.style.background = '#f8fafc';
+  resEl.style.color = '#334155';
+  resEl.style.border = '1px solid #e2e8f0';
+  resEl.innerHTML = '⏳ Cadastrando...';
+
+  try {
+    const r = await api('/boletins/seed-template', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(r.error || 'erro desconhecido');
+
+    resEl.style.background = '#dcfce7';
+    resEl.style.color = '#15803d';
+    resEl.style.border = '1px solid #86efac';
+    resEl.innerHTML = `
+      ✅ <strong>Template importado.</strong><br>
+      Contrato: ${r.contrato_existia_antes ? 'já existia (id=' + r.contrato_id + ')' : 'criado (id=' + r.contrato_id + ')'}<br>
+      Postos novos: ${r.postos_criados}, Itens novos: ${r.itens_criados}<br>
+      Boletim ${competencia || ''}: ${r.boletim?.status === 'criado' ? '<strong>rascunho criado</strong> (id=' + r.boletim.id + ')' : (r.boletim?.status === 'ja_existia' ? 'já existia' : '—')}
+    `;
+
+    setTimeout(() => {
+      document.getElementById('modal-bol-template')?.remove();
+      // Refresh do painel/lista de boletins
+      if (typeof loadBoletins === 'function') loadBoletins();
+      if (typeof renderPainelFaturamento === 'function' && _bolView === 'painel') renderPainelFaturamento();
+    }, 1800);
+  } catch (e) {
+    resEl.style.background = '#fee2e2';
+    resEl.style.color = '#991b1b';
+    resEl.style.border = '1px solid #fca5a5';
+    resEl.innerHTML = `❌ Erro: ${e.message || e}`;
+  }
+}
+
 async function renderPainelFaturamento() {
   const el = document.getElementById('bol-content');
   el.innerHTML = '<div class="loading">Carregando painel...</div>';
