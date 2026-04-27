@@ -1308,7 +1308,12 @@ router.get('/painel-faturamento', async (req, res) => {
     const db = req.db;
 
     // FIX2: JOIN duplo — contrato_ref exato OU LIKE numero_contrato
-    const contratos = db.prepare(`
+    // FIX3 (2026-04): faltava `await` na .all() (era síncrono em SQLite, virou
+    // Promise em PG → frontend recebia Promise em vez de array → "contratos.map
+    // is not a function"). Corrigido também `bc.ativo = 1` → `bc.ativo = TRUE`
+    // pra schemas em que `ativo` é boolean (compatibilidade com integer 1 mantida
+    // via COALESCE — assume ativo se a coluna for NULL).
+    const _contratosRaw = await db.prepare(`
       SELECT bc.*,
         COALESCE(
           (SELECT c1.valor_mensal_bruto FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
@@ -1321,9 +1326,10 @@ router.get('/painel-faturamento', async (req, res) => {
           ''
         ) AS cnpj_tomador_contrato
       FROM bol_contratos bc
-      WHERE bc.ativo = 1
+      WHERE COALESCE(bc.ativo::text, 'true') NOT IN ('0','false','f')
       ORDER BY bc.nome
     `).all();
+    const contratos = Array.isArray(_contratosRaw) ? _contratosRaw : [];
 
     const resultado = await Promise.all(contratos.map(async bc => {
       // FIX1: COALESCE(valor_total, total_geral)
@@ -1398,37 +1404,41 @@ router.post('/gerar-mes', async (req, res) => {
     }
     const db = req.db;
 
-    const contratos = await db.prepare(`
+    // FIX 2026-04: bc.ativo = 1 falhava em PG quando ativo é boolean.
+    // Tolera ambos: integer 1 e boolean TRUE (e NULL = ativo por default).
+    const _contratosRaw = await db.prepare(`
       SELECT bc.*, c.valor_mensal_bruto
       FROM bol_contratos bc
       LEFT JOIN contratos c ON bc.contrato_ref = c.numContrato
-      WHERE bc.ativo = 1
+      WHERE COALESCE(bc.ativo::text, 'true') NOT IN ('0','false','f')
     `).all();
+    const contratos = Array.isArray(_contratosRaw) ? _contratosRaw : [];
 
     const [ano, mesNum] = mes.split('-');
     const mesNome = MESES_NOME_COMPLETO[parseInt(mesNum)] || mes;
 
-    const ins = db.prepare(`INSERT INTO bol_boletins
-      (contrato_id, competencia, data_emissao, valor_base, valor_total, glosas, acrescimos, discriminacao, status, nfse_status)
-      VALUES (?, ?, CURRENT_DATE, ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')`);
-
     let criados = 0, existentes = 0;
 
-    const criar = db.transaction(async () => {
-      for (const bc of contratos) {
-        const existe = await db.prepare('SELECT id FROM bol_boletins WHERE contrato_id=? AND competencia=?').get(bc.id, mes);
-        if (existe) { existentes++; continue; }
+    // Sem transaction wrapper — em PG cada INSERT é atômico e não precisamos
+    // de ROLLBACK se o batch falhar no meio (mais simples + sem confusão de
+    // async/sync no transaction adapter).
+    for (const bc of contratos) {
+      const existe = await db.prepare('SELECT id FROM bol_boletins WHERE contrato_id=? AND competencia=?').get(bc.id, mes);
+      if (existe) { existentes++; continue; }
 
-        const valor_base = Math.round((bc.valor_mensal_bruto || 0) * 100) / 100;
-        const tipoServico = bc.descricao_servico || 'SERVIÇOS';
-        const numContrato  = bc.contrato_ref || bc.numero_contrato || '';
-        const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServico.toUpperCase()} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. VALOR MENSAL CONFORME BOLETIM DE MEDIÇÃO APROVADO.`;
+      const valor_base = Math.round((bc.valor_mensal_bruto || 0) * 100) / 100;
+      const tipoServico = bc.descricao_servico || 'SERVIÇOS';
+      const numContrato  = bc.contrato_ref || bc.numero_contrato || '';
+      const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServico.toUpperCase()} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. VALOR MENSAL CONFORME BOLETIM DE MEDIÇÃO APROVADO.`;
 
-        ins.run(bc.id, mes, valor_base, valor_base, discriminacao);
-        criados++;
-      }
-    });
-    await criar();
+      // FIX: faltava await em ins.run em PG (Promise não esperada → criados++
+      // contabilizava antes do INSERT terminar)
+      await db.prepare(`INSERT INTO bol_boletins
+        (contrato_id, competencia, data_emissao, valor_base, valor_total, glosas, acrescimos, discriminacao, status, nfse_status)
+        VALUES (?, ?, CURRENT_DATE, ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')
+      `).run(bc.id, mes, valor_base, valor_base, discriminacao);
+      criados++;
+    }
 
     res.json({ ok: true, mes, criados, existentes, total: contratos.length });
   } catch (err) {
