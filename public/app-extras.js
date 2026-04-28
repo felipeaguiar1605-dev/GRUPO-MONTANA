@@ -2272,9 +2272,15 @@ async function loadRHFuncionarios() {
   _rhFuncionarios = data;
 
   // KPIs
-  const ativos   = data.filter(f => f.status === 'ATIVO').length;
-  const demitidos = data.filter(f => f.status === 'DEMITIDO').length;
-  const totalSalarios = data.filter(f => f.status === 'ATIVO').reduce((s, f) => s + (f.salario_base || 0), 0);
+  const ativos        = data.filter(f => f.status === 'ATIVO').length;
+  const demitidos     = data.filter(f => f.status === 'DEMITIDO').length;
+  const ativosComSal  = data.filter(f => f.status === 'ATIVO' && (f.salario_base || 0) > 0);
+  const totalSalarios = ativosComSal.reduce((s, f) => s + (f.salario_base || 0), 0);
+  // Aviso se a maioria está sem salário cadastrado (>10%)
+  const semSalarioPct = ativos > 0 ? Math.round((1 - ativosComSal.length / ativos) * 100) : 0;
+  const semSalarioWarn = semSalarioPct > 10
+    ? `<div style="font-size:8px;color:#dc2626;font-weight:700;margin-top:2px">⚠ ${ativos - ativosComSal.length} sem salário cadastrado (${semSalarioPct}%)</div>`
+    : '';
   document.getElementById('rh-kpis').innerHTML = `
     <div class="kpi-card" style="border-left:4px solid #22c55e">
       <div class="kpi-v">${ativos}</div>
@@ -2291,6 +2297,8 @@ async function loadRHFuncionarios() {
     <div class="kpi-card" style="border-left:4px solid #f59e0b">
       <div class="kpi-v">${brl(totalSalarios)}</div>
       <div class="kpi-l">Folha Bruta Estimada</div>
+      <div style="font-size:9px;color:#64748b;margin-top:2px">${ativosComSal.length} de ${ativos} com salário</div>
+      ${semSalarioWarn}
     </div>
   `;
 

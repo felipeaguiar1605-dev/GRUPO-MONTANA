@@ -527,8 +527,16 @@ router.get('/dashboard', async (req, res) => {
     FROM extratos e WHERE 1=1 ${dateFilter}
   `).get(params);
 
-  // 2. Contratos com resumo financeiro
-  const contratos = await req.db.prepare(`SELECT COUNT(*) as total, COALESCE(SUM(total_pago),0) as total_pago, COALESCE(SUM(total_aberto),0) as total_aberto FROM contratos`).get();
+  // 2. Contratos com resumo financeiro — só ATIVOS (status NÃO contém 'encerrad'/'rescindid')
+  // FIX 2026-04: antes contava 26 (todos), divergia da página Contratos que mostra 11.
+  const contratos = await req.db.prepare(`
+    SELECT COUNT(*) as total,
+           COALESCE(SUM(total_pago),0) as total_pago,
+           COALESCE(SUM(total_aberto),0) as total_aberto
+    FROM contratos
+    WHERE LOWER(COALESCE(status,'')) NOT LIKE '%encerrad%'
+      AND LOWER(COALESCE(status,'')) NOT LIKE '%rescindid%'
+  `).get();
 
   // 3. NFs — filtradas pelo mesmo período quando fornecido
   let nfsDateFilter = '';
@@ -1224,7 +1232,7 @@ router.get('/reajustes', async (req, res) => {
              data_ultimo_reajuste, indice_reajuste, pct_reajuste_ultimo,
              data_proximo_reajuste, obs_reajuste, valor_mensal_bruto
       FROM contratos
-      WHERE status NOT LIKE '%ENCERRADO%' AND status NOT LIKE '%RESCINDIDO%'
+      WHERE COALESCE(status,'') NOT ILIKE '%ENCERRADO%' AND COALESCE(status,'') NOT ILIKE '%RESCINDIDO%'
       ORDER BY data_proximo_reajuste ASC, vigencia_fim ASC
     `).all();
 
@@ -3733,9 +3741,11 @@ router.get('/fluxo-projetado', async (req, res) => {
   try {
     const meses = Math.min(Math.max(parseInt(req.query.meses) || 6, 1), 24);
 
+    // FIX 2026-04: ILIKE case-insensitive (LIKE é case-sensitive em PG, escapava
+    // status como 'Encerrado' e contava errado).
     const _contratosRaw = await req.db.prepare(
       "SELECT valor_mensal_liquido FROM contratos " +
-      "WHERE status NOT LIKE '%ENCERRADO%' AND status NOT LIKE '%RESCINDIDO%' " +
+      "WHERE COALESCE(status,'') NOT ILIKE '%ENCERRADO%' AND COALESCE(status,'') NOT ILIKE '%RESCINDIDO%' " +
       "AND (vigencia_fim IS NULL OR vigencia_fim = '' OR safe_date(vigencia_fim) >= CURRENT_DATE)"
     ).all();
     const contratos = Array.isArray(_contratosRaw) ? _contratosRaw : [];
