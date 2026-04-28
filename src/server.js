@@ -141,6 +141,9 @@ app.use('/api/inss-retido', require('./routes/inss-retido'));
 // ─── Painel de Pagamentos por Contrato ───────────────────────
 app.use('/api/pagamentos-contrato', require('./routes/pagamentos-contrato'));
 
+// ─── Diagnóstico Faturamento × Previsto ──────────────────────
+app.use('/api/diagnostico', require('./routes/diagnostico'));
+
 // ─── Margem Real por Contrato ────────────────────────────────
 app.use('/api/margem-contrato', require('./routes/margem-contrato'));
 

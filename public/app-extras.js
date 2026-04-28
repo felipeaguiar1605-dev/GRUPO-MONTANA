@@ -20,6 +20,7 @@
     if (id === 'desp')            loadSubcontratados();
     if (id === 'piscofins-seg')   initPisCofinsSeg();
     if (id === 'inss-retido')     initInssRetido();
+    if (id === 'apuracao-fat')    apuracaoFatInit();
   };
 })();
 
@@ -3677,3 +3678,161 @@ async function abrirRelatorioInss() {
     content.innerHTML = `<div style="color:#dc2626;padding:20px">Erro ao gerar relatório: ${e.message}</div>`;
   }
 }
+
+// ═══════════════════════════════════════════════════════════════
+// 🎯 APURAÇÃO FATURADO × PREVISTO (Boletins vs NFs)
+// ═══════════════════════════════════════════════════════════════
+
+window.apuracaoFatInit = function () {
+  const elFrom = document.getElementById('afat-from');
+  const elTo   = document.getElementById('afat-to');
+  if (elFrom && !elFrom.value) {
+    // Default: jan a mes-anterior (cobre histórico que o user costuma cadastrar)
+    const hoje = new Date();
+    const inicioAno = `${hoje.getFullYear()}-01-01`;
+    const ultimoDia = new Date(hoje.getFullYear(), hoje.getMonth(), 0).toISOString().slice(0, 10);
+    elFrom.value = inicioAno;
+    if (elTo) elTo.value = ultimoDia >= inicioAno ? ultimoDia : `${hoje.getFullYear()}-12-31`;
+  }
+};
+
+const _afatStatusCfg = {
+  OK:           { cor: '#15803d', bg: '#dcfce7', label: '✅ Alinhado',           desc: 'Faturado bate com previsto (±1%)' },
+  ALERTA:       { cor: '#b45309', bg: '#fef3c7', label: '⚠ Alerta',              desc: 'Divergência entre 1% e 5%' },
+  DIVERGENTE:   { cor: '#991b1b', bg: '#fee2e2', label: '🔴 Divergente',         desc: 'Divergência > 5%' },
+  SEM_BOLETIM:  { cor: '#9333ea', bg: '#f3e8ff', label: '📋 Sem Boletim',        desc: 'Tem NF emitida mas falta cadastrar Boletim' },
+  SEM_NF:       { cor: '#0369a1', bg: '#dbeafe', label: '🧾 Sem NF',             desc: 'Boletim gerado mas NF ainda não emitida' },
+};
+
+window.carregarApuracaoFat = async function () {
+  const from = document.getElementById('afat-from')?.value;
+  const to   = document.getElementById('afat-to')?.value;
+  const elStatus = document.getElementById('afat-status');
+  const elLoading = document.getElementById('afat-loading');
+
+  if (!from || !to) {
+    if (elLoading) elLoading.textContent = '⚠ Preencha as datas De e Até.';
+    return;
+  }
+
+  if (elStatus) elStatus.textContent = 'Apurando…';
+  if (elLoading) {
+    elLoading.style.display = 'block';
+    elLoading.textContent = '⏳ Apurando faturamento × previsto…';
+  }
+  document.getElementById('afat-kpis').innerHTML = '';
+  document.getElementById('afat-status-bar').style.display = 'none';
+  document.getElementById('afat-tabela-wrap').style.display = 'none';
+  document.getElementById('afat-orfas-wrap').style.display = 'none';
+
+  try {
+    const url = `/diagnostico/faturamento-vs-previsto?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    const d = await api(url);
+    if (!d.ok) throw new Error(d.error || 'Erro');
+
+    const r = d.resumo;
+    if (elStatus) elStatus.textContent = `${r.qtd_contratos_total} contratos analisados · ${d.periodo.fromMes} → ${d.periodo.toMes}`;
+
+    // KPIs
+    document.getElementById('afat-kpis').innerHTML = `
+      <div style="background:#dbeafe;border-radius:10px;padding:12px 14px;border:1px solid #93c5fd">
+        <div style="font-size:9px;font-weight:700;color:#1e40af;text-transform:uppercase">Previsto (Boletins)</div>
+        <div style="font-size:16px;font-weight:800;color:#1e3a8a">${brl(r.total_previsto)}</div>
+      </div>
+      <div style="background:#dcfce7;border-radius:10px;padding:12px 14px;border:1px solid #86efac">
+        <div style="font-size:9px;font-weight:700;color:#15803d;text-transform:uppercase">Faturado (NFs)</div>
+        <div style="font-size:16px;font-weight:800;color:#14532d">${brl(r.total_faturado)}</div>
+      </div>
+      <div style="background:${r.total_diferenca >= 0 ? '#dcfce7' : '#fee2e2'};border-radius:10px;padding:12px 14px;border:1px solid ${r.total_diferenca >= 0 ? '#86efac' : '#fca5a5'}">
+        <div style="font-size:9px;font-weight:700;color:${r.total_diferenca >= 0 ? '#15803d' : '#991b1b'};text-transform:uppercase">Diferença</div>
+        <div style="font-size:16px;font-weight:800;color:${r.total_diferenca >= 0 ? '#14532d' : '#7f1d1d'}">${r.total_diferenca >= 0 ? '+' : ''}${brl(r.total_diferenca)}</div>
+        <div style="font-size:9px;color:#64748b;margin-top:2px">${r.total_diferenca >= 0 ? 'Faturou a mais que previu' : 'Faturou a menos que previu'}</div>
+      </div>
+      <div style="background:#fef3c7;border-radius:10px;padding:12px 14px;border:1px solid #fcd34d">
+        <div style="font-size:9px;font-weight:700;color:#92400e;text-transform:uppercase">Aderência</div>
+        <div style="font-size:16px;font-weight:800;color:#78350f">${r.aderencia_pct}%</div>
+        <div style="font-size:9px;color:#64748b;margin-top:2px">${r.qtd_alinhados} OK · ${r.qtd_alerta} alerta · ${r.qtd_divergentes} div.</div>
+      </div>`;
+
+    // Status bar
+    const statusBar = document.getElementById('afat-status-bar');
+    statusBar.style.display = 'block';
+    const statusItens = [
+      { k: 'OK', cnt: r.qtd_alinhados },
+      { k: 'ALERTA', cnt: r.qtd_alerta },
+      { k: 'DIVERGENTE', cnt: r.qtd_divergentes },
+      { k: 'SEM_BOLETIM', cnt: r.qtd_sem_boletim },
+      { k: 'SEM_NF', cnt: r.qtd_sem_nf },
+    ];
+    statusBar.innerHTML = `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        ${statusItens.map(s => {
+          const cfg = _afatStatusCfg[s.k];
+          return `<span style="background:${cfg.bg};color:${cfg.cor};font-size:11px;font-weight:700;padding:5px 12px;border-radius:6px;border:1px solid ${cfg.cor}33" title="${cfg.desc}">${cfg.label}: ${s.cnt}</span>`;
+        }).join('')}
+        ${r.qtd_nfs_orfas > 0 ? `<span style="background:#fef3c7;color:#92400e;font-size:11px;font-weight:700;padding:5px 12px;border-radius:6px;border:1px solid #fcd34d40" title="NFs sem contrato_ref preenchido">⚠ NFs órfãs: ${r.qtd_nfs_orfas} (${brl(r.valor_nfs_orfas)})</span>` : ''}
+      </div>`;
+
+    // Tabela contratos
+    const linhas = d.contratos || [];
+    if (linhas.length) {
+      document.getElementById('afat-tabela-wrap').style.display = 'block';
+      const thead = document.querySelector('#afat-tabela thead');
+      const tbody = document.querySelector('#afat-tabela tbody');
+      thead.innerHTML = `<tr style="background:#1e293b;color:#fff">
+        <th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700">Contrato</th>
+        <th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700">Nome</th>
+        <th style="padding:8px 10px;text-align:right;font-size:10px;font-weight:700">Previsto</th>
+        <th style="padding:8px 10px;text-align:right;font-size:10px;font-weight:700">Faturado</th>
+        <th style="padding:8px 10px;text-align:right;font-size:10px;font-weight:700">Diferença</th>
+        <th style="padding:8px 10px;text-align:right;font-size:10px;font-weight:700">% Diff</th>
+        <th style="padding:8px 10px;text-align:center;font-size:10px;font-weight:700">NFs</th>
+        <th style="padding:8px 10px;text-align:center;font-size:10px;font-weight:700">Status</th>
+      </tr>`;
+      tbody.innerHTML = linhas.map(l => {
+        const cfg = _afatStatusCfg[l.status] || _afatStatusCfg.OK;
+        const corDiff = l.diferenca > 0 ? '#15803d' : l.diferenca < 0 ? '#dc2626' : '#64748b';
+        const sinalDiff = l.diferenca > 0 ? '+' : '';
+        const pctTxt = l.status === 'SEM_BOLETIM' ? '—' : (sinalDiff + l.diferenca_pct + '%');
+        return `<tr style="border-bottom:1px solid #f1f5f9;background:${cfg.bg}40">
+          <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#0f172a">${l.contrato_ref}</td>
+          <td style="padding:6px 10px;font-size:11px;color:#475569;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(l.nome||'').replace(/"/g,'&quot;')}">${l.nome||''}</td>
+          <td style="padding:6px 10px;font-size:11px;text-align:right;font-family:monospace;color:#1e40af">${brl(l.previsto)}</td>
+          <td style="padding:6px 10px;font-size:11px;text-align:right;font-family:monospace;color:#15803d">${brl(l.faturado)}</td>
+          <td style="padding:6px 10px;font-size:11px;text-align:right;font-family:monospace;color:${corDiff};font-weight:700">${sinalDiff}${brl(l.diferenca)}</td>
+          <td style="padding:6px 10px;font-size:11px;text-align:right;font-family:monospace;color:${corDiff}">${pctTxt}</td>
+          <td style="padding:6px 10px;font-size:11px;text-align:center;color:#64748b">${l.qtd_nfs}</td>
+          <td style="padding:6px 10px;text-align:center"><span style="background:${cfg.bg};color:${cfg.cor};font-size:9px;font-weight:700;padding:2px 8px;border-radius:6px;white-space:nowrap">${cfg.label}</span></td>
+        </tr>`;
+      }).join('');
+    }
+
+    // NFs órfãs
+    if (d.nfs_orfas && d.nfs_orfas.length) {
+      document.getElementById('afat-orfas-wrap').style.display = 'block';
+      const ot = document.querySelector('#afat-orfas thead');
+      const ob = document.querySelector('#afat-orfas tbody');
+      ot.innerHTML = `<tr style="background:#92400e;color:#fff">
+        <th style="padding:6px 10px;text-align:left;font-size:10px">NF</th>
+        <th style="padding:6px 10px;text-align:left;font-size:10px">Emissão</th>
+        <th style="padding:6px 10px;text-align:left;font-size:10px">Tomador</th>
+        <th style="padding:6px 10px;text-align:right;font-size:10px">Valor Bruto</th>
+      </tr>`;
+      ob.innerHTML = d.nfs_orfas.map(n => `<tr style="border-bottom:1px solid #fef3c7">
+        <td style="padding:5px 10px;font-size:11px;font-weight:600">${n.numero||'(s/n)'}</td>
+        <td style="padding:5px 10px;font-size:11px;color:#64748b">${n.data_emissao||''}</td>
+        <td style="padding:5px 10px;font-size:11px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(n.tomador||'').replace(/"/g,'&quot;')}">${n.tomador||''}</td>
+        <td style="padding:5px 10px;font-size:11px;text-align:right;font-family:monospace">${brl(n.valor_bruto||0)}</td>
+      </tr>`).join('');
+    }
+
+    if (elLoading) elLoading.style.display = 'none';
+  } catch (e) {
+    console.error('[apuracao-fat]', e);
+    if (elLoading) {
+      elLoading.style.display = 'block';
+      elLoading.innerHTML = `<span style="color:#dc2626">❌ Erro: ${e.message}</span>`;
+    }
+    if (elStatus) elStatus.textContent = '';
+  }
+};

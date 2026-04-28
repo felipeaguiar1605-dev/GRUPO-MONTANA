@@ -205,6 +205,7 @@
       <div class="tab" data-tab="dre" onclick="navGo('dre',this)">📊 DRE</div>
       <div class="tab" data-tab="margem" onclick="navGo('margem',this)">💰 Margem</div>
       <div class="tab" data-tab="margem-contrato" onclick="navGo('margem-contrato',this);setTimeout(()=>margemContratoInit&&margemContratoInit(),50)">📊 Margem por Contrato</div>
+      <div class="tab" data-tab="apuracao-fat" onclick="navGo('apuracao-fat',this);setTimeout(()=>apuracaoFatInit&&apuracaoFatInit(),50)">🎯 Faturado vs Previsto</div>
       <div class="tab" data-tab="fluxo" onclick="navGo('fluxo',this)">📈 Fluxo de Caixa</div>
       <!-- Caixa Livre e Fluxo Projetado viraram sub-abas de Fluxo (2026-04). Tabs ocultas mas rotas mantidas. -->
       <div class="tab" data-tab="fluxo-proj" onclick="navGo('fluxo-proj',this);setTimeout(()=>fcpCarregar&&fcpCarregar(),50)" style="display:none">🔮 Fluxo Projetado</div>
@@ -1192,6 +1193,53 @@
   </div>
 </div>
 
+
+<!-- 🎯 Apuração Faturado × Previsto -->
+<div id="pg-apuracao-fat" class="pg">
+  <div style="max-width:1100px;margin:0 auto">
+    <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:4px">🎯 Faturado × Previsto — Conciliação por Contrato</h2>
+    <p style="font-size:11px;color:#94a3b8;margin-bottom:14px">
+      Compara NFs emitidas (faturado) com Boletins gerados (previsto) por contrato e período.
+      Identifica contratos sem boletim, boletins sem NF, e NFs órfãs.
+    </p>
+
+    <!-- Filtros -->
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;background:#fff;padding:10px 14px;border:1px solid #e2e8f0;border-radius:8px">
+      <label style="font-size:11px;font-weight:700;color:#475569">De:</label>
+      <input type="date" id="afat-from" style="padding:5px 8px;font-size:12px;border:1px solid #e2e8f0;border-radius:5px">
+      <label style="font-size:11px;font-weight:700;color:#475569">Até:</label>
+      <input type="date" id="afat-to" style="padding:5px 8px;font-size:12px;border:1px solid #e2e8f0;border-radius:5px">
+      <button onclick="carregarApuracaoFat()" style="padding:6px 14px;font-size:11px;border:none;border-radius:5px;background:#0f172a;color:#fff;cursor:pointer;font-weight:600">Apurar</button>
+      <span id="afat-status" style="font-size:10px;color:#64748b;margin-left:auto"></span>
+    </div>
+
+    <!-- KPIs -->
+    <div id="afat-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:16px"></div>
+
+    <!-- Distribuição por status -->
+    <div id="afat-status-bar" style="display:none;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;margin-bottom:14px"></div>
+
+    <!-- Tabela principal -->
+    <div id="afat-tabela-wrap" style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:14px;display:none">
+      <div style="background:#f8fafc;padding:8px 14px;font-size:11px;font-weight:700;color:#475569;border-bottom:1px solid #e2e8f0">
+        Por Contrato (ordenado pela maior divergência)
+      </div>
+      <div class="tw" style="overflow-x:auto"><table id="afat-tabela" style="width:100%;border-collapse:collapse;font-size:11px"><thead></thead><tbody></tbody></table></div>
+    </div>
+
+    <!-- NFs órfãs -->
+    <div id="afat-orfas-wrap" style="display:none;background:#fff;border:1px solid #fcd34d;border-radius:8px;overflow:hidden;margin-bottom:14px">
+      <div style="background:#fef3c7;padding:8px 14px;font-size:11px;font-weight:700;color:#92400e;border-bottom:1px solid #fcd34d">
+        ⚠ NFs Órfãs (sem contrato_ref) — recomenda-se vincular antes de re-apurar
+      </div>
+      <div class="tw" style="overflow-x:auto;max-height:300px;overflow-y:auto"><table id="afat-orfas" style="width:100%;border-collapse:collapse;font-size:11px"><thead></thead><tbody></tbody></table></div>
+    </div>
+
+    <div id="afat-loading" style="padding:30px;text-align:center;color:#94a3b8;font-size:13px">
+      Selecione o período e clique em Apurar.
+    </div>
+  </div>
+</div>
 
 <!-- Fluxo de Caixa Projetado -->
 <div id="pg-fluxo" class="pg">
