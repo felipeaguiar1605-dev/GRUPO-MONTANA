@@ -931,6 +931,30 @@ function abrirPainelFaturamento() {
   renderPainelFaturamento();
 }
 
+// Abre o preview do PDF do boletim em nova aba (não baixa, só visualiza)
+async function previewBoletimPDF(boletim_id) {
+  const token = localStorage.getItem('jwt') || localStorage.getItem('montana_jwt') || '';
+  const company = window.currentCompany || '';
+  // Como <a target=_blank> não envia headers, abrimos via blob URL
+  try {
+    const r = await fetch(`/api/boletins/${boletim_id}/preview-pdf?company=${company}`, {
+      headers: { 'Authorization': 'Bearer ' + token, 'X-Company': company },
+    });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      alert('Erro ao gerar preview: ' + (txt || r.status));
+      return;
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    // Libera URL depois de uns segundos
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) {
+    alert('Erro: ' + e.message);
+  }
+}
+
 // ─── Templates pré-configurados de contratos (Boletins) ─────────
 // Cada template tem o JSON pronto pra POST /boletins/seed-template,
 // idempotente. Cadastra contrato + postos + items + boletim em rascunho
@@ -1274,7 +1298,11 @@ function _renderLinhaContratoPainel(c, idx, mes) {
            style="padding:4px 8px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">📦 ZIP</button>`
       : '';
 
-    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${btnAjustar}${btnAprovar}${btnEmitir}${btnPacote}</div>`;
+    // Preview do PDF do boletim (visualizar layout antes de emitir)
+    const btnPreview = `<button onclick="previewBoletimPDF(${bol.id})" title="Visualizar PDF do boletim"
+           style="padding:4px 8px;background:#0ea5e9;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">👁️ PDF</button>`;
+
+    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${btnPreview}${btnAjustar}${btnAprovar}${btnEmitir}${btnPacote}</div>`;
   }
 
   const valorBase   = brl(c.valor_mensal_bruto);

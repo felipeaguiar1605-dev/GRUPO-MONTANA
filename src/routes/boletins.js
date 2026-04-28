@@ -1152,6 +1152,166 @@ function gerarResumoPDF(dadosResumo, contrato, ano, outputPath) {
   return totalMensal;
 }
 
+// ─── PREVIEW PDF do boletim (gera em memória e devolve inline) ──
+// GET /api/boletins/:id/preview-pdf
+// Útil pra visualizar o layout sem precisar acionar /gerar e salvar em disco.
+router.get('/:id/preview-pdf', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const bol = await req.db.prepare(`
+      SELECT b.*, bc.*, b.id AS boletim_id, b.competencia AS boletim_competencia
+      FROM bol_boletins b
+      JOIN bol_contratos bc ON bc.id = b.contrato_id
+      WHERE b.id = ?
+    `).get(id);
+    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+
+    const postos = await req.db.prepare(`SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem`).all(bol.contrato_id);
+    for (const p of postos) {
+      p.itens = await req.db.prepare(`SELECT * FROM bol_itens WHERE posto_id = ? ORDER BY ordem`).all(p.id);
+    }
+    if (!postos.length) return res.status(400).json({ error: 'Contrato sem postos cadastrados' });
+
+    // Para preview, junta TODOS os items de TODOS os postos num "posto agregado"
+    // (mesmo formato do PDF SEDUC original — 1 boletim por contrato com todas as funções).
+    const postoAggregado = {
+      campus_nome: postos.map(p => p.campus_nome || p.label_resumo).join(' · '),
+      municipio: postos[0]?.municipio || '',
+      descricao_posto: postos.map(p => p.descricao_posto).filter(Boolean).join(' · ') || '—',
+      itens: postos.flatMap(p => p.itens || []),
+    };
+
+    // Período humano (ex.: "Abril/2026")
+    const MESES = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    const [ano, mesNum] = (bol.boletim_competencia || '').split('-');
+    const periodo = `${MESES[parseInt(mesNum, 10)] || mesNum}/${ano}`;
+    const dataEmissao = bol.data_emissao
+      ? new Date(bol.data_emissao).toLocaleDateString('pt-BR')
+      : new Date().toLocaleDateString('pt-BR');
+    const nfNumero = bol.nfse_numero || '— a emitir —';
+
+    // Gera em buffer e devolve inline
+    const buf = await pdfToBuffer(doc => {
+      gerarBoletimPDF_inline(doc, bol, postoAggregado, nfNumero, dataEmissao, periodo);
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="preview_boletim_${bol.contrato_id}_${bol.boletim_competencia}.pdf"`);
+    res.send(buf);
+  } catch (err) {
+    console.error('Erro preview-pdf:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Wrapper que reusa o desenho do gerarBoletimPDF, mas escrevendo no doc
+// fornecido em vez de criar um stream novo. Replica o layout 1:1.
+function gerarBoletimPDF_inline(doc, contrato, posto, nfNumero, dataEmissao, periodo) {
+  const pageW = doc.page.width;
+  const margin = 30;
+  const contentW = pageW - 2 * margin;
+
+  doc.rect(margin, 30, contentW, 85).fill(AZUL_ESCURO);
+  doc.fill('#FFFFFF').fontSize(18).font('Helvetica-Bold')
+     .text('BOLETIM DE MEDIÇÃO', margin, 42, { width: contentW, align: 'center' });
+  doc.moveTo(margin + 40, 65).lineTo(margin + contentW - 40, 65)
+     .strokeColor('#FFFFFF').lineWidth(0.5).stroke();
+  const textoEmpresa = `${contrato.empresa_razao || ''}    CNPJ: ${contrato.empresa_cnpj || ''}`;
+  doc.fontSize(9).font('Helvetica-Bold').text(textoEmpresa, margin, 72, { width: contentW, align: 'center' });
+  doc.fontSize(7.5).font('Helvetica').text(contrato.empresa_endereco || '', margin, 85, { width: contentW, align: 'center' });
+  doc.text(`E-mail: ${contrato.empresa_email || ''}  /  Telefone: ${contrato.empresa_telefone || ''}`,
+           margin, 96, { width: contentW, align: 'center' });
+
+  const blocoY = 130, blocoH = 130;
+  doc.rect(margin, blocoY, contentW, blocoH).strokeColor(CINZA_BORDA).lineWidth(0.5).stroke();
+  let y = blocoY + 15;
+  const lx = margin + 8;
+  function field(label, value) {
+    doc.fill('#000000').font('Helvetica-Bold').fontSize(9).text(label + ':', lx, y, { continued: true });
+    doc.font('Helvetica').text(' ' + (value || '—'));
+    y += 16;
+  }
+  function fieldSmall(label, value) {
+    doc.fill('#000000').font('Helvetica').fontSize(8.5).text(label + ': ' + (value || '—'), lx, y);
+    y += 14;
+  }
+  field('CONTRATANTE', contrato.contratante);
+  field('CONTRATO', contrato.numero_contrato);
+  fieldSmall('PROCESSO', contrato.processo);
+  fieldSmall('PREGÃO ELETRÔNICO', contrato.pregao);
+  fieldSmall('POSTO', posto.campus_nome);
+  y += 2;
+  field('PERÍODO', periodo);
+  field('MUNICÍPIO', posto.municipio);
+
+  const nfY = blocoY + blocoH + 15;
+  doc.rect(margin, nfY, contentW, 22).fill(CINZA_CLARO);
+  doc.fill('#000000').font('Helvetica-Bold').fontSize(10)
+     .text(`NOTA FISCAL: ${nfNumero}`, margin + 10, nfY + 5)
+     .text(`DATA DE EMISSÃO: ${dataEmissao}`, pageW / 2 + 30, nfY + 5);
+
+  const tableY = nfY + 35;
+  const colWidths = [contentW * 0.42, contentW * 0.12, contentW * 0.23, contentW * 0.23];
+  const headers = ['ITEM', 'QTD.', 'VALOR UNITÁRIO', 'VALOR TOTAL'];
+
+  let tx = margin;
+  doc.rect(margin, tableY, contentW, 20).fill(AZUL_ESCURO);
+  doc.fill('#FFFFFF').font('Helvetica-Bold').fontSize(8);
+  for (let i = 0; i < headers.length; i++) {
+    doc.text(headers[i], tx + 4, tableY + 5, { width: colWidths[i] - 8, align: 'center' });
+    tx += colWidths[i];
+  }
+
+  let rowY = tableY + 20;
+  let totalPosto = 0;
+  for (let idx = 0; idx < posto.itens.length; idx++) {
+    const item = posto.itens[idx];
+    const vt = (item.quantidade || 0) * (item.valor_unitario || 0);
+    totalPosto += vt;
+    if (idx % 2 === 1) doc.rect(margin, rowY, contentW, 28).fill(CINZA_CLARO);
+    tx = margin;
+    doc.fill('#000000').font('Helvetica').fontSize(8);
+    const descH = doc.heightOfString(item.descricao || '', { width: colWidths[0] - 12 });
+    const rowH = Math.max(descH + 10, 28);
+    doc.text(item.descricao || '', tx + 6, rowY + 5, { width: colWidths[0] - 12 });
+    tx += colWidths[0];
+    doc.text(String(item.quantidade || 0), tx + 4, rowY + 8, { width: colWidths[1] - 8, align: 'center' });
+    tx += colWidths[1];
+    doc.text(formatMoeda(item.valor_unitario || 0), tx + 4, rowY + 8, { width: colWidths[2] - 8, align: 'right' });
+    tx += colWidths[2];
+    doc.text(formatMoeda(vt), tx + 4, rowY + 8, { width: colWidths[3] - 8, align: 'right' });
+    doc.rect(margin, rowY, contentW, rowH).strokeColor(CINZA_BORDA).lineWidth(0.3).stroke();
+    rowY += rowH;
+  }
+
+  rowY += 4;
+  doc.font('Helvetica-Bold').fontSize(9).fill('#000000');
+  const totalX = margin + colWidths[0] + colWidths[1];
+  doc.text('TOTAL:', totalX + 4, rowY, { width: colWidths[2] - 8, align: 'right' });
+  doc.text(formatMoeda(totalPosto), totalX + colWidths[2] + 4, rowY, { width: colWidths[3] - 8, align: 'right' });
+
+  rowY += 25;
+  doc.font('Helvetica-Bold').fontSize(9).text('DESCRIÇÃO DO SERVIÇO:', margin + 5, rowY);
+  rowY += 5;
+  doc.font('Helvetica').fontSize(8).text(contrato.descricao_servico || '', margin + 5, rowY + 8, { width: contentW - 10 });
+  rowY = doc.y + 10;
+  doc.font('Helvetica-Bold').fontSize(9).text('DESCRIÇÃO DO POSTO: ', margin + 5, rowY, { continued: true });
+  doc.font('Helvetica').text(posto.descricao_posto || '');
+  rowY = doc.y + 5;
+  doc.font('Helvetica-Bold').fontSize(9).text('ESCALA: ', margin + 5, rowY, { continued: true });
+  doc.font('Helvetica').text((contrato.escala || '') + '.');
+
+  const sigY = doc.page.height - 100;
+  const sigW = (contentW - 20) / 3;
+  const labels = ['FORNECEDOR', 'FISCALIZAÇÃO', 'APROVADO'];
+  for (let i = 0; i < labels.length; i++) {
+    const x = margin + i * (sigW + 10);
+    doc.rect(x, sigY, sigW, 60).strokeColor(CINZA_BORDA).lineWidth(0.5).stroke();
+    doc.moveTo(x + 15, sigY + 40).lineTo(x + sigW - 15, sigY + 40).stroke();
+    doc.fill('#000000').font('Helvetica').fontSize(8).text(labels[i], x, sigY + 45, { width: sigW, align: 'center' });
+  }
+}
+
 // ─── PDF helpers: Espelho NFS-e e Ofício (usam buffer em memória) ──
 
 function pdfToBuffer(builder) {
