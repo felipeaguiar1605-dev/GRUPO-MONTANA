@@ -1091,12 +1091,23 @@ document.addEventListener('DOMContentLoaded', () => {
 // ─── RETENÇÕES TRIBUTÁRIAS ──────────────────────────────────────
 
 let _retData = null;
+let _retDataKey = null;  // chave de cache: invalida quando _from/_to mudam
 
 async function loadRetencoes() {
   const el = document.getElementById('ret-kpis');
-  if (!_retData) {
+  // Cache invalidado automaticamente quando o filtro de período do header muda.
+  // Antes, o cache era keyed apenas por "carregou alguma vez" → mudar o mês
+  // não recarregava os dados, mostrando dados de outro período.
+  const cacheKey = `${_from || ''}|${_to || ''}`;
+  if (!_retData || _retDataKey !== cacheKey) {
     el.innerHTML = '<div class="loading">Carregando análise de retenções</div>';
-    _retData = await api('/retencoes/analise');
+    let url = '/retencoes/analise';
+    const params = [];
+    if (_from) params.push('from=' + encodeURIComponent(_from));
+    if (_to)   params.push('to='   + encodeURIComponent(_to));
+    if (params.length) url += '?' + params.join('&');
+    _retData = await api(url);
+    _retDataKey = cacheKey;
   }
   const d = _retData;
   const r = d.resumo;
