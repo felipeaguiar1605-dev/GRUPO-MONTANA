@@ -1185,8 +1185,25 @@ router.get('/:id/preview-pdf', async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'ID inválido' });
 
     // Queries separadas (evita conflito de colunas duplicadas com SELECT b.*, bc.*)
-    const boletim = await req.db.prepare(`SELECT * FROM bol_boletins WHERE id = ?`).get(id);
-    if (!boletim) return res.status(404).json({ error: 'Boletim não encontrado (id=' + id + ')' });
+    let boletim = await req.db.prepare(`SELECT * FROM bol_boletins WHERE id = ?`).get(id);
+
+    // FALLBACK: se id stale (frontend com cache), usar contrato_id+competencia
+    // como localizadores alternativos via query string.
+    if (!boletim && req.query.contrato_id && req.query.competencia) {
+      boletim = await req.db.prepare(`
+        SELECT * FROM bol_boletins WHERE contrato_id = ? AND competencia = ?
+      `).get(parseInt(req.query.contrato_id, 10), req.query.competencia);
+    }
+
+    if (!boletim) {
+      // Diagnóstico: lista IDs existentes pra debug
+      const ids = await req.db.prepare(`SELECT id, contrato_id, competencia, valor_total FROM bol_boletins ORDER BY id DESC LIMIT 10`).all();
+      return res.status(404).json({
+        error: 'Boletim não encontrado (id=' + id + ')',
+        ids_disponiveis: ids,
+        dica: 'Use ?contrato_id=X&competencia=YYYY-MM como alternativa',
+      });
+    }
 
     const contrato = await req.db.prepare(`SELECT * FROM bol_contratos WHERE id = ?`).get(boletim.contrato_id);
     if (!contrato) return res.status(404).json({ error: 'Contrato do boletim não encontrado' });
