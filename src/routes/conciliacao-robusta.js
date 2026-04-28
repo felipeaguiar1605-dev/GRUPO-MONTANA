@@ -42,7 +42,8 @@ router.get('/status', async (req, res) => {
   try {
     // FIX 2026-04: `e.e.db` (errado, herdado de SQLite onde getEmpresa retornava {e:{db}})
     // → `e.db`. Também movido `.c/.t` pra DEPOIS do await (era acessado em Promise).
-    const aliasRow   = await e.db.prepare(`SELECT COUNT(*) c FROM pagador_alias WHERE ativo=true`).get();
+    // pagador_alias.ativo é SMALLINT (0/1) — NÃO usar comparação com boolean
+    const aliasRow   = await e.db.prepare(`SELECT COUNT(*) c FROM pagador_alias WHERE COALESCE(ativo,1)=1`).get();
     const extIdRow   = await e.db.prepare(`SELECT COUNT(*) c FROM extratos WHERE pagador_identificado<>''`).get();
     const extPendRow = await e.db.prepare(`SELECT COUNT(*) c FROM extratos WHERE credito>0 AND COALESCE(status_conciliacao,'PENDENTE')='PENDENTE'`).get();
     const extPendTotRow = await e.db.prepare(`SELECT COALESCE(SUM(credito),0) t FROM extratos WHERE credito>0 AND COALESCE(status_conciliacao,'PENDENTE')='PENDENTE'`).get();
