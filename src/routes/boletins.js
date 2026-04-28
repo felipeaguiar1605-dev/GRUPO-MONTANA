@@ -1158,15 +1158,16 @@ function gerarResumoPDF(dadosResumo, contrato, ano, outputPath) {
 router.get('/:id/preview-pdf', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const bol = await req.db.prepare(`
-      SELECT b.*, bc.*, b.id AS boletim_id, b.competencia AS boletim_competencia
-      FROM bol_boletins b
-      JOIN bol_contratos bc ON bc.id = b.contrato_id
-      WHERE b.id = ?
-    `).get(id);
-    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'ID inválido' });
 
-    const postos = await req.db.prepare(`SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem`).all(bol.contrato_id);
+    // Queries separadas (evita conflito de colunas duplicadas com SELECT b.*, bc.*)
+    const boletim = await req.db.prepare(`SELECT * FROM bol_boletins WHERE id = ?`).get(id);
+    if (!boletim) return res.status(404).json({ error: 'Boletim não encontrado (id=' + id + ')' });
+
+    const contrato = await req.db.prepare(`SELECT * FROM bol_contratos WHERE id = ?`).get(boletim.contrato_id);
+    if (!contrato) return res.status(404).json({ error: 'Contrato do boletim não encontrado' });
+
+    const postos = await req.db.prepare(`SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem`).all(boletim.contrato_id);
     for (const p of postos) {
       p.itens = await req.db.prepare(`SELECT * FROM bol_itens WHERE posto_id = ? ORDER BY ordem`).all(p.id);
     }
@@ -1183,20 +1184,22 @@ router.get('/:id/preview-pdf', async (req, res) => {
 
     // Período humano (ex.: "Abril/2026")
     const MESES = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-    const [ano, mesNum] = (bol.boletim_competencia || '').split('-');
+    const [ano, mesNum] = (boletim.competencia || '').split('-');
     const periodo = `${MESES[parseInt(mesNum, 10)] || mesNum}/${ano}`;
-    const dataEmissao = bol.data_emissao
-      ? new Date(bol.data_emissao).toLocaleDateString('pt-BR')
+    const dataEmissao = boletim.data_emissao
+      ? new Date(boletim.data_emissao).toLocaleDateString('pt-BR')
       : new Date().toLocaleDateString('pt-BR');
-    const nfNumero = bol.nfse_numero || '— a emitir —';
+    const nfNumero = boletim.nfse_numero || '— a emitir —';
 
-    // Gera em buffer e devolve inline
+    // Gera em buffer e devolve inline. Passa contrato como base + boletim
+    // (alguns campos como `data_emissao` vêm do boletim, outros do contrato).
+    const dadosPDF = { ...contrato, ...boletim, contrato_id: boletim.contrato_id };
     const buf = await pdfToBuffer(doc => {
-      gerarBoletimPDF_inline(doc, bol, postoAggregado, nfNumero, dataEmissao, periodo);
+      gerarBoletimPDF_inline(doc, dadosPDF, postoAggregado, nfNumero, dataEmissao, periodo);
     });
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="preview_boletim_${bol.contrato_id}_${bol.boletim_competencia}.pdf"`);
+    res.setHeader('Content-Disposition', `inline; filename="preview_boletim_${boletim.contrato_id}_${boletim.competencia}.pdf"`);
     res.send(buf);
   } catch (err) {
     console.error('Erro preview-pdf:', err);
