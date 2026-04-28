@@ -856,7 +856,9 @@ router.get('/extratos/meses', async (req, res) => {
 
 router.get('/extratos', async (req, res) => {
   try {
-  const { from, to, status, mes, posto, page = 1, limit = 100, somente_creditos } = req.query;
+  const { from, to, mes, posto, page = 1, limit = 100, somente_creditos } = req.query;
+  // Retrocompatível: aceita `?status=` (nome novo) e `?status_conciliacao=` (legado)
+  const status = req.query.status || req.query.status_conciliacao;
   let where = '1=1';
   const params = {};
   if (from) { where += ' AND data_iso >= @from'; params.from = from; }
@@ -2511,6 +2513,24 @@ router.get('/despesas/resumo', async (req, res) => {
     .reduce((s, r) => s + r.total, 0);
 
   res.json({ totais, porCategoria, overhead, totalOverhead });
+});
+
+// ─── CATEGORIAS DISTINTAS ───────────────────────────────────────────────────
+// Retorna lista de categorias canônicas (UPPER+TRIM) presentes em despesas.
+// Usado pelo frontend para popular o <select> de filtro/cadastro de despesa.
+router.get('/despesas/categorias', async (req, res) => {
+  try {
+    const rows = await req.db.prepare(`
+      SELECT DISTINCT UPPER(TRIM(categoria)) AS categoria
+      FROM despesas
+      WHERE categoria IS NOT NULL AND TRIM(categoria) <> ''
+      ORDER BY 1
+    `).all();
+    res.json(rows.map(r => r.categoria));
+  } catch (e) {
+    console.error('[GET /despesas/categorias] erro:', e.message);
+    res.status(500).json({ erro: e.message });
+  }
 });
 
 // ─── RATEIO DE OVERHEAD POR CONTRATO ─────────────────────────────────────────
