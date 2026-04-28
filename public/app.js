@@ -3420,6 +3420,9 @@ async function doLogin() {
     if (!r.ok) { errEl.textContent = d.error || 'Credenciais inválidas'; errEl.style.display='block'; return; }
     setToken(d.token);
     localStorage.setItem('montana_jwt_user', JSON.stringify({ usuario: d.usuario, nome: d.nome, role: d.role }));
+    // Reseta o guard do 401 interceptor — nova sessão pode receber 401s sem
+    // ser ignorados (token velho expira novamente eventualmente).
+    window._authWiped = false;
     const ov = document.getElementById('login-overlay');
     if (ov) ov.style.display = 'none';
     updateUserInfo();
@@ -3458,11 +3461,32 @@ function updateUserInfo() {
 function initAuth() {
   const token = getToken();
   if (!token) { showLoginModal(); return; }
-  // Verifica se token ainda é válido tentando uma requisição GET
+  // Verifica se token ainda é válido tentando uma requisição GET.
+  // IMPORTANTE: só limpa o token em 401 explícito (TOKEN_EXPIRED/INVALID).
+  // Erros de rede ou 500 do backend NÃO devem deslogar o usuário —
+  // antes do fix, qualquer erro em /api/dashboard durante F5 chamava
+  // clearToken() e o usuário era forçado a relogar com token válido.
   api('/dashboard').then(d => {
     if (d && !d.error) { updateUserInfo(); loadDashboard(); applyInitialHash(); }
-    else { clearToken(); showLoginModal('Sessão expirada. Faça login novamente.'); }
-  }).catch(() => { clearToken(); showLoginModal('Erro de conexão.'); });
+    else {
+      // Resposta sem 401 mas com {error}: backend retornou 4xx/5xx semântico.
+      // Não desloga — só mostra na UI com aviso de retry. Mantém o token.
+      console.warn('[initAuth] /dashboard retornou erro, mantendo sessão:', d?.error);
+      updateUserInfo();
+      const k = document.getElementById('dash-kpis');
+      if (k) k.innerHTML = `<div style="grid-column:1/-1;background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:18px;text-align:center;color:#92400e;font-weight:600">⚠ Erro ao carregar dashboard: ${d?.error || 'desconhecido'}.<br><button onclick="loadDashboard()" style="margin-top:10px;padding:6px 14px;background:#92400e;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px">🔄 Tentar de novo</button></div>`;
+      applyInitialHash();
+    }
+  }).catch((e) => {
+    // api() lança 'Unauthorized' em 401 — aí sim clearToken (já feito dentro do api).
+    // Outros erros (network, parsing): NÃO desloga, mantém o token e mostra retry.
+    if (e && e.message === 'Unauthorized') return;  // já tratado em api()
+    console.warn('[initAuth] erro de rede, mantendo sessão:', e);
+    updateUserInfo();
+    const k = document.getElementById('dash-kpis');
+    if (k) k.innerHTML = `<div style="grid-column:1/-1;background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:18px;text-align:center;color:#991b1b;font-weight:600">📡 Erro de conexão: ${e?.message || e}<br><button onclick="loadDashboard()" style="margin-top:10px;padding:6px 14px;background:#991b1b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px">🔄 Tentar de novo</button></div>`;
+    applyInitialHash();
+  });
 }
 
 // ─── Hash routing (deep-link / bookmark) ─────────────────────────
@@ -3491,6 +3515,10 @@ window.addEventListener('hashchange', () => {
     try {
       const url = typeof input === 'string' ? input : (input && input.url) || '';
       if(resp.status === 401 && url.indexOf('/api/') >= 0 && url.indexOf('/api/auth/login') < 0){
+        // Guard contra storm: se múltiplas chamadas paralelas retornam 401,
+        // só processa a primeira. Evita login modal piscando, clearToken N×.
+        if (window._authWiped) return resp;
+        window._authWiped = true;
         // clone() para nao consumir o body que o chamador precisa ler
         resp.clone().json().then(d => {
           if (typeof clearToken === 'function') clearToken();
@@ -3506,6 +3534,9 @@ window.addEventListener('hashchange', () => {
     return resp;
   };
 })();
+
+// Reseta _authWiped quando login bem-sucedido limpa a flag para próximas sessões.
+// Chamado de doLogin() após setToken().
 
 // ─── Override api() para injetar token JWT ──────────────────────
 // (redefine a função api() já declarada acima)

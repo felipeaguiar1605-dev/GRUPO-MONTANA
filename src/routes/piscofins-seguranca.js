@@ -66,8 +66,16 @@ const NAO_TRIBUTA_KW = [
   'resgate',
   'brb invest',
   'poupança', 'poupanca',
+  // Intra-grupo: créditos vindos de empresas-irmãs / mesma titularidade
   'montana assessoria', 'montana serviços', 'montana servicos',
-  'estorno ted', 'dev ted',
+  'montana s ltda', 'montana s. ltda', 'montana seg', 'montana segurança',
+  'mustang', 'porto do vau', 'portodovau', 'nevada', 'montreal', 'ohio med',
+  'mesma titularidade', 'mesma titul',
+  'ch.avulso entre ag', 'ted mesma titul',
+  // Estornos / devoluções / desbloqueios judiciais (não compõem receita)
+  'estorno ted', 'dev ted', 'estorno',
+  'desbl judicial', 'bacen jud', 'desbl. judicial',
+  'ted devolvida', 'boleto devolvido',
 ];
 
 function isNaoTributa(historico) {
@@ -115,11 +123,15 @@ async function apurar(db, anoMes, companyKey) {
     // Período da NF: data_emissao (AAAA-MM-DD) ou competencia (AAAA-MM)
     const nfPeriodo = (r.data_emissao || r.nf_competencia || '').trim();
 
-    if (r.nf_id) {
+    // PRIORIDADE: histórico claramente não-tributável (aplicação financeira,
+    // intra-grupo, desbloqueio judicial, estorno) sempre fica fora da base —
+    // mesmo se houver NF vinculada por erro. Ex.: "BB Rende Fácil" não é
+    // receita operacional, mesmo se algum match equivocado tenha colado uma NF.
+    if (isNaoTributa(r.historico)) {
+      naoTributa.push(r);
+    } else if (r.nf_id) {
       if (nfPeriodo >= INICIO_CAIXA) tributaveis.push(r);
       else                           excluidos.push(r);
-    } else if (isNaoTributa(r.historico)) {
-      naoTributa.push(r);
     } else {
       pendentes.push(r);
     }
