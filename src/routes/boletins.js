@@ -246,7 +246,8 @@ router.delete('/itens/:id', async (req, res) => {
 router.post('/seed-template', async (req, res) => {
   try {
     const { contrato, postos = [], gerar_boletim_competencia,
-            reset_postos = false, reset_boletim = false } = req.body;
+            reset_postos = false, reset_boletim = false,
+            force_update_contrato = false } = req.body;
     if (!contrato || !contrato.numero_contrato || !contrato.nome) {
       return res.status(400).json({ error: 'contrato.numero_contrato e contrato.nome obrigatórios' });
     }
@@ -255,6 +256,7 @@ router.post('/seed-template', async (req, res) => {
     // 1) Contrato
     let bc = await db.prepare(`SELECT * FROM bol_contratos WHERE numero_contrato = ?`).get(contrato.numero_contrato);
     let contratoId;
+    let contratoAtualizado = false;
     if (!bc) {
       const r = await db.prepare(`
         INSERT INTO bol_contratos (nome, contratante, numero_contrato, processo, pregao,
@@ -272,6 +274,26 @@ router.post('/seed-template', async (req, res) => {
       contratoId = r.lastInsertRowid;
     } else {
       contratoId = bc.id;
+      // FLAG: força UPDATE dos campos do contrato com os valores do template
+      if (force_update_contrato) {
+        await db.prepare(`
+          UPDATE bol_contratos SET
+            nome = ?, contratante = ?, processo = ?, pregao = ?,
+            descricao_servico = ?, escala = ?, empresa_razao = ?, empresa_cnpj = ?,
+            empresa_endereco = ?, empresa_email = ?, empresa_telefone = ?,
+            contrato_ref = ?, orgao = ?, insc_municipal = ?,
+            updated_at = NOW()
+          WHERE id = ?
+        `).run(
+          contrato.nome, contrato.contratante || '', contrato.processo || '', contrato.pregao || '',
+          contrato.descricao_servico || '', contrato.escala || 'Mensal',
+          contrato.empresa_razao || '', contrato.empresa_cnpj || '',
+          contrato.empresa_endereco || '', contrato.empresa_email || '', contrato.empresa_telefone || '',
+          contrato.contrato_ref || '', contrato.orgao || '', contrato.insc_municipal || '',
+          contratoId
+        );
+        contratoAtualizado = true;
+      }
     }
 
     // ── RESET (opt-in): limpa postos+items+boletim antes de recriar ──
@@ -369,6 +391,7 @@ router.post('/seed-template', async (req, res) => {
       ok: true,
       contrato_id: contratoId,
       contrato_existia_antes: !!bc,
+      contrato_atualizado: contratoAtualizado,
       reset: resetSummary,
       postos_criados: postosCriados,
       itens_criados: itensCriados,

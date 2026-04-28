@@ -984,17 +984,25 @@ const _BOL_TEMPLATES = {
     payload: {
       contrato: {
         nome: 'SEDUC',
-        contratante: 'SECRETARIA DA EDUCAÇÃO DO ESTADO DO TOCANTINS',
+        contratante: 'SECRETARIA DA EDUCACAO',
         numero_contrato: '016/2023',
-        descricao_servico: 'Prestação de serviços continuados nas áreas de limpeza, asseio e conservação, nas instalações da Secretaria da Educação do Estado do Tocantins e anexos/Palmas - TO. Considerando os serviços de copeiragem, jardinagem, serviços gerais e encarregadas. Com fornecimento de todo material e equipamentos que se fizerem necessários à execução dos serviços.',
+        processo: '2023/27000/000120',
+        pregao: '',
+        // Descrição oficial conforme NFS-e emitida (PRESERVAR esse texto exato — usado pela emissão)
+        descricao_servico: 'SERVICOS COPEIRAGEM, LIMPEZA, CONSERVACAO, HIGIENIZACAO E JARDINAGEM, COM FORNECIMENTO DE MATERIAIS E PRODUTOS DE CONSUMO APROPRIADOS, MAQUINAS E EQUIPAMENTOS A SEREM PRESTADOS NAS DEPENDENCIAS INTERNAS E EXTERNAS DA SECRETARIA DA EDUCACAO, JUVENTUDE E ESPORTES E ANEXOS.',
         escala: 'Mensal',
-        empresa_razao: 'MONTANA ASSESSORIA EMPRESARIAL LTDA',
+        // Prestador (Montana Assessoria) — confirmado na NFS-e
+        empresa_razao: 'MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP',
         empresa_cnpj: '14.092.519/0001-51',
-        empresa_endereco: 'QD. 104 SUL RUA SE 05 LOTE 19 SALA 07 CEP: 77020-018 PALMAS-TO',
-        empresa_email: 'montanaempresarial@gmail.com',
+        empresa_endereco: 'Quadra ACSE 1 Rua SE 5, 19, Plano Diretor Sul - CEP: 77020-018 - Palmas/TO',
+        empresa_email: 'MONTANAEMPRESARIAL@GMAIL.COM',
         empresa_telefone: '(63) 3215-0351',
-        orgao: 'SECRETARIA DA EDUCAÇÃO DO ESTADO DO TOCANTINS',
+        // Tomador (SEDUC) — extraído da NFS-e 301/2026
         contrato_ref: 'SEDUC 016/2023',
+        orgao: 'SECRETARIA DA EDUCACAO',
+        // CAMPO CRÍTICO PARA EMISSÃO: insc_municipal armazena o CNPJ do tomador
+        // (nomenclatura herdada do WebISS — apesar do nome confuso)
+        insc_municipal: '25.053.083/0001-08',
       },
       postos: [{
         campus_key: 'PALMAS_SEDE',
@@ -1055,7 +1063,11 @@ function abrirImportarTemplate() {
         <input id="bt-comp" type="month" value="${(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;})()}" style="width:100%;padding:8px;font-size:12px;border:1px solid #cbd5e1;border-radius:6px">
       </div>
       <div style="margin-bottom:14px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px">
-        <div style="font-size:10px;font-weight:700;color:#c2410c;text-transform:uppercase;margin-bottom:6px">⚠ Opções avançadas (use só se houve duplicação)</div>
+        <div style="font-size:10px;font-weight:700;color:#c2410c;text-transform:uppercase;margin-bottom:6px">⚠ Opções avançadas</div>
+        <label style="font-size:11px;display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:4px">
+          <input type="checkbox" id="bt-force-update">
+          <span><strong>Atualizar dados do contrato</strong> existente (sobrescreve nome, endereço, CNPJ tomador, processo, descrição etc.)</span>
+        </label>
         <label style="font-size:11px;display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:4px">
           <input type="checkbox" id="bt-reset-postos">
           <span><strong>Resetar postos + items</strong> antes de importar (apaga estrutura existente do contrato)</span>
@@ -1064,7 +1076,7 @@ function abrirImportarTemplate() {
           <input type="checkbox" id="bt-reset-boletim">
           <span><strong>Resetar boletim</strong> da competência (apaga rascunho/aprovado; protege EMITIDA)</span>
         </label>
-        <div style="font-size:9px;color:#9a3412;margin-top:6px">Ative ambos pra fazer um clean reset desse contrato.</div>
+        <div style="font-size:9px;color:#9a3412;margin-top:6px">Marque os 3 pra um sync completo do template no contrato existente.</div>
       </div>
       <div id="bt-result" style="display:none;padding:10px 12px;border-radius:8px;font-size:11px;margin-bottom:10px"></div>
       <div style="display:flex;justify-content:flex-end;gap:8px">
@@ -1090,8 +1102,9 @@ async function confirmarImportTemplate() {
   const tpl = _BOL_TEMPLATES[sel.value];
   if (!tpl) return;
   const competencia = compEl.value || null;
-  const resetPostos  = document.getElementById('bt-reset-postos')?.checked || false;
-  const resetBoletim = document.getElementById('bt-reset-boletim')?.checked || false;
+  const resetPostos    = document.getElementById('bt-reset-postos')?.checked || false;
+  const resetBoletim   = document.getElementById('bt-reset-boletim')?.checked || false;
+  const forceUpdate    = document.getElementById('bt-force-update')?.checked || false;
 
   // Confirmação extra se reset estiver ativado (perigoso)
   if (resetPostos || resetBoletim) {
@@ -1107,6 +1120,7 @@ async function confirmarImportTemplate() {
     gerar_boletim_competencia: competencia,
     reset_postos: resetPostos,
     reset_boletim: resetBoletim,
+    force_update_contrato: forceUpdate,
   };
   resEl.style.display = 'block';
   resEl.style.background = '#f8fafc';
@@ -1128,8 +1142,9 @@ async function confirmarImportTemplate() {
     const resetLine = (r.reset && (r.reset.postos_deletados || r.reset.itens_deletados || r.reset.boletim_deletado))
       ? `<br>🧹 Reset: ${r.reset.postos_deletados} posto(s), ${r.reset.itens_deletados} item(ns)${r.reset.boletim_deletado ? ', boletim apagado' : ''}`
       : '';
+    const updateLine = r.contrato_atualizado ? '<br>📝 <strong>Dados do contrato atualizados</strong>' : '';
     resEl.innerHTML = `
-      ✅ <strong>Template importado.</strong>${resetLine}<br>
+      ✅ <strong>Template importado.</strong>${resetLine}${updateLine}<br>
       Contrato: ${r.contrato_existia_antes ? 'já existia (id=' + r.contrato_id + ')' : 'criado (id=' + r.contrato_id + ')'}<br>
       Postos novos: ${r.postos_criados}, Itens novos: ${r.itens_criados}<br>
       Boletim ${competencia || ''}: ${r.boletim?.status === 'criado' ? '<strong>rascunho criado</strong> (id=' + r.boletim.id + ')' : (r.boletim?.status === 'ja_existia' ? 'já existia' : '—')}
