@@ -1152,6 +1152,30 @@ function gerarResumoPDF(dadosResumo, contrato, ano, outputPath) {
   return totalMensal;
 }
 
+// ─── DIAGNÓSTICO: lista boletins existentes (debug) ────────────
+// GET /api/boletins/_diag
+router.get('/_diag', async (req, res) => {
+  try {
+    const boletins = await req.db.prepare(`
+      SELECT b.id, b.contrato_id, b.competencia, b.status, b.nfse_status,
+             b.valor_base, b.valor_total,
+             bc.nome AS contrato_nome
+      FROM bol_boletins b
+      LEFT JOIN bol_contratos bc ON bc.id = b.contrato_id
+      ORDER BY b.id DESC
+      LIMIT 50
+    `).all();
+    res.json({
+      ok: true,
+      total: boletins.length,
+      boletins,
+      empresa: req.companyKey || req.company?.key || 'desconhecida',
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── PREVIEW PDF do boletim (gera em memória e devolve inline) ──
 // GET /api/boletins/:id/preview-pdf
 // Útil pra visualizar o layout sem precisar acionar /gerar e salvar em disco.
