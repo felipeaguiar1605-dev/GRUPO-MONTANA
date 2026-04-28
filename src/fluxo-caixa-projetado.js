@@ -107,7 +107,7 @@ async function projectarEntradas(db, horizonteDias) {
       AND COALESCE(status_conciliacao, '') NOT IN ('CONCILIADO', 'ASSESSORIA', 'IGNORAR')
       AND data_emissao IS NOT NULL
       AND COALESCE(valor_bruto, 0) > 0
-      AND data_emissao >= date('now', '-365 days')
+      AND data_emissao >= to_char(CURRENT_DATE - INTERVAL '365 days', 'YYYY-MM-DD')
   `).all();
 
   const itens = [];
@@ -168,7 +168,7 @@ async function projectarSaidas(db, horizonteDias) {
       SELECT AVG(total_liquido) AS media, COUNT(*) AS n
       FROM rh_folha
       WHERE COALESCE(total_liquido, 0) > 0
-        AND competencia >= strftime('%Y-%m', date('now', '-${MESES_FOLHA_MEDIA} months'))
+        AND competencia >= to_char(CURRENT_DATE - INTERVAL '${MESES_FOLHA_MEDIA} months', 'YYYY-MM')
     `).get();
     folhaMedia = Number(row?.media || 0);
 
@@ -188,7 +188,7 @@ async function projectarSaidas(db, horizonteDias) {
         SELECT SUM(valor_liquido) / 6.0 AS media
         FROM despesas
         WHERE lower(categoria) LIKE '%folha%'
-          AND data_iso >= date('now', '-180 days')
+          AND data_iso >= to_char(CURRENT_DATE - INTERVAL '180 days', 'YYYY-MM-DD')
       `).get();
       folhaMedia = Number(row?.media || 0);
     } catch (_) {}
@@ -223,7 +223,7 @@ async function projectarSaidas(db, horizonteDias) {
              SUM(valor_liquido) / 6.0 AS media_mensal,
              COUNT(*) AS n
       FROM despesas
-      WHERE data_iso >= date('now', '-${JANELA_HISTORICA} days')
+      WHERE data_iso >= to_char(CURRENT_DATE - INTERVAL '${JANELA_HISTORICA} days', 'YYYY-MM-DD')
         AND COALESCE(valor_liquido, 0) > 0
         AND lower(categoria) NOT LIKE '%folha%'
       GROUP BY categoria

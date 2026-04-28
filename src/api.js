@@ -4629,14 +4629,17 @@ router.get('/contratos/faturamento-previsto', async (req, res) => {
     // 1) Contratos da empresa (bol_contratos = catálogo do módulo Boletins).
     //    Faz LEFT JOIN com `contratos` via contrato_ref para puxar vigência/status
     //    e detectar contratos encerrados ou fora de vigência em cada mês.
-    const contratosBol = await req.db.prepare(`
+    // FIX 2026-04: COALESCE(bc.ativo, TRUE) = TRUE falhava quando ativo era INTEGER
+    // em PG (mismatch boolean/int). Cast pra text e check exclusivo é type-safe.
+    const _contratosBolRaw = await req.db.prepare(`
       SELECT bc.id, bc.nome, bc.contratante, bc.contrato_ref, bc.numero_contrato,
              c.vigencia_inicio, c.vigencia_fim, c.status, c.valor_mensal_liquido
       FROM bol_contratos bc
       LEFT JOIN contratos c ON c.numContrato = bc.contrato_ref
-      WHERE COALESCE(bc.ativo, TRUE) = TRUE
+      WHERE COALESCE(bc.ativo::text, 'true') NOT IN ('0','false','f')
       ORDER BY bc.nome
     `).all();
+    const contratosBol = Array.isArray(_contratosBolRaw) ? _contratosBolRaw : [];
 
     // 2) Para cada contrato, busca postos + soma de itens (qtd × valor_unitario)
     for (const contrato of contratosBol) {

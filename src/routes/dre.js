@@ -37,7 +37,7 @@ async function buscarDRE(db, dateFrom, dateTo) {
   //    discriminados que só a NF conhece.
   let ret;
   try {
-    ret = db.prepare(`
+    ret = await db.prepare(`
       SELECT COALESCE(SUM(inss),0) inss, COALESCE(SUM(ir),0) irrf,
              COALESCE(SUM(iss),0) iss,  COALESCE(SUM(csll),0) csll,
              COALESCE(SUM(pis),0) pis,  COALESCE(SUM(cofins),0) cofins,
@@ -185,9 +185,14 @@ async function buscarDRE(db, dateFrom, dateTo) {
 
 // GET /api/dre
 router.get('/', async (req, res) => {
-  const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
-  const dados = buscarDRE(req.db, dateFrom, dateTo);
-  res.json({ periodo, ...dados });
+  try {
+    const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
+    const dados = await buscarDRE(req.db, dateFrom, dateTo);
+    res.json({ periodo, ...dados });
+  } catch (e) {
+    console.error('[dre]', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // GET /api/dre/excel
@@ -195,7 +200,7 @@ router.get('/excel', async (req, res) => {
   try {
     const ExcelJS = require('exceljs');
     const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
-    const { dre, despesas_detalhe } = buscarDRE(req.db, dateFrom, dateTo);
+    const { dre, despesas_detalhe } = await buscarDRE(req.db, dateFrom, dateTo);
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'Montana';
@@ -278,7 +283,7 @@ router.get('/pdf', async (req, res) => {
   try {
     const PDFDocument = require('pdfkit');
     const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
-    const { dre } = buscarDRE(req.db, dateFrom, dateTo);
+    const { dre } = await buscarDRE(req.db, dateFrom, dateTo);
     const empresa = req.company;
 
     const doc = new PDFDocument({ size: 'A4', margin: 40 });
@@ -354,9 +359,14 @@ router.get('/pdf', async (req, res) => {
 });
 // GET /api/dre — DRE principal
 router.get('/', async (req, res) => {
-  const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
-  const dados = buscarDRE(req.db, dateFrom, dateTo);
-  res.json({ periodo, ...dados });
+  try {
+    const { dateFrom, dateTo, periodo } = resolvePeriodo(req.query);
+    const dados = await buscarDRE(req.db, dateFrom, dateTo);
+    res.json({ periodo, ...dados });
+  } catch (e) {
+    console.error('[dre]', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // GET /api/dre/historico — apuração mensal salva pelo cron

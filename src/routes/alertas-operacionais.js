@@ -17,13 +17,13 @@ router.use(companyMw);
 
 // ─── Consolidado ──────────────────────────────────────────────────────────────
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const opcoes = {};
     if (req.query.competencia) {
       opcoes.faturamento = { competencia: req.query.competencia };
     }
-    const rel = alertas.rodarTodos(req.db, req.company, opcoes);
+    const rel = await alertas.rodarTodos(req.db, req.company, opcoes);
     res.json({ ok: true, ...rel });
   } catch (e) {
     console.error('[alertas-operacionais]', e);
@@ -33,9 +33,9 @@ router.get('/', (req, res) => {
 
 // ─── Endpoints individuais ────────────────────────────────────────────────────
 
-router.get('/faturamento', (req, res) => {
+router.get('/faturamento', async (req, res) => {
   try {
-    const r = alertas.faturamentoNaoEmitido(req.db, req.company, {
+    const r = await alertas.faturamentoNaoEmitido(req.db, req.company, {
       competencia: req.query.competencia,
       dia_corte:   req.query.dia_corte ? Number(req.query.dia_corte) : undefined,
     });
@@ -43,9 +43,9 @@ router.get('/faturamento', (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, erro: e.message }); }
 });
 
-router.get('/cobrancas', (req, res) => {
+router.get('/cobrancas', async (req, res) => {
   try {
-    const r = alertas.cobrancasAtrasadas(req.db, req.company, {
+    const r = await alertas.cobrancasAtrasadas(req.db, req.company, {
       min_amostras: req.query.min_amostras ? Number(req.query.min_amostras) : undefined,
       sla_padrao:   req.query.sla_padrao   ? Number(req.query.sla_padrao)   : undefined,
       atraso_extra: req.query.atraso_extra ? Number(req.query.atraso_extra) : undefined,
@@ -54,11 +54,11 @@ router.get('/cobrancas', (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, erro: e.message }); }
 });
 
-router.get('/folha', (req, res) => {
+router.get('/folha', async (req, res) => {
   try {
     const opts = {};
     if (req.query.competencias) opts.competencias = String(req.query.competencias).split(',');
-    const r = alertas.folhaSemContrapartida(req.db, req.company, opts);
+    const r = await alertas.folhaSemContrapartida(req.db, req.company, opts);
     res.json({ ok: true, ...r });
   } catch (e) { res.status(500).json({ ok: false, erro: e.message }); }
 });
@@ -67,15 +67,15 @@ router.get('/folha', (req, res) => {
 
 router.post('/enviar-email', async (req, res) => {
   try {
-    const rel = alertas.rodarTodos(req.db, req.company, req.body?.opcoes || {});
+    const rel = await alertas.rodarTodos(req.db, req.company, req.body?.opcoes || {});
     if (rel.total_geral === 0) {
       return res.json({ ok: true, enviado: false, motivo: 'nenhum alerta operacional' });
     }
 
     // Busca SMTP da empresa
-    const smtpRows = req.db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'smtp_%'`).all();
+    const smtpRows = await req.db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'smtp_%'`).all();
     const smtp = {};
-    smtpRows.forEach(r => { smtp[r.chave.replace('smtp_', '')] = r.valor; });
+    (Array.isArray(smtpRows) ? smtpRows : []).forEach(r => { smtp[r.chave.replace('smtp_', '')] = r.valor; });
 
     if (!smtp.host || !smtp.user || !smtp.to) {
       return res.status(400).json({ ok: false, erro: 'SMTP não configurado' });
@@ -103,7 +103,7 @@ router.post('/enviar-email', async (req, res) => {
     });
 
     try {
-      req.db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status)
+      await req.db.prepare(`INSERT INTO notificacoes_log (tipo,destinatario,assunto,corpo,status)
                       VALUES ('email',?,?,?,'enviado')`).run(smtp.to, assunto, html);
     } catch (_) {}
 

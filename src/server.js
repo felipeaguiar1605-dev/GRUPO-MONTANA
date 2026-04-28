@@ -233,11 +233,11 @@ try {
 
         // ── Alertas Operacionais (#1 faturamento, #2 cobranças, #3 folha) ──
         try {
-          const relOp = alertasOp.rodarTodos(db, COMPANIES[key]);
+          const relOp = await alertasOp.rodarTodos(db, COMPANIES[key]);
           if (relOp.total_geral > 0) {
-            const smtpRows = db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'smtp_%'`).all();
+            const smtpRows = await db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'smtp_%'`).all();
             const smtp = {};
-            smtpRows.forEach(r => { smtp[r.chave.replace('smtp_', '')] = r.valor; });
+            (Array.isArray(smtpRows) ? smtpRows : []).forEach(r => { smtp[r.chave.replace('smtp_', '')] = r.valor; });
             if (smtp.host && smtp.user && smtp.to) {
               const nodemailer = require('nodemailer');
               const transporter = nodemailer.createTransport({

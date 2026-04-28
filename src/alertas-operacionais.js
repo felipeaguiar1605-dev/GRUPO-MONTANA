@@ -58,7 +58,7 @@ function diffDias(dataISO) {
  *   - competencia: 'YYYY-MM' (default = mês atual)
  *   - dia_corte:   só alerta se hoje >= dia do mês (default 25 — boletim geralmente emitido até dia 20)
  */
-function faturamentoNaoEmitido(db, company, opcoes = {}) {
+async function faturamentoNaoEmitido(db, company, opcoes = {}) {
   const competencia = opcoes.competencia || competenciaAtual();
   const diaCorte    = opcoes.dia_corte ?? 25;
   const hoje        = new Date();
@@ -71,13 +71,14 @@ function faturamentoNaoEmitido(db, company, opcoes = {}) {
 
   let contratos;
   try {
-    contratos = db.prepare(`
+    contratos = await db.prepare(`
       SELECT numContrato, contrato, orgao, valor_mensal_bruto
       FROM contratos
       WHERE LOWER(COALESCE(status,'')) NOT LIKE '%encerrad%'
         AND LOWER(COALESCE(numContrato,'')) NOT LIKE '%encerrad%'
         AND COALESCE(valor_mensal_bruto, 0) > 0
     `).all();
+    if (!Array.isArray(contratos)) contratos = [];
   } catch (_) { return { itens: [], total: 0, erro: 'tabela contratos indisponível' }; }
 
   const itens = [];
@@ -87,11 +88,11 @@ function faturamentoNaoEmitido(db, company, opcoes = {}) {
     let esperado = Number(c.valor_mensal_bruto || 0);
     let origemEsperado = 'contrato.valor_mensal_bruto';
     try {
-      const bol = db.prepare(`
+      const bol = await db.prepare(`
         SELECT b.total_geral
         FROM bol_boletins b
         JOIN bol_contratos bc ON bc.id = b.contrato_id
-        WHERE bc.num_contrato = ?
+        WHERE bc.numero_contrato = ?
           AND (b.competencia = ? OR b.competencia LIKE ?)
         ORDER BY b.id DESC LIMIT 1
       `).get(c.numContrato, competencia, `%${competencia}%`);
@@ -104,7 +105,7 @@ function faturamentoNaoEmitido(db, company, opcoes = {}) {
     if (esperado <= 0) continue;
 
     // Realizado: NFs emitidas no mês com contrato_ref matching
-    const realizadoRow = db.prepare(`
+    const realizadoRow = await db.prepare(`
       SELECT COALESCE(SUM(valor_bruto),0) v, COUNT(*) n
       FROM notas_fiscais
       WHERE to_char((data_emissao)::date, 'YYYY-MM') = ?
@@ -152,7 +153,7 @@ function faturamentoNaoEmitido(db, company, opcoes = {}) {
  *   - sla_padrao:   dias a usar quando amostras < min (default 30)
  *   - atraso_extra: margem sobre o SLA antes de considerar atrasada (default 15)
  */
-function cobrancasAtrasadas(db, company, opcoes = {}) {
+async function cobrancasAtrasadas(db, company, opcoes = {}) {
   const minAmostras = opcoes.min_amostras ?? SLA_MIN_AMOSTRAS;
   const slaPadrao   = opcoes.sla_padrao   ?? SLA_PADRAO_DIAS;
   const atrasoExtra = opcoes.atraso_extra ?? ATRASO_EXTRA_DIAS;
@@ -160,7 +161,7 @@ function cobrancasAtrasadas(db, company, opcoes = {}) {
   const limiteItens = opcoes.limite_itens ?? COBRANCA_LIMITE_ITENS;
 
   // Calcula SLA médio por tomador (apenas NFs pagas com ambas as datas)
-  const slaRows = db.prepare(`
+  let slaRows = await db.prepare(`
     SELECT tomador,
            AVG((data_pagamento::date - data_emissao::date)) AS dias_medio,
            COUNT(*) AS amostras
@@ -171,6 +172,7 @@ function cobrancasAtrasadas(db, company, opcoes = {}) {
       AND ((data_pagamento::date - data_emissao::date)) BETWEEN 1 AND 365
     GROUP BY tomador
   `).all();
+  if (!Array.isArray(slaRows)) slaRows = [];
 
   const slaMap = new Map();
   for (const r of slaRows) {
@@ -183,7 +185,7 @@ function cobrancasAtrasadas(db, company, opcoes = {}) {
   const dataLimite = new Date(Date.now() - janelaDias * 86400000).toISOString().split('T')[0];
 
   // NFs em aberto: sem data_pagamento, não CONCILIADAS, e dentro da janela
-  const abertas = db.prepare(`
+  let abertas = await db.prepare(`
     SELECT numero, tomador, valor_bruto, valor_liquido, data_emissao, contrato_ref,
            status_conciliacao
     FROM notas_fiscais
@@ -194,6 +196,7 @@ function cobrancasAtrasadas(db, company, opcoes = {}) {
       AND data_emissao >= ?
       AND COALESCE(valor_bruto, 0) > 0
   `).all(dataLimite);
+  if (!Array.isArray(abertas)) abertas = [];
 
   const itens = [];
   for (const nf of abertas) {
@@ -259,7 +262,7 @@ function cobrancasAtrasadas(db, company, opcoes = {}) {
  * Opções:
  *   - competencias: array de 'YYYY-MM' a verificar (default = últimos 3 meses fechados)
  */
-function folhaSemContrapartida(db, company, opcoes = {}) {
+async function folhaSemContrapartida(db, company, opcoes = {}) {
   // Determina competências a checar: default = 3 últimos meses fechados
   let competencias = opcoes.competencias;
   if (!competencias) {
@@ -273,12 +276,13 @@ function folhaSemContrapartida(db, company, opcoes = {}) {
 
   let folhas;
   try {
-    folhas = db.prepare(`
+    folhas = await db.prepare(`
       SELECT competencia, data_pagamento, total_liquido, status
       FROM rh_folha
       WHERE competencia IN (${competencias.map(() => '?').join(',')})
         AND COALESCE(total_liquido, 0) > 0
     `).all(...competencias);
+    if (!Array.isArray(folhas)) folhas = [];
   } catch (_) { return { itens: [], total: 0, erro: 'tabela rh_folha indisponível' }; }
 
   const itens = [];
@@ -296,7 +300,7 @@ function folhaSemContrapartida(db, company, opcoes = {}) {
     const maxVal   = esperado * (1 + TOLERANCIA_FOLHA);
 
     // Busca débitos na janela que batem com total ou candidatos a compor folha
-    const candidatos = db.prepare(`
+    let candidatos = await db.prepare(`
       SELECT id, data_iso, historico, debito
       FROM extratos
       WHERE data_iso >= ? AND data_iso <= ?
@@ -309,6 +313,7 @@ function folhaSemContrapartida(db, company, opcoes = {}) {
           OR lower(historico) LIKE '%pgto %'
         )
     `).all(janelaIni, janelaFim, minVal, maxVal);
+    if (!Array.isArray(candidatos)) candidatos = [];
 
     // Caso 1: existe um único lançamento que bate
     const match = candidatos.find(c => c.debito >= minVal && c.debito <= maxVal);
@@ -431,7 +436,7 @@ function certificadosA1Vencendo(db, company, opcoes = {}) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Agregador — chama as 4 lógicas e retorna tudo num relatório
 // ─────────────────────────────────────────────────────────────────────────────
-function rodarTodos(db, company, opcoes = {}) {
+async function rodarTodos(db, company, opcoes = {}) {
   const resultado = {
     empresa:     company?.nome || '(?)',
     gerado_em:   new Date().toISOString(),
@@ -442,13 +447,13 @@ function rodarTodos(db, company, opcoes = {}) {
     total_geral: 0,
   };
 
-  try { resultado.faturamento = faturamentoNaoEmitido(db, company, opcoes.faturamento || {}); }
+  try { resultado.faturamento = await faturamentoNaoEmitido(db, company, opcoes.faturamento || {}); }
   catch (e) { resultado.faturamento.erro = e.message; }
 
-  try { resultado.cobrancas = cobrancasAtrasadas(db, company, opcoes.cobrancas || {}); }
+  try { resultado.cobrancas = await cobrancasAtrasadas(db, company, opcoes.cobrancas || {}); }
   catch (e) { resultado.cobrancas.erro = e.message; }
 
-  try { resultado.folha = folhaSemContrapartida(db, company, opcoes.folha || {}); }
+  try { resultado.folha = await folhaSemContrapartida(db, company, opcoes.folha || {}); }
   catch (e) { resultado.folha.erro = e.message; }
 
   try { resultado.certificados = certificadosA1Vencendo(db, company, opcoes.certificados || {}); }
