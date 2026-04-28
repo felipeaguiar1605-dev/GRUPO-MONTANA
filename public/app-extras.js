@@ -3213,8 +3213,26 @@ function _pcShow(id, display = 'block') { const el = document.getElementById(id)
 function _pcHide(id) { _pcShow(id, 'none'); }
 
 async function loadPisCofinsSeg() {
-  const anoMes = document.getElementById('pc-mes')?.value;
-  if (!anoMes) return;
+  const inp = document.getElementById('pc-mes');
+  // Auto-default: se o input estiver vazio (deep-link, navegação direta, ou
+  // usuário limpou o campo), preenche com o mês anterior em vez de retornar
+  // silenciosamente — evita "botão não responde ao click".
+  if (inp && !inp.value) {
+    const now = new Date();
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    inp.value = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}`;
+  }
+  const anoMes = inp?.value;
+  if (!anoMes) {
+    _pcSetText('pc-loading', '⚠ Selecione a competência (ex: 2026-03).');
+    _pcShow('pc-loading');
+    return;
+  }
+
+  // Feedback visual no botão — desabilita enquanto calcula
+  const btn = document.querySelector('#pg-piscofins-seg button[onclick^="loadPisCofinsSeg"]');
+  const btnTxt = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = 'Calculando…'; btn.style.opacity = '0.6'; }
 
   _pcSetText('pc-loading', 'Calculando…');
   _pcShow('pc-loading');
@@ -3223,7 +3241,7 @@ async function loadPisCofinsSeg() {
 
   try {
     const data = await api(`/piscofins-seguranca/${anoMes}`);
-    if (!data.ok) throw new Error(data.error || 'Erro');
+    if (!data || !data.ok) throw new Error((data && data.error) || 'Resposta inválida do servidor');
     _pcDados = data.dados || {};
     const resumo = _pcDados.resumo || {};
 
@@ -3273,7 +3291,11 @@ async function loadPisCofinsSeg() {
 
     pcShowTab('tributaveis');
   } catch (e) {
-    _pcSetText('pc-loading', 'Erro: ' + (e?.message || e));
+    console.error('[piscofins] loadPisCofinsSeg falhou:', e);
+    _pcSetText('pc-loading', '❌ Erro: ' + (e?.message || e) + ' — abra o console (F12) para detalhes.');
+    _pcShow('pc-loading');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = btnTxt || 'Calcular'; btn.style.opacity = ''; }
   }
 }
 
