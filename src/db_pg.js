@@ -309,8 +309,30 @@ function _logQueryError(e, sql, values) {
 }
 
 // ── Factory: retorna PgDb por empresa ───────────────────────────
+// FIX 2026-04: safe_date agora aceita formatos brasileiros DD/MM/YYYY
+// (cadastro legado tem datas como "04/01/2026", "15/03/2027" etc.).
+// Tenta na ordem: ISO (YYYY-MM-DD) → DD/MM/YYYY → DD-MM-YYYY → ano só (YYYY).
+// Se nada bater, retorna NULL.
 const SAFE_DATE_DDL = `CREATE OR REPLACE FUNCTION safe_date(txt TEXT) RETURNS DATE AS $$
-BEGIN RETURN txt::DATE; EXCEPTION WHEN OTHERS THEN RETURN NULL; END;
+BEGIN
+  IF txt IS NULL OR txt = '' THEN RETURN NULL; END IF;
+  -- Formato ISO YYYY-MM-DD ou YYYY/MM/DD
+  IF txt ~ '^\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}' THEN
+    BEGIN RETURN to_date(substring(txt FROM 1 FOR 10), 'YYYY-MM-DD'); EXCEPTION WHEN OTHERS THEN NULL; END;
+    BEGIN RETURN to_date(substring(txt FROM 1 FOR 10), 'YYYY/MM/DD'); EXCEPTION WHEN OTHERS THEN NULL; END;
+  END IF;
+  -- Formato BR DD/MM/YYYY ou DD-MM-YYYY
+  IF txt ~ '^\\d{1,2}[/-]\\d{1,2}[/-]\\d{4}' THEN
+    BEGIN RETURN to_date(substring(txt FROM 1 FOR 10), 'DD/MM/YYYY'); EXCEPTION WHEN OTHERS THEN NULL; END;
+    BEGIN RETURN to_date(substring(txt FROM 1 FOR 10), 'DD-MM-YYYY'); EXCEPTION WHEN OTHERS THEN NULL; END;
+  END IF;
+  -- Só ano (YYYY) — assume 31/12 do ano para vigências
+  IF txt ~ '^\\d{4}$' THEN
+    BEGIN RETURN to_date(txt || '-12-31', 'YYYY-MM-DD'); EXCEPTION WHEN OTHERS THEN NULL; END;
+  END IF;
+  -- Fallback: tenta cast direto (compat com versão anterior)
+  BEGIN RETURN txt::DATE; EXCEPTION WHEN OTHERS THEN RETURN NULL; END;
+END;
 $$ LANGUAGE plpgsql IMMUTABLE`;
 
 function getDb(companyKey) {
