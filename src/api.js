@@ -2000,7 +2000,11 @@ router.get('/relatorios/lucro-por-contrato', async (req, res) => {
 });
 
 router.get('/relatorios/a-receber-por-contrato', async (req, res) => {
-  const contratos = req.db.prepare(`
+  // FIX 2026-04: faltava `await` no `.all()` — após migração SQLite→PG o
+  // método é assíncrono. Sem await, `contratos` era uma Promise e o
+  // `.reduce()` abaixo estourava com TypeError → tela de Inadimplência
+  // mostrava "Erro ao carregar dados".
+  const contratos = await req.db.prepare(`
     SELECT
       c.numContrato, c.contrato, c.orgao, c.status, c.valor_mensal_liquido,
       COALESCE(SUM(CASE WHEN p.valor_pago > 0 THEN p.valor_pago ELSE 0 END), 0) as total_pago,
@@ -2023,7 +2027,7 @@ router.get('/relatorios/a-receber-por-contrato', async (req, res) => {
       FROM parcelas WHERE valor_pago > 0
       ORDER BY id DESC LIMIT 1
     ) p2 ON p2.contrato_num = c.numContrato
-    GROUP BY c.numContrato
+    GROUP BY c.numContrato, p2.competencia, p2.data_pagamento
     ORDER BY a_receber DESC, em_atraso DESC
   `).all();
 
