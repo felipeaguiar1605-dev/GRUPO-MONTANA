@@ -935,7 +935,12 @@ function abrirPainelFaturamento() {
 // Aceita contrato_id+competencia opcionais como fallback caso boletim_id esteja stale
 async function previewBoletimPDF(boletim_id, contrato_id, competencia) {
   const token = localStorage.getItem('jwt') || localStorage.getItem('montana_jwt') || '';
-  const company = window.currentCompany || '';
+  // FIX: `currentCompany` é declarado com `let` em app.js — NÃO está em window.
+  // Lê direto da variável global (mesmo escopo) ou do localStorage como fallback.
+  // Sem isso, middleware default pra 'seguranca' → SEDUC não encontrado.
+  const company = (typeof currentCompany !== 'undefined' && currentCompany)
+    || localStorage.getItem('montana_company')
+    || 'assessoria';
   // Monta query string com fallback contrato_id+competencia
   const params = new URLSearchParams({ company });
   if (contrato_id) params.set('contrato_id', String(contrato_id));
