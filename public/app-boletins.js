@@ -946,9 +946,17 @@ async function previewBoletimPDF(boletim_id, contrato_id, competencia) {
     });
     if (!r.ok) {
       let msg = '';
-      try { const j = await r.json(); msg = j.error || JSON.stringify(j); }
-      catch (_) { msg = await r.text().catch(() => '') || r.status; }
-      alert('Erro ao gerar preview: ' + msg);
+      let ids = '';
+      try {
+        const j = await r.json();
+        msg = j.error || JSON.stringify(j);
+        if (j.ids_disponiveis && j.ids_disponiveis.length) {
+          ids = '\n\nIDs disponíveis no banco:\n' + j.ids_disponiveis.slice(0, 8).map(b =>
+            `  • id=${b.id} contrato=${b.contrato_id} comp=${b.competencia} R$${b.valor_total||b.valor_base||0}`
+          ).join('\n');
+        }
+      } catch (_) { msg = await r.text().catch(() => '') || r.status; }
+      alert('Erro ao gerar preview: ' + msg + ids + '\n\n(O frontend tentou id=' + boletim_id + ', contrato_id=' + (contrato_id||'?') + ', competencia=' + (competencia||'?') + ')');
       return;
     }
     const blob = await r.blob();
