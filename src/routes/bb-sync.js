@@ -47,20 +47,32 @@ async function setCfg(db, chave, valor) {
   `).run(chave, valor || '');
 }
 
-function getBBConfig(db) {
+// P0 fix (2026-04-29): getCfg() é async (retorna Promise) - antes este helper
+// devolvia um objeto com Promises não resolvidas, quebrando toda a integração BB.
+async function getBBConfig(db) {
+  const [
+    client_id, client_secret, app_key, agencia, conta,
+    ambiente, scope, ultimo_sync,
+    cert_path, key_path, pfx_path, pfx_passphrase,
+  ] = await Promise.all([
+    getCfg(db, 'bb_client_id'),
+    getCfg(db, 'bb_client_secret'),
+    getCfg(db, 'bb_app_key'),
+    getCfg(db, 'bb_agencia'),
+    getCfg(db, 'bb_conta'),
+    getCfg(db, 'bb_ambiente'),
+    getCfg(db, 'bb_scope'),
+    getCfg(db, 'bb_ultimo_sync'),
+    getCfg(db, 'bb_cert_path'),
+    getCfg(db, 'bb_key_path'),
+    getCfg(db, 'bb_pfx_path'),
+    getCfg(db, 'bb_pfx_passphrase'),
+  ]);
   return {
-    client_id:     getCfg(db, 'bb_client_id'),
-    client_secret: getCfg(db, 'bb_client_secret'),
-    app_key:       getCfg(db, 'bb_app_key'),
-    agencia:       getCfg(db, 'bb_agencia'),
-    conta:         getCfg(db, 'bb_conta'),
-    ambiente:      getCfg(db, 'bb_ambiente') || 'producao',
-    scope:         getCfg(db, 'bb_scope')    || 'extrato-info',
-    ultimo_sync:   getCfg(db, 'bb_ultimo_sync'),
-    cert_path:     getCfg(db, 'bb_cert_path'),
-    key_path:      getCfg(db, 'bb_key_path'),
-    pfx_path:      getCfg(db, 'bb_pfx_path'),
-    pfx_passphrase:getCfg(db, 'bb_pfx_passphrase'),
+    client_id, client_secret, app_key, agencia, conta,
+    ambiente: ambiente || 'producao',
+    scope:    scope    || 'extrato-info',
+    ultimo_sync, cert_path, key_path, pfx_path, pfx_passphrase,
   };
 }
 
@@ -90,13 +102,14 @@ function buildTlsOpts(cfg) {
 }
 
 // Retorna array de todas as contas: [{agencia, conta, descricao}]
-function getBBContas(db, cfg) {
+// P0 fix: era sync com getCfg async (Promise leakou para JSON.parse)
+async function getBBContas(db, cfg) {
   const contas = [];
   if (cfg.agencia && cfg.conta) {
     contas.push({ agencia: cfg.agencia, conta: cfg.conta, descricao: 'Conta principal' });
   }
   try {
-    const extra = getCfg(db, 'bb_contas_extra');
+    const extra = await getCfg(db, 'bb_contas_extra');
     if (extra) {
       const arr = JSON.parse(extra);
       if (Array.isArray(arr)) contas.push(...arr);
@@ -322,21 +335,8 @@ function periodoEmBlocos(dataInicio, dataFim) {
 }
 
 async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim, companyKey = '') {
-  // INSERT com id (numeroDocumento do BB) — usa id + bb_hash como dupla proteção
-  const ins = db.prepare(`
-    INSERT INTO extratos
-      (id, mes, data, data_iso, tipo, historico, debito, credito, bb_hash, status_conciliacao)
-    VALUES
-      (@id, @mes, @data, @data_iso, @tipo, @historico, @debito, @credito, @bb_hash, 'PENDENTE')
-  `);
-  // INSERT sem id — usa bb_hash como único critério de dedup
-  const insByHash = db.prepare(`
-    INSERT INTO extratos
-      (mes, data, data_iso, tipo, historico, debito, credito, bb_hash, status_conciliacao)
-    VALUES
-      (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito, @bb_hash, 'PENDENTE')
-  `);
-
+  // P0 fix: prepares movidos para DENTRO da transaction (txIns / txInsByHash)
+  // para garantir que rodem no mesmo connection do BEGIN/COMMIT.
   let imported = 0, skipped = 0;
   const blocos = periodoEmBlocos(dataInicio, dataFim);
 
@@ -348,7 +348,23 @@ async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim, co
       let lista = data.listaLancamento || data.lancamentos || data.data || [];
       if (!Array.isArray(lista)) lista = Object.values(lista);
 
-      await db.transaction(async () => {
+      // P0 fix (2026-04-29): em PG, ins.run() retorna Promise — sem await,
+      // r.changes era undefined e nunca incrementava `imported`.
+      // Também: a fn de transaction precisa ser async (já era) E os runs
+      // dentro precisam de await pra serem incluídos no BEGIN/COMMIT.
+      const trans = db.transaction(async (tx) => {
+        const txIns       = tx.prepare(`
+          INSERT INTO extratos
+            (id, mes, data, data_iso, tipo, historico, debito, credito, bb_hash, status_conciliacao)
+          VALUES
+            (@id, @mes, @data, @data_iso, @tipo, @historico, @debito, @credito, @bb_hash, 'PENDENTE')
+        `);
+        const txInsByHash = tx.prepare(`
+          INSERT INTO extratos
+            (mes, data, data_iso, tipo, historico, debito, credito, bb_hash, status_conciliacao)
+          VALUES
+            (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito, @bb_hash, 'PENDENTE')
+        `);
         for (const l of lista) {
           if (!isLancamentoReal(l)) { skipped++; continue; }
           const ext = lancamentoToExtrato(l);
@@ -360,19 +376,25 @@ async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim, co
             historico: ext.historico,
             debito:    ext.debito   ?? null,
             credito:   ext.credito  ?? null,
-            // Hash garante unicidade mesmo sem numeroDocumento
             bb_hash:   bbHash(companyKey, ext.iso, ext.tipo, ext.historico,
                               ext.debito ?? 0, ext.credito ?? 0),
           };
           let r;
-          if (ext.id) {
-            r = ins.run({ id: ext.id, ...row });
-          } else {
-            r = insByHash.run(row);
+          try {
+            if (ext.id) {
+              r = await txIns.run({ id: ext.id, ...row });
+            } else {
+              r = await txInsByHash.run(row);
+            }
+            if (r && r.changes > 0) imported++; else skipped++;
+          } catch (e) {
+            // Conflito de PK/UNIQUE = já existia → skipped
+            if (e.code === '23505') { skipped++; }
+            else throw e;
           }
-          if (r.changes > 0) imported++; else skipped++;
         }
-      })();
+      });
+      await trans();
 
       hasMore = (data.numeroPaginaProximo || 0) > 0 && lista.length > 0;
       pagina++;
@@ -387,7 +409,7 @@ async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim, co
 
 async function syncBB(db, cfg, dataInicio, dataFim, companyKey = '') {
   const token  = await getBBToken(cfg);
-  const contas = getBBContas(db, cfg);
+  const contas = await getBBContas(db, cfg);
 
   let totalImported = 0, totalSkipped = 0;
   const resultadosPorConta = [];
@@ -409,8 +431,8 @@ async function syncBB(db, cfg, dataInicio, dataFim, companyKey = '') {
 // ─── GET /bb/status ───────────────────────────────────────────────────────────
 
 router.get('/status', async (req, res) => {
-  const cfg    = getBBConfig(req.db);
-  const contas = getBBContas(req.db, cfg);
+  const cfg    = await getBBConfig(req.db);
+  const contas = await getBBContas(req.db, cfg);
   res.json({
     ok:           true,
     configurado:  isBBConfigurado(cfg),
@@ -443,17 +465,18 @@ router.post('/config', async (req, res) => {
   }
 
   const db = req.db;
-  setCfg(db, 'bb_client_id',     client_id);
-  setCfg(db, 'bb_client_secret', client_secret);
-  setCfg(db, 'bb_app_key',       app_key);
-  setCfg(db, 'bb_agencia',       agencia);
-  setCfg(db, 'bb_conta',         conta);
-  setCfg(db, 'bb_ambiente',      ambiente || 'producao');
-  setCfg(db, 'bb_scope',         scope    || 'extrato-info');
-  if (cert_path)      setCfg(db, 'bb_cert_path',      cert_path);
-  if (key_path)       setCfg(db, 'bb_key_path',       key_path);
-  if (pfx_path)       setCfg(db, 'bb_pfx_path',       pfx_path);
-  if (pfx_passphrase) setCfg(db, 'bb_pfx_passphrase', pfx_passphrase);
+  // P0 fix: setCfg é async — sem await criava race condition
+  await setCfg(db, 'bb_client_id',     client_id);
+  await setCfg(db, 'bb_client_secret', client_secret);
+  await setCfg(db, 'bb_app_key',       app_key);
+  await setCfg(db, 'bb_agencia',       agencia);
+  await setCfg(db, 'bb_conta',         conta);
+  await setCfg(db, 'bb_ambiente',      ambiente || 'producao');
+  await setCfg(db, 'bb_scope',         scope    || 'extrato-info');
+  if (cert_path)      await setCfg(db, 'bb_cert_path',      cert_path);
+  if (key_path)       await setCfg(db, 'bb_key_path',       key_path);
+  if (pfx_path)       await setCfg(db, 'bb_pfx_path',       pfx_path);
+  if (pfx_passphrase) await setCfg(db, 'bb_pfx_passphrase', pfx_passphrase);
 
   res.json({ ok: true, message: 'Credenciais BB salvas com sucesso' });
 });
@@ -467,14 +490,14 @@ router.post('/config/conta', async (req, res) => {
   const db = req.db;
   let extra = [];
   try {
-    const raw = getCfg(db, 'bb_contas_extra');
+    const raw = await getCfg(db, 'bb_contas_extra');
     if (raw) extra = JSON.parse(raw);
   } catch (_) {}
 
   // Evita duplicata
   if (!extra.find(c => c.agencia === agencia && c.conta === conta)) {
     extra.push({ agencia, conta, descricao: descricao || `Conta ${conta}` });
-    setCfg(db, 'bb_contas_extra', JSON.stringify(extra));
+    await setCfg(db, 'bb_contas_extra', JSON.stringify(extra));
   }
 
   res.json({ ok: true, total: extra.length + 1 });
@@ -489,12 +512,12 @@ router.delete('/config/conta', async (req, res) => {
   const db = req.db;
   let extra = [];
   try {
-    const raw = getCfg(db, 'bb_contas_extra');
+    const raw = await getCfg(db, 'bb_contas_extra');
     if (raw) extra = JSON.parse(raw);
   } catch (_) {}
 
   extra = extra.filter(c => c.conta !== conta);
-  setCfg(db, 'bb_contas_extra', JSON.stringify(extra));
+  await setCfg(db, 'bb_contas_extra', JSON.stringify(extra));
   res.json({ ok: true });
 });
 
@@ -502,10 +525,13 @@ router.delete('/config/conta', async (req, res) => {
 
 router.delete('/config', async (req, res) => {
   const db = req.db;
-  ['bb_client_id','bb_client_secret','bb_app_key','bb_agencia','bb_conta',
-   'bb_ambiente','bb_scope','bb_ultimo_sync','bb_cert_path','bb_key_path',
-   'bb_pfx_path','bb_pfx_passphrase','bb_contas_extra']
-    .forEach(async k => await db.prepare(`DELETE FROM configuracoes WHERE chave=?`).run(k));
+  // P0 fix: forEach não respeita async — usar for-of pra esperar todos os deletes
+  const chaves = ['bb_client_id','bb_client_secret','bb_app_key','bb_agencia','bb_conta',
+                  'bb_ambiente','bb_scope','bb_ultimo_sync','bb_cert_path','bb_key_path',
+                  'bb_pfx_path','bb_pfx_passphrase','bb_contas_extra'];
+  for (const k of chaves) {
+    await db.prepare(`DELETE FROM configuracoes WHERE chave=?`).run(k);
+  }
   res.json({ ok: true });
 });
 
@@ -513,7 +539,7 @@ router.delete('/config', async (req, res) => {
 
 router.post('/sync', async (req, res) => {
   const db  = req.db;
-  const cfg = getBBConfig(db);
+  const cfg = await getBBConfig(db);
 
   if (!isBBConfigurado(cfg)) {
     return res.status(400).json({ error: 'BB não configurado para esta empresa. Configure as credenciais primeiro.' });
@@ -540,7 +566,7 @@ router.post('/sync', async (req, res) => {
     const { imported, skipped, contas } = await syncBB(db, cfg, dataInicio, dataFim, req.companyKey);
 
     const agora = new Date().toISOString();
-    setCfg(db, 'bb_ultimo_sync', agora);
+    await setCfg(db, 'bb_ultimo_sync', agora);
 
     await db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('bb-sync', ?, ?)`)
       .run(`BB sync ${dataInicio} → ${dataFim}`, imported);
