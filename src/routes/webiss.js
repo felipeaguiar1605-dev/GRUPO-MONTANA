@@ -370,6 +370,9 @@ router.post('/importar', async (req, res) => {
 
     let imported = 0, skipped = 0;
 
+    // P0 fix v2 (2026-04-29 14:00): try/catch dentro de transaction PG aborta
+    // a tx inteira ("current transaction is aborted"). Solução: ON CONFLICT
+    // DO NOTHING — Postgres-native, evita o crash sem precisar de SAVEPOINT.
     const trans = db.transaction(async (tx) => {
       const ins = tx.prepare(`
         INSERT INTO notas_fiscais
@@ -379,37 +382,32 @@ router.post('/importar', async (req, res) => {
            data_emissao, status_conciliacao,
            webiss_numero_nfse, discriminacao)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT DO NOTHING
       `);
       for (const nf of allNfses) {
         const retencao = nf.valorInss + nf.valorIr + nf.valorIss +
                          nf.valorCsll + nf.valorPis + nf.valorCofins;
-        try {
-          const r = await ins.run(
-            nf.numero,
-            nf.competencia,
-            'Palmas/TO',
-            nf.tomadorRazaoSocial,
-            nf.tomadorCnpj,
-            nf.valorServicos,
-            nf.valorLiquido,
-            nf.valorInss,
-            nf.valorIr,
-            nf.valorIss,
-            nf.valorCsll,
-            nf.valorPis,
-            nf.valorCofins,
-            retencao,
-            nf.dataEmissao,
-            nf.status === 'CANCELADA' ? 'CANCELADA' : 'PENDENTE',
-            nf.numero,       // webiss_numero_nfse
-            nf.discriminacao,
-          );
-          if (r && r.changes > 0) imported++; else skipped++;
-        } catch (e) {
-          // Conflito UNIQUE no número da NF — já existe, conta como skipped
-          if (e.code === '23505') { skipped++; }
-          else throw e;
-        }
+        const r = await ins.run(
+          nf.numero,
+          nf.competencia,
+          'Palmas/TO',
+          nf.tomadorRazaoSocial,
+          nf.tomadorCnpj,
+          nf.valorServicos,
+          nf.valorLiquido,
+          nf.valorInss,
+          nf.valorIr,
+          nf.valorIss,
+          nf.valorCsll,
+          nf.valorPis,
+          nf.valorCofins,
+          retencao,
+          nf.dataEmissao,
+          nf.status === 'CANCELADA' ? 'CANCELADA' : 'PENDENTE',
+          nf.numero,       // webiss_numero_nfse
+          nf.discriminacao,
+        );
+        if (r && r.changes > 0) imported++; else skipped++;
       }
     });
     await trans();

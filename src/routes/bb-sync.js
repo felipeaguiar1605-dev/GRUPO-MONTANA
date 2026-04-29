@@ -348,22 +348,25 @@ async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim, co
       let lista = data.listaLancamento || data.lancamentos || data.data || [];
       if (!Array.isArray(lista)) lista = Object.values(lista);
 
-      // P0 fix (2026-04-29): em PG, ins.run() retorna Promise — sem await,
-      // r.changes era undefined e nunca incrementava `imported`.
-      // Também: a fn de transaction precisa ser async (já era) E os runs
-      // dentro precisam de await pra serem incluídos no BEGIN/COMMIT.
+      // P0 fix v2 (2026-04-29 14:00): em PG, try/catch para 23505 (UNIQUE)
+      // dentro de transação NÃO funciona — qualquer erro aborta toda a tx
+      // ("current transaction is aborted, commands ignored").
+      // Solução correta: ON CONFLICT DO NOTHING — Postgres-native upsert.
+      // r.changes = 0 quando ja existe, sem precisar try/catch.
       const trans = db.transaction(async (tx) => {
         const txIns       = tx.prepare(`
           INSERT INTO extratos
             (id, mes, data, data_iso, tipo, historico, debito, credito, bb_hash, status_conciliacao)
           VALUES
             (@id, @mes, @data, @data_iso, @tipo, @historico, @debito, @credito, @bb_hash, 'PENDENTE')
+          ON CONFLICT DO NOTHING
         `);
         const txInsByHash = tx.prepare(`
           INSERT INTO extratos
             (mes, data, data_iso, tipo, historico, debito, credito, bb_hash, status_conciliacao)
           VALUES
             (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito, @bb_hash, 'PENDENTE')
+          ON CONFLICT DO NOTHING
         `);
         for (const l of lista) {
           if (!isLancamentoReal(l)) { skipped++; continue; }
@@ -380,18 +383,13 @@ async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim, co
                               ext.debito ?? 0, ext.credito ?? 0),
           };
           let r;
-          try {
-            if (ext.id) {
-              r = await txIns.run({ id: ext.id, ...row });
-            } else {
-              r = await txInsByHash.run(row);
-            }
-            if (r && r.changes > 0) imported++; else skipped++;
-          } catch (e) {
-            // Conflito de PK/UNIQUE = já existia → skipped
-            if (e.code === '23505') { skipped++; }
-            else throw e;
+          if (ext.id) {
+            r = await txIns.run({ id: ext.id, ...row });
+          } else {
+            r = await txInsByHash.run(row);
           }
+          // ON CONFLICT DO NOTHING: r.changes=0 = ja existia
+          if (r && r.changes > 0) imported++; else skipped++;
         }
       });
       await trans();
