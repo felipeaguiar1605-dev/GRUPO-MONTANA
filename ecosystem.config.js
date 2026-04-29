@@ -33,6 +33,20 @@ module.exports = {
       // Graceful shutdown
       kill_timeout       : 5000,
       listen_timeout     : 8000,
+    },
+
+    // ─── Cron mensal: gera boletins do mês passado, dia 5 às 8h ─────────
+    {
+      name         : 'montana-cron-boletins',
+      script       : 'scripts/gerar_boletins_mensal.js',
+      args         : '--apply',
+      cwd          : '/opt/montana/app_unificado',
+      autorestart  : false,                // só roda no cron, não restart contínuo
+      cron_restart : '0 8 5 * *',          // todo dia 5 às 8h (depois fechamento mês)
+      out_file     : '/opt/montana/logs/cron-boletins-out.log',
+      error_file   : '/opt/montana/logs/cron-boletins-err.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+      merge_logs   : true,
     }
   ]
 };
