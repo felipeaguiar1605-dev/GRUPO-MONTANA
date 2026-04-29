@@ -37,7 +37,8 @@ const STATUS_MAP = [
   [/^ATIVOS?$/,                         'ATIVO'],
   [/^EM[\s_-]?DIA$/,                    'EM DIA'],
   [/^CR[ÍI]TICO$/,                      'CRÍTICO'],
-  [/^ENCERRAD[OA]$/,                    'ENCERRADO'],
+  [/^ATEN[ÇC][AÃ]O$/,                   'ATENÇÃO'],
+  [/^ENCERRAD[OA].*$/,                  'ENCERRADO'],   // "ENCERRADO — DÍVIDA PENDENTE" → "ENCERRADO"
   [/^RESCINDID[OA]$/,                   'RESCINDIDO'],
   [/^SUSPEND?ID[OA]$/,                  'SUSPENSO'],
   [/^SUSPENSO$/,                        'SUSPENSO'],
@@ -45,14 +46,28 @@ const STATUS_MAP = [
   [/^CANCELAD[OA]$/,                    'CANCELADO'],
 ];
 
+// Strip de emojis e símbolos (mantém letras Unicode, dígitos e espaços comuns).
+// Cobre: 🟡 🔴 ✅ 🚨 ⚠️ etc. — qualquer coisa fora de ASCII printable + acentos latinos.
+function stripEmojis(s) {
+  return s
+    // Remove emojis e pictogramas (ranges Unicode)
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F000}-\u{1F2FF}]/gu, '')
+    // Remove variation selectors (ex: emoji presentation ️)
+    .replace(/[︀-️]/g, '')
+    // Compacta espaços múltiplos
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function canonicalStatus(raw) {
   if (raw === null || raw === undefined) return null;
-  const t = String(raw).trim().toUpperCase();
+  // Primeiro tira emojis, depois UPPER+TRIM
+  const t = stripEmojis(String(raw)).toUpperCase().trim();
   if (t === '') return null;
   for (const [rx, canon] of STATUS_MAP) {
     if (rx.test(t)) return canon;
   }
-  // Não bate em nada → devolve UPPER+TRIM (canoniza ao menos espaços e caixa)
+  // Não bate em nada → devolve sem emoji + UPPER+TRIM
   return t;
 }
 
