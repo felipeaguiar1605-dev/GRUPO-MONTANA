@@ -24,15 +24,20 @@ const AUDIT_INDEX_SQL = `
     ON audit_log_routes(created_at)
 `;
 
-for (const key of Object.keys(COMPANIES)) {
-  try {
-    const db = getDb(key);
-    db.exec(AUDIT_TABLE_SQL);
-    db.exec(AUDIT_INDEX_SQL);
-  } catch (_e) {
-    // Banco pode não estar disponível ainda — ignora silenciosamente
+// P0 fix (2026-04-30): db.exec() em PG é async — sem await, Promises ficam
+// pendentes e erros não são capturados. Top-level await funciona em ESM mas
+// este arquivo é CommonJS, então usamos IIFE async que swallow erros.
+(async () => {
+  for (const key of Object.keys(COMPANIES)) {
+    try {
+      const db = getDb(key);
+      await db.exec(AUDIT_TABLE_SQL);
+      await db.exec(AUDIT_INDEX_SQL);
+    } catch (_e) {
+      // Banco pode não estar disponível ainda — ignora silenciosamente
+    }
   }
-}
+})();
 
 // ── Rotas a ignorar ───────────────────────────────────────────────
 const ROTAS_IGNORADAS = [

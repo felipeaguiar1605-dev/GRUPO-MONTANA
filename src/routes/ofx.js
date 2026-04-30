@@ -142,27 +142,29 @@ router.post('/importar', async (req, res) => {
         return res.status(422).json({ error: 'Nenhuma transação encontrada no arquivo OFX. Verifique o formato.' });
       }
 
-      const stmtInsert = db.prepare(`
-        INSERT INTO extratos
-          (mes, data, data_iso, tipo, historico, debito, credito,
-           status_conciliacao, banco, conta, ofx_fitid,
-           created_at, updated_at)
-        VALUES
-          (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito,
-           'PENDENTE', @banco, @conta, @ofx_fitid,
-           NOW(), NOW())
-      `);
-
-      // Verifica quantas já existem (para contar duplicatas)
-      const checkFitid = db.prepare(`SELECT 1 FROM extratos WHERE ofx_fitid=? AND ofx_fitid!='' LIMIT 1`);
-
       let importados = 0;
       let duplicatas = 0;
 
-      const importarTudo = db.transaction(async () => {
+      // P0 fix (2026-04-30): stmts movidos para dentro da tx + await em todas
+      // as chamadas. ON CONFLICT DO NOTHING substituiu try/catch (que aborta
+      // a tx em PG por causa de UNIQUE).
+      const importarTudo = db.transaction(async (tx) => {
+        const stmtInsert = tx.prepare(`
+          INSERT INTO extratos
+            (mes, data, data_iso, tipo, historico, debito, credito,
+             status_conciliacao, banco, conta, ofx_fitid,
+             created_at, updated_at)
+          VALUES
+            (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito,
+             'PENDENTE', @banco, @conta, @ofx_fitid,
+             NOW(), NOW())
+          ON CONFLICT DO NOTHING
+        `);
+        const checkFitid = tx.prepare(`SELECT 1 FROM extratos WHERE ofx_fitid=? AND ofx_fitid!='' LIMIT 1`);
+
         for (const t of transacoes) {
           // Verifica duplicata via fitid
-          const existe = checkFitid.get(t.fitid);
+          const existe = await checkFitid.get(t.fitid);
           if (existe) { duplicatas++; continue; }
 
           const mes  = derivarMes(t.dataIso);
@@ -171,7 +173,7 @@ router.post('/importar', async (req, res) => {
           const data   = partes.length === 3 ? `${partes[2]}/${partes[1]}/${partes[0]}` : t.dataIso;
           const tipo   = t.credito ? 'C' : 'D';
 
-          const r = stmtInsert.run({
+          const r = await stmtInsert.run({
             mes,
             data,
             data_iso: t.dataIso,
@@ -184,7 +186,7 @@ router.post('/importar', async (req, res) => {
             ofx_fitid: t.fitid
           });
 
-          if (r.changes > 0) importados++;
+          if (r && r.changes > 0) importados++;
           else duplicatas++;
         }
       });

@@ -390,7 +390,7 @@ router.post('/retencoes/preencher', async (req, res) => {
       const esp = calcularRetencoesEsperadas(nf.valor_bruto, nf.tomador, nf.cidade, nf.retencao);
       // Ajustar proporcionalmente à retenção real (para fechar o valor)
       const fator = nf.retencao / esp.totalEsperado;
-      update.run({
+      await update.run({
         id: nf.id,
         inss: +(esp.inss * fator).toFixed(2),
         ir: +(esp.irrf * fator).toFixed(2),
@@ -1504,12 +1504,13 @@ router.post('/nfs/auto-vincular', async (req, res) => {
     let totalVinculadas = 0;
     const resumo = [];
 
-    const upd = req.db.prepare(`
-      UPDATE notas_fiscais SET contrato_ref = @contrato
-      WHERE id = @id
-    `);
-
-    await req.db.transaction(async () => {
+    // P0 fix (2026-04-30): upd.run em forEach (Promise descartada) e fora
+    // da tx (cliente PG diferente). Movido pra dentro com tx.prepare + await.
+    const trans = req.db.transaction(async (tx) => {
+      const upd = tx.prepare(`
+        UPDATE notas_fiscais SET contrato_ref = @contrato
+        WHERE id = @id
+      `);
       for (const regra of REGRAS) {
         let where = `tomador LIKE @like`;
         const params = { like: regra.like };
@@ -1521,14 +1522,17 @@ router.post('/nfs/auto-vincular', async (req, res) => {
         if (regra.discriminacao_not) where += ` AND (discriminacao IS NULL OR (${regra.discriminacao_not}))`;
         if (regra.discriminacao_req) where += ` AND ${regra.discriminacao_req}`;
 
-        const nfs = await req.db.prepare(`SELECT id FROM notas_fiscais WHERE ${where}`).all(params);
+        const nfs = await tx.prepare(`SELECT id FROM notas_fiscais WHERE ${where}`).all(params);
         if (nfs.length > 0) {
-          nfs.forEach(n => upd.run({ id: n.id, contrato: regra.contrato }));
+          for (const n of nfs) {
+            await upd.run({ id: n.id, contrato: regra.contrato });
+          }
           totalVinculadas += nfs.length;
           resumo.push({ contrato: regra.contrato, vinculadas: nfs.length });
         }
       }
-    })();
+    });
+    await trans();
 
     audit(req, 'AUTO_VINCULAR', 'notas_fiscais', '', `Auto-vinculação: ${totalVinculadas} NFs`);
     dashCacheInvalidate(req.companyKey);
@@ -1665,7 +1669,7 @@ router.post('/import/extratos', (req, res, next) => getUpload(req).single("file"
         const row = {};
         header.forEach((h, idx) => { row[h.toLowerCase()] = cols[idx] || ''; });
 
-        const r = insert.run({
+        const r = await insert.run({
           id: parseInt(row.id || row.ID || i),
           mes: row.mes || row.MES || '',
           data: row.data || row.DATA || '',
@@ -1730,7 +1734,7 @@ router.post('/import/pagamentos', (req, res, next) => getUpload(req).single("fil
         const row = {};
         header.forEach((h, idx) => { row[h.toLowerCase().trim()] = cols[idx] || ''; });
 
-        insert.run({
+        await insert.run({
           ob: row['documento de pagamento'] || row.ob || '',
           gestao: row['unidade gestora'] || row.gestao || '',
           fonte: row['fonte de recurso'] || row.fonte || '',
@@ -1785,7 +1789,7 @@ router.post('/import/liquidacoes', (req, res, next) => getUpload(req).single("fi
         const row = {};
         header.forEach((h, idx) => { row[h.toLowerCase().trim()] = cols[idx] || ''; });
 
-        insert.run({
+        await insert.run({
           empenho: row.empenho || '',
           gestao: row['unidade gestora'] || row.gestao || '',
           favorecido: row.favorecido || '',
@@ -3303,7 +3307,7 @@ router.post('/import/despesas', (req, res, next) => getUpload(req).single("file"
         const descricao_row = row.descricao || row['descrição'] || '';
         const dedup_hash_row = dedupHash(req.companyKey, data_iso_row, vbruto, fornecedor_row, descricao_row);
 
-        const r = insert.run({
+        const r = await insert.run({
           categoria: cat,
           descricao: descricao_row,
           fornecedor: fornecedor_row,
@@ -4894,8 +4898,8 @@ router.post('/extratos/classificar-interno', async (req, res) => {
          AND (${buildWhere(PALAVRAS_INVESTIMENTO)})`
     );
 
-    const resInt = stmtInt.run(...buildParams(PALAVRAS_INTERNO));
-    const resInv = stmtInv.run(...buildParams(PALAVRAS_INVESTIMENTO));
+    const resInt = await stmtInt.run(...buildParams(PALAVRAS_INTERNO));
+    const resInv = await stmtInv.run(...buildParams(PALAVRAS_INVESTIMENTO));
 
     // Contagem de cada tipo após classificação
     const contagens = await db.prepare(`
@@ -5090,18 +5094,20 @@ router.post('/extratos/classificar-todos', async (req, res) => {
         ${extraWhere}
     `).all(extraParams);
 
-    const stmtUpdate = db.prepare(`
-      UPDATE extratos
-      SET status_conciliacao = @status,
-          contrato_vinculado  = CASE WHEN @contrato IS NOT NULL THEN @contrato ELSE contrato_vinculado END,
-          updated_at=NOW()
-      WHERE id = @id
-    `);
-
     let totalAtualizados = 0;
     const porCategoria = {};
 
-    const updateMany = db.transaction(async () => {
+    // P0 fix (2026-04-30): stmtUpdate fora da tx + .run() sem await em PG
+    // não esperava completar dentro da transaction. Movido pra dentro
+    // (tx.prepare) e cada .run() agora com await.
+    const updateMany = db.transaction(async (tx) => {
+      const stmtUpdate = tx.prepare(`
+        UPDATE extratos
+        SET status_conciliacao = @status,
+            contrato_vinculado  = CASE WHEN @contrato IS NOT NULL THEN @contrato ELSE contrato_vinculado END,
+            updated_at=NOW()
+        WHERE id = @id
+      `);
       for (const e of pendentes) {
         const hist = (e.historico || '').toUpperCase();
         for (const regra of REGRAS) {
@@ -5111,7 +5117,7 @@ router.post('/extratos/classificar-todos', async (req, res) => {
           });
           if (matched) {
             const status = regra.categoria;
-            stmtUpdate.run({ id: e.id, status, contrato: regra.contrato || null });
+            await stmtUpdate.run({ id: e.id, status, contrato: regra.contrato || null });
             totalAtualizados++;
             const key = regra.contrato || regra.categoria;
             porCategoria[key] = (porCategoria[key] || 0) + 1;
@@ -5647,7 +5653,7 @@ router.post('/compras/requisicoes', async (req, res) => {
       `);
       for (const it of itens) {
         if (!it.descricao) continue;
-        stmtItem.run(reqId, it.descricao, it.unidade || 'un', it.quantidade || 1, it.valor_unitario_est || null);
+        await stmtItem.run(reqId, it.descricao, it.unidade || 'un', it.quantidade || 1, it.valor_unitario_est || null);
       }
     }
 
