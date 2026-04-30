@@ -427,7 +427,7 @@ function bolEditarContrato(id) {
     </div>`;
 
   overlay.innerHTML = `
-    <div style="background:#fff;border-radius:14px;padding:28px;width:560px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.35)">
+    <div style="background:#fff;border-radius:14px;padding:28px;width:min(620px, 95vw);min-width:340px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)">
       <h3 style="margin:0 0 18px;font-size:16px;font-weight:800;color:#1e293b">✏️ Editar Contrato de Boletim</h3>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
