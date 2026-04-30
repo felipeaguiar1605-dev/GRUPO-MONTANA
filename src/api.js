@@ -1434,30 +1434,31 @@ router.post('/nfs/corrigir-lote', async (req, res) => {
     const { itens } = req.body; // [{id, data_emissao, competencia, contrato_ref}]
     if (!Array.isArray(itens) || !itens.length) return res.status(400).json({ error: 'Nenhum item enviado' });
 
-    const upd = req.db.prepare(`
-      UPDATE notas_fiscais SET
-        data_emissao = COALESCE(@data_emissao, data_emissao),
-        competencia  = COALESCE(@competencia, competencia),
-        contrato_ref = COALESCE(@contrato_ref, contrato_ref)
-      WHERE id = @id
-    `);
-
-    const tx = req.db.transaction((lista) => {
-      let ok = 0;
-      lista.forEach(item => {
-        if (!item.id) return;
-        upd.run({
+    // P0 fix (2026-04-30): db.transaction com fn sync + .run() async em PG
+    // não esperava completar (BEGIN/COMMIT antes dos UPDATEs).
+    // Reescrito: fn async + tx.prepare dentro + await em cada run.
+    let total = 0;
+    const tx = req.db.transaction(async (txDb) => {
+      const upd = txDb.prepare(`
+        UPDATE notas_fiscais SET
+          data_emissao = COALESCE(@data_emissao, data_emissao),
+          competencia  = COALESCE(@competencia, competencia),
+          contrato_ref = COALESCE(@contrato_ref, contrato_ref)
+        WHERE id = @id
+      `);
+      for (const item of itens) {
+        if (!item.id) continue;
+        await upd.run({
           id: item.id,
           data_emissao: item.data_emissao || null,
           competencia:  item.competencia  || null,
           contrato_ref: item.contrato_ref || null,
         });
-        ok++;
-      });
-      return ok;
+        total++;
+      }
     });
+    await tx();
 
-    const total = tx(itens);
     audit(req, 'UPDATE_LOTE', 'notas_fiscais', '', `Correção em lote: ${total} NFs`);
     dashCacheInvalidate(req.companyKey);
     res.json({ ok: true, atualizadas: total });

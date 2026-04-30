@@ -595,4 +595,99 @@ router.get('/historico', async (req, res) => {
   res.json({ ok: true, historico: rows });
 });
 
+// ─── POST /bb/diag-period ─────────────────────────────────────────────────────
+// Endpoint de diagnóstico: tenta buscar lançamentos da API BB DIA A DIA
+// dentro de um período, identificando exatamente qual data dispara erro 500.
+// Útil quando uma sincronização falha com "Erro Interno do Servidor" do BB.
+//
+// Body: { agencia, conta, dataInicio: 'YYYY-MM-DD', dataFim: 'YYYY-MM-DD' }
+//   - se agencia/conta omitidos, usa a conta principal configurada
+//   - dataInicio/dataFim default = ultimos 7 dias
+//
+// NÃO grava nada no banco. Apenas tenta GET e reporta status por dia.
+router.post('/diag-period', async (req, res) => {
+  const cfg = await getBBConfig(req.db);
+  if (!isBBConfigurado(cfg)) {
+    return res.status(400).json({ error: 'BB não configurado' });
+  }
+
+  const hoje = new Date();
+  const fmtLocal = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const hojeStr = fmtLocal(hoje);
+
+  let { agencia, conta, dataInicio, dataFim } = req.body || {};
+  agencia    = agencia || cfg.agencia;
+  conta      = conta   || cfg.conta;
+  dataFim    = dataFim || hojeStr;
+  dataInicio = dataInicio || (() => {
+    const d = new Date(hoje); d.setDate(d.getDate() - 7); return fmtLocal(d);
+  })();
+  if (dataFim    > hojeStr) dataFim    = hojeStr;
+  if (dataInicio > hojeStr) dataInicio = hojeStr;
+
+  const dias = [];
+  // Gera lista de dias (inclusivo)
+  let cur = new Date(dataInicio + 'T00:00:00Z');
+  const fim = new Date(dataFim + 'T00:00:00Z');
+  while (cur <= fim) {
+    dias.push(cur.toISOString().split('T')[0]);
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+
+  let token;
+  try {
+    token = await getBBToken(cfg);
+  } catch (e) {
+    return res.status(502).json({ error: 'Falha OAuth BB: ' + e.message });
+  }
+
+  const resultados = [];
+  for (const dia of dias) {
+    const t0 = Date.now();
+    try {
+      const data = await getLancamentos(cfg, token, agencia, conta, dia, dia, 1);
+      const lista = data.listaLancamento || data.lancamentos || data.data || [];
+      const qtd = Array.isArray(lista) ? lista.length : Object.keys(lista || {}).length;
+      resultados.push({
+        dia,
+        ok: true,
+        qtd_lancamentos: qtd,
+        elapsed_ms: Date.now() - t0,
+      });
+    } catch (e) {
+      // Tenta extrair codigo/ocorrencia do erro BB
+      const msg = e.message || '';
+      const codeMatch = msg.match(/"codigo":\s*"(\d+)"/);
+      const ocorMatch = msg.match(/"ocorrencia":\s*"([0-9]+)"/);
+      resultados.push({
+        dia,
+        ok: false,
+        erro: msg.substring(0, 250),
+        codigo_bb: codeMatch ? codeMatch[1] : null,
+        ocorrencia_bb: ocorMatch ? ocorMatch[1] : null,
+        elapsed_ms: Date.now() - t0,
+      });
+    }
+  }
+
+  const totalDias = resultados.length;
+  const okDias    = resultados.filter(r => r.ok).length;
+  const erroDias  = resultados.filter(r => !r.ok);
+
+  res.json({
+    ok: true,
+    agencia,
+    conta: conta.toString().replace(/.(?=.{4})/g, '*'),
+    periodo: { dataInicio, dataFim },
+    total_dias: totalDias,
+    ok_dias: okDias,
+    erro_dias: erroDias.length,
+    dias_com_erro: erroDias.map(r => ({ dia: r.dia, codigo_bb: r.codigo_bb, ocorrencia_bb: r.ocorrencia_bb, erro_resumo: r.erro.substring(0, 120) })),
+    resultados,
+    sumario: erroDias.length === 0
+      ? `✅ Todos os ${totalDias} dias responderam OK.`
+      : `❌ ${erroDias.length}/${totalDias} dias falharam. Reporte ao BB com as ocorrencias listadas.`,
+  });
+});
+
 module.exports = router;
