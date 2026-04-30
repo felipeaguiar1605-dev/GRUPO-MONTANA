@@ -101,23 +101,55 @@ async function processarEmpresa(empresa) {
       continue;
     }
 
-    // Pegar último total_geral conhecido (prioriza mês anterior, senão o último de qualquer mês)
-    let ref = await db.prepare(`
-      SELECT total_geral FROM bol_boletins WHERE contrato_id = @cid AND competencia = @comp
-    `).get({ cid: c.id, comp: compAnt });
+    // Estratégia (em ordem de prioridade):
+    //  1. SUM das NFs do MÊS ALVO (fonte de verdade quando NFs já foram emitidas)
+    //  2. Boletim do mês anterior (clone, fallback quando não há NFs ainda)
+    //  3. Último boletim disponível de qualquer competência
+    //  4. Zero (com flag sem_referencia)
+    let total_geral = 0;
+    let origem = 'sem_ref';
 
-    if (!ref) {
-      // Pega o boletim mais recente disponível desse contrato
-      ref = await db.prepare(`
+    // ─ Tentativa 1: SUM das NFs do mês alvo
+    if (c.numero_contrato && c.numero_contrato !== 'undefined') {
+      const sumRow = await db.prepare(`
+        SELECT COALESCE(SUM(valor_bruto), 0) AS total, COUNT(*) AS qtd
+        FROM notas_fiscais
+        WHERE contrato_ref ILIKE @pat
+          AND data_emissao LIKE @ym
+          AND COALESCE(status_conciliacao, '') NOT IN ('CANCELADA')
+      `).get({ pat: `%${c.numero_contrato}%`, ym: `${COMP_ALVO}-%` });
+      if (sumRow && sumRow.qtd > 0 && Number(sumRow.total) > 0) {
+        total_geral = Number(sumRow.total);
+        origem = `sum_nfs(${sumRow.qtd})`;
+      }
+    }
+
+    // ─ Tentativa 2: boletim do mês anterior (clone)
+    if (!total_geral) {
+      const ref = await db.prepare(`
+        SELECT total_geral FROM bol_boletins WHERE contrato_id = @cid AND competencia = @comp
+      `).get({ cid: c.id, comp: compAnt });
+      if (ref && Number(ref.total_geral) > 0) {
+        total_geral = Number(ref.total_geral);
+        origem = 'boletim_anterior';
+      }
+    }
+
+    // ─ Tentativa 3: último boletim de qualquer competência
+    if (!total_geral) {
+      const ref2 = await db.prepare(`
         SELECT total_geral FROM bol_boletins WHERE contrato_id = @cid
         ORDER BY competencia DESC LIMIT 1
       `).get({ cid: c.id });
+      if (ref2 && Number(ref2.total_geral) > 0) {
+        total_geral = Number(ref2.total_geral);
+        origem = 'ultimo_boletim';
+      }
     }
 
-    const total_geral = ref?.total_geral ?? 0;
-    if (!ref) sem_referencia++;
+    if (!total_geral) sem_referencia++;
 
-    acoes.push({ cid: c.id, nome: c.nome, total_geral });
+    acoes.push({ cid: c.id, nome: c.nome, total_geral, origem });
   }
 
   // Mostra resumo
@@ -126,7 +158,7 @@ async function processarEmpresa(empresa) {
   if (sem_referencia > 0) console.log(`    ⚠️  ${sem_referencia} sem boletim anterior — usará total_geral=0`);
 
   for (const a of acoes) {
-    console.log(`     [#${a.cid}] ${a.nome.slice(0, 50).padEnd(50)} R$ ${a.total_geral.toFixed(2)}`);
+    console.log(`     [#${a.cid}] ${a.nome.slice(0, 45).padEnd(45)} R$ ${Number(a.total_geral).toFixed(2).padStart(14)}  (${a.origem})`);
   }
 
   if (APPLY && acoes.length > 0) {
