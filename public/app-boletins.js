@@ -417,56 +417,58 @@ function bolEditarContrato(id) {
   document.getElementById('modal-editar-contrato-bol')?.remove();
   const overlay = document.createElement('div');
   overlay.id = 'modal-editar-contrato-bol';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;overflow-y:auto;padding:20px';
+  // align-items:flex-start + padding-top:5vh => modal sempre fica no topo,
+  // mesmo se o conteúdo for grande. Evita ficar deslocado/cortado.
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:5vh 20px';
 
   const fld = (lbl, key, hint) => `
-    <div style="margin-bottom:10px">
-      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:3px">${lbl}${hint?`<span style="font-weight:400;color:#94a3b8"> — ${hint}</span>`:''}</label>
+    <div style="margin-bottom:7px">
+      <label style="font-size:10px;font-weight:700;color:#475569;display:block;margin-bottom:2px">${lbl}${hint?`<span style="font-weight:400;color:#94a3b8;font-size:9px"> — ${hint}</span>`:''}</label>
       <input id="bec-${key}" value="${(c[key]||'').replace(/"/g,'&quot;')}"
-        style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+        style="width:100%;padding:5px 9px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
     </div>`;
 
   overlay.innerHTML = `
-    <div style="background:#fff;border-radius:14px;padding:28px;width:min(620px, 95vw);min-width:340px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)">
-      <h3 style="margin:0 0 18px;font-size:16px;font-weight:800;color:#1e293b">✏️ Editar Contrato de Boletim</h3>
+    <div style="background:#fff;border-radius:12px;padding:18px 20px;width:min(480px, 92vw);min-width:300px;box-shadow:0 20px 60px rgba(0,0,0,.35);font-size:12px">
+      <h3 style="margin:0 0 12px;font-size:14px;font-weight:800;color:#1e293b">✏️ Editar Contrato de Boletim</h3>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">
         ${fld('Nome','nome')}
         ${fld('Nº Contrato','numero_contrato')}
       </div>
-      ${fld('Contratante (Razão Social do Órgão)','contratante')}
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+      ${fld('Contratante','contratante')}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">
         ${fld('Processo','processo')}
         ${fld('Pregão','pregao')}
       </div>
       ${fld('Descrição do Serviço','descricao_servico')}
       ${fld('Escala','escala')}
 
-      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;margin:12px 0">
-        <div style="font-size:11px;font-weight:800;color:#1d4ed8;margin-bottom:8px">🔗 Vinculação Financeira (necessário para emissão NFS-e)</div>
-        ${fld('Referência do Contrato Financeiro','contrato_ref','numContrato exato da tabela contratos — ex: UFT 16/2025')}
-        ${fld('CNPJ do Tomador','insc_municipal','CNPJ do órgão contratante — 18 caracteres c/ máscara')}
-        ${fld('Orgão/Campo auxiliar','orgao','deixe vazio — preenchido automaticamente se contrato_ref estiver correto')}
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:7px;padding:9px 10px;margin:8px 0">
+        <div style="font-size:10px;font-weight:800;color:#1d4ed8;margin-bottom:5px">🔗 Vinculação Financeira (NFS-e)</div>
+        ${fld('Referência do Contrato Financeiro','contrato_ref','numContrato — ex: UFT 16/2025')}
+        ${fld('CNPJ do Tomador','insc_municipal','CNPJ do órgão')}
+        ${fld('Órgão (auto)','orgao','vazio = preenchido pelo contrato_ref')}
       </div>
 
-      <div style="background:#f8fafc;border-radius:8px;padding:12px;margin:12px 0">
-        <div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:8px">Dados da Empresa Emitente</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+      <div style="background:#f8fafc;border-radius:7px;padding:9px 10px;margin:8px 0">
+        <div style="font-size:10px;font-weight:700;color:#475569;margin-bottom:5px">Dados da Empresa Emitente</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">
           ${fld('Razão Social','empresa_razao')}
           ${fld('CNPJ','empresa_cnpj')}
         </div>
         ${fld('Endereço','empresa_endereco')}
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">
           ${fld('E-mail','empresa_email')}
           ${fld('Telefone','empresa_telefone')}
         </div>
       </div>
 
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px">
         <button onclick="document.getElementById('modal-editar-contrato-bol').remove()"
-          style="padding:8px 18px;background:#f1f5f9;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">Cancelar</button>
+          style="padding:6px 14px;background:#f1f5f9;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-weight:600">Cancelar</button>
         <button id="bec-salvar-btn" onclick="_bolSalvarContrato(${id})"
-          style="padding:8px 18px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">💾 Salvar</button>
+          style="padding:6px 14px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-weight:700">💾 Salvar</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
