@@ -2559,6 +2559,466 @@ router.post('/previa', async (req, res) => {
   }
 });
 
+// ─── PRÉVIAS — listar / aprovar / cancelar ─────────────────────────
+
+// GET /boletins/previas?competencia=YYYY-MM&status=previa,aprovado
+// Lista boletins com NFs planejadas, filtrável por status (suporta CSV)
+router.get('/previas', async (req, res) => {
+  try {
+    const { competencia, status, contrato_id } = req.query;
+    const where = ['1=1'];
+    const params = [];
+    if (competencia) { where.push('bb.competencia = ?'); params.push(competencia); }
+    if (status) {
+      const list = String(status).split(',').map(s => s.trim()).filter(Boolean);
+      where.push(`bb.status IN (${list.map(() => '?').join(',')})`);
+      params.push(...list);
+    }
+    if (contrato_id) { where.push('bb.contrato_id = ?'); params.push(Number(contrato_id)); }
+
+    const rows = await req.db.prepare(`
+      SELECT bb.*, bc.nome AS contrato_nome, bc.numero_contrato,
+             bp.campus_nome AS posto_nome, bp.municipio AS posto_municipio
+      FROM bol_boletins bb
+      JOIN bol_contratos bc ON bc.id = bb.contrato_id
+      LEFT JOIN bol_postos bp ON bp.id = bb.posto_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY bb.competencia DESC, bc.nome, bp.ordem NULLS FIRST
+    `).all(...params);
+
+    // Anexa NFs planejadas
+    for (const r of rows) {
+      r.nfs_planejadas = await req.db.prepare(`
+        SELECT * FROM bol_boletins_nfs_planejadas WHERE boletim_id = ? ORDER BY ordem, id
+      `).all(r.id);
+    }
+
+    res.json({ ok: true, total: rows.length, data: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PATCH /boletins/:id/aprovar — financeiro aprova prévia para emissão
+// Body opcional: { observacao }
+router.patch('/:id([0-9]+)/aprovar', async (req, res) => {
+  try {
+    const cur = await req.db.prepare(`
+      SELECT bb.*, bc.nome AS contrato_nome FROM bol_boletins bb
+      JOIN bol_contratos bc ON bc.id = bb.contrato_id
+      WHERE bb.id = ?
+    `).get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Boletim não encontrado' });
+
+    if (cur.status !== 'previa') {
+      return res.status(409).json({
+        error: `Boletim está com status '${cur.status}'. Só prévias podem ser aprovadas.`
+      });
+    }
+    if (cur.expira_em && new Date(cur.expira_em) < new Date()) {
+      return res.status(409).json({
+        error: `Prévia expirada em ${cur.expira_em}. Gere uma nova prévia.`
+      });
+    }
+    if (Number(cur.total_geral || 0) <= 0) {
+      return res.status(409).json({
+        error: 'Não é possível aprovar prévia com valor zero. Verifique itens, NFs ou aditivos.'
+      });
+    }
+
+    // Permissão: role 'financeiro' ou 'admin'
+    const role = req.user?.role;
+    if (role && !['financeiro', 'admin'].includes(role)) {
+      return res.status(403).json({ error: 'Apenas usuários financeiro ou admin podem aprovar prévias.' });
+    }
+    const usuario = req.user?.usuario || 'sistema';
+
+    await req.db.prepare(`
+      UPDATE bol_boletins
+      SET status = 'aprovado_para_emissao',
+          aprovado_por = ?,
+          aprovado_em = NOW(),
+          updated_at = NOW()
+      WHERE id = ?
+    `).run(usuario, req.params.id);
+
+    // Marca aditivos do contrato como 'aplicado' (Q3 fluxo semi-automático)
+    await req.db.prepare(`
+      UPDATE bol_aditivos SET status = 'aplicado', updated_at = NOW()
+      WHERE contrato_id = ? AND status = 'validado'
+        AND vigencia_de <= ? AND (vigencia_ate IS NULL OR vigencia_ate >= ?)
+    `).run(Number(cur.contrato_id), cur.periodo_inicio, cur.periodo_inicio);
+
+    res.json({
+      ok: true,
+      id: Number(req.params.id),
+      novo_status: 'aprovado_para_emissao',
+      aprovado_por: usuario,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PATCH /boletins/:id/cancelar-previa — desfaz prévia (volta a 'cancelado')
+router.patch('/:id([0-9]+)/cancelar-previa', async (req, res) => {
+  try {
+    const cur = await req.db.prepare('SELECT * FROM bol_boletins WHERE id = ?').get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Boletim não encontrado' });
+    if (!['previa', 'aprovado_para_emissao'].includes(cur.status)) {
+      return res.status(409).json({ error: `Não pode cancelar prévia em status '${cur.status}'` });
+    }
+    // Se já tem NF emitida em algum item planejado, bloqueia
+    const temEmitida = await req.db.prepare(`
+      SELECT COUNT(*) AS n FROM bol_boletins_nfs_planejadas
+      WHERE boletim_id = ? AND status = 'emitida'
+    `).get(req.params.id);
+    if (temEmitida.n > 0) {
+      return res.status(409).json({
+        error: `Boletim tem ${temEmitida.n} NF(s) já emitidas. Cancele as NFs no WebISS antes.`
+      });
+    }
+    await req.db.prepare(`
+      UPDATE bol_boletins SET status = 'cancelado', updated_at = NOW() WHERE id = ?
+    `).run(req.params.id);
+    res.json({ ok: true, novo_status: 'cancelado' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PATCH /boletins/nfs-planejadas/:id — edita override Q7 antes da emissão
+// Body: { descricao_override?, valor? }
+router.patch('/nfs-planejadas/:id([0-9]+)', async (req, res) => {
+  try {
+    const cur = await req.db.prepare(`
+      SELECT np.*, bb.status AS boletim_status FROM bol_boletins_nfs_planejadas np
+      JOIN bol_boletins bb ON bb.id = np.boletim_id
+      WHERE np.id = ?
+    `).get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'NF planejada não encontrada' });
+
+    if (cur.status === 'emitida') {
+      return res.status(409).json({ error: 'NF já emitida, não pode mais ser editada' });
+    }
+    if (!['previa', 'aprovado_para_emissao'].includes(cur.boletim_status)) {
+      return res.status(409).json({ error: `Boletim está '${cur.boletim_status}', não permite edição` });
+    }
+
+    const b = req.body || {};
+    await req.db.prepare(`
+      UPDATE bol_boletins_nfs_planejadas SET
+        descricao_override = COALESCE(?, descricao_override),
+        valor              = COALESCE(?, valor),
+        updated_at         = NOW()
+      WHERE id = ?
+    `).run(
+      b.descricao_override !== undefined ? b.descricao_override : null,
+      b.valor !== undefined ? Number(b.valor) : null,
+      req.params.id
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /boletins/nfs-planejadas/:id — exclui uma NF da prévia (antes de aprovar)
+router.delete('/nfs-planejadas/:id([0-9]+)', async (req, res) => {
+  try {
+    const cur = await req.db.prepare(`
+      SELECT np.status, bb.status AS boletim_status
+      FROM bol_boletins_nfs_planejadas np
+      JOIN bol_boletins bb ON bb.id = np.boletim_id
+      WHERE np.id = ?
+    `).get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'NF planejada não encontrada' });
+    if (cur.status === 'emitida') return res.status(409).json({ error: 'NF já emitida, não pode ser removida' });
+    if (cur.boletim_status === 'aprovado_para_emissao') {
+      return res.status(409).json({ error: 'Boletim já aprovado, não permite remover NFs. Cancele a prévia primeiro.' });
+    }
+    await req.db.prepare('DELETE FROM bol_boletins_nfs_planejadas WHERE id = ?').run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── EMISSÃO ASSÍNCRONA NFS-e (Fase 5) ─────────────────────────────
+// Modelo: cliente faz POST → resposta imediata com job_id, depois
+//         conecta em GET /:id/emissao-status (SSE) para acompanhar.
+
+// Estado in-memory dos jobs de emissão (vive por execução do node).
+// Se pm2 reiniciar, jobs ativos perdem state — clientes reconectam e
+// veem status final lido do banco (bol_boletins_nfs_planejadas.status).
+const _emissaoJobs = new Map(); // boletim_id → { listeners: Set<res>, started_at, by }
+
+function _emissaoEmit(boletimId, evt) {
+  const job = _emissaoJobs.get(boletimId);
+  if (!job) return;
+  const payload = `event: ${evt.type}\ndata: ${JSON.stringify(evt)}\n\n`;
+  for (const res of job.listeners) {
+    try { res.write(payload); } catch (_) {}
+  }
+}
+
+// POST /boletins/:id/emitir-nfs — dispara emissão em background
+// Body opcional: { force_retry: false } (re-tenta NFs com status 'erro')
+router.post('/:id([0-9]+)/emitir-nfs', async (req, res) => {
+  try {
+    const boletimId = Number(req.params.id);
+    const cur = await req.db.prepare(`
+      SELECT bb.*, bc.nome AS contrato_nome, bc.numero_contrato
+      FROM bol_boletins bb
+      JOIN bol_contratos bc ON bc.id = bb.contrato_id
+      WHERE bb.id = ?
+    `).get(boletimId);
+    if (!cur) return res.status(404).json({ error: 'Boletim não encontrado' });
+
+    if (cur.status !== 'aprovado_para_emissao') {
+      return res.status(409).json({
+        error: `Boletim está '${cur.status}'. Apenas 'aprovado_para_emissao' pode emitir.`
+      });
+    }
+
+    if (_emissaoJobs.has(boletimId)) {
+      return res.status(409).json({ error: 'Emissão já em andamento para este boletim. Use o endpoint de status.' });
+    }
+
+    const forceRetry = !!(req.body && req.body.force_retry);
+    const where = forceRetry ? `status IN ('pendente', 'erro')` : `status = 'pendente'`;
+    const nfsParaEmitir = await req.db.prepare(`
+      SELECT * FROM bol_boletins_nfs_planejadas
+      WHERE boletim_id = ? AND ${where}
+      ORDER BY ordem, id
+    `).all(boletimId);
+
+    if (nfsParaEmitir.length === 0) {
+      return res.status(409).json({ error: 'Nenhuma NF pendente para emitir neste boletim.' });
+    }
+
+    const usuario = req.user?.usuario || 'sistema';
+    _emissaoJobs.set(boletimId, {
+      listeners: new Set(),
+      started_at: new Date(),
+      by: usuario,
+      total: nfsParaEmitir.length,
+      processed: 0,
+      sucesso: 0,
+      erros: 0,
+    });
+
+    // Marca status do boletim
+    await req.db.prepare(`UPDATE bol_boletins SET status = 'emitindo', updated_at = NOW() WHERE id = ?`).run(boletimId);
+
+    // Resposta imediata
+    res.json({
+      ok: true,
+      job_id: boletimId,
+      total_nfs: nfsParaEmitir.length,
+      sse_url: `/api/boletins/${boletimId}/emissao-status`,
+    });
+
+    // Processa em background (não bloqueia resposta)
+    setImmediate(() => processarEmissao(req.db, req.companyKey, boletimId, nfsParaEmitir, usuario)
+      .catch(err => {
+        console.error(`[boletins/emitir-nfs job=${boletimId}] erro fatal:`, err.message);
+        _emissaoEmit(boletimId, { type: 'fatal', erro: err.message });
+      }));
+  } catch (e) {
+    console.error('[POST /boletins/:id/emitir-nfs] erro:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Processa emissão NF-a-NF, emitindo eventos SSE
+async function processarEmissao(db, companyKey, boletimId, nfsParaEmitir, usuario) {
+  // Carrega WebISS dinamicamente (evita ciclo de dependência)
+  // Em produção, /webiss/emitir está em src/routes/webiss.js — chamamos via HTTP local.
+  // Aqui usamos a rota interna via fetch local pra reaproveitar a lógica de assinatura A1.
+  const http = require('http');
+  const PORT = process.env.PORT || 3002;
+
+  for (const nfp of nfsParaEmitir) {
+    _emissaoEmit(boletimId, { type: 'progress', status: 'emitindo', nf_planejada_id: nfp.id, ordem: nfp.ordem });
+
+    await db.prepare(`
+      UPDATE bol_boletins_nfs_planejadas
+      SET status = 'emitindo', tentativas = tentativas + 1, updated_at = NOW()
+      WHERE id = ?
+    `).run(nfp.id);
+
+    try {
+      // Carrega contexto: contrato + posto + tomador
+      const boletim = await db.prepare(`
+        SELECT bb.*, bc.nome AS contrato_nome, bc.numero_contrato, bc.contratante,
+               bc.empresa_razao, bc.empresa_cnpj, bc.processo, bc.pregao, bc.orgao
+        FROM bol_boletins bb JOIN bol_contratos bc ON bc.id = bb.contrato_id
+        WHERE bb.id = ?
+      `).get(boletimId);
+
+      // RPS sequencial — usa nfp.id para ter idempotência se WebISS retornar timeout
+      const rpsNumero = nfp.rps_numero || `${boletimId}-${nfp.id}`;
+      const descricao = nfp.descricao_override || nfp.descricao_template || '';
+      const valor = Number(nfp.valor || 0);
+
+      // Body para /webiss/emitir
+      const body = {
+        rps: {
+          numero: rpsNumero,
+          serie: nfp.rps_serie || 'NFSE',
+          tipo: 1,
+          dataEmissao: new Date().toISOString().slice(0, 10),
+          competencia: boletim.competencia + '-01',
+          servico: {
+            valorServicos: valor,
+            valorDeducoes: 0,
+            issRetido: true,                 // padrão Montana: ISS retido pelo tomador
+            valorIss: +(valor * 0.05).toFixed(2),
+            aliquota: 5.0,
+            itemLista: '07.10',              // Limpeza/Vigilância — códigos ABRASF
+            codTributacao: '07.10',
+            discriminacao: descricao,
+            exigibilidadeIss: 1,
+          },
+          tomador: {
+            cnpj: boletim.orgao || '',
+            razaoSocial: boletim.contratante || '',
+          },
+        },
+      };
+
+      // Chama /webiss/emitir via HTTP local
+      const resp = await new Promise((resolve, reject) => {
+        const data = JSON.stringify(body);
+        const reqLocal = http.request({
+          hostname: '127.0.0.1', port: PORT, path: '/api/webiss/emitir',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(data),
+            'X-Empresa': companyKey,
+            'X-Internal-Bypass-Auth': 'montana-internal-' + (process.env.JWT_SECRET || 'montana'),
+          },
+        }, r => {
+          let buf = '';
+          r.on('data', c => buf += c);
+          r.on('end', () => {
+            try { resolve({ status: r.statusCode, json: JSON.parse(buf) }); }
+            catch { resolve({ status: r.statusCode, json: { erro: buf } }); }
+          });
+        });
+        reqLocal.on('error', reject);
+        reqLocal.write(data);
+        reqLocal.end();
+      });
+
+      if (resp.status >= 200 && resp.status < 300 && resp.json?.ok && resp.json?.nfse?.numero) {
+        const nfse = resp.json.nfse;
+        await db.prepare(`
+          UPDATE bol_boletins_nfs_planejadas SET
+            status = 'emitida',
+            nfse_numero = ?,
+            nfse_data_emissao = NOW(),
+            rps_numero = ?,
+            emitida_em = NOW(),
+            emitida_por = ?,
+            erro_mensagem = NULL,
+            updated_at = NOW()
+          WHERE id = ?
+        `).run(nfse.numero, rpsNumero, usuario, nfp.id);
+
+        const job = _emissaoJobs.get(boletimId);
+        if (job) job.sucesso++;
+        _emissaoEmit(boletimId, {
+          type: 'progress', status: 'emitida',
+          nf_planejada_id: nfp.id, nfse_numero: nfse.numero, valor,
+        });
+      } else {
+        const erroMsg = resp.json?.error || resp.json?.erro || JSON.stringify(resp.json?.erros || resp.json).slice(0, 500);
+        await db.prepare(`
+          UPDATE bol_boletins_nfs_planejadas SET
+            status = 'erro', erro_mensagem = ?, updated_at = NOW()
+          WHERE id = ?
+        `).run(erroMsg, nfp.id);
+        const job = _emissaoJobs.get(boletimId);
+        if (job) job.erros++;
+        _emissaoEmit(boletimId, { type: 'progress', status: 'erro', nf_planejada_id: nfp.id, erro: erroMsg });
+      }
+    } catch (e) {
+      await db.prepare(`
+        UPDATE bol_boletins_nfs_planejadas SET status = 'erro', erro_mensagem = ?, updated_at = NOW()
+        WHERE id = ?
+      `).run(e.message, nfp.id);
+      const job = _emissaoJobs.get(boletimId);
+      if (job) job.erros++;
+      _emissaoEmit(boletimId, { type: 'progress', status: 'erro', nf_planejada_id: nfp.id, erro: e.message });
+    }
+
+    const job = _emissaoJobs.get(boletimId);
+    if (job) job.processed++;
+  }
+
+  // Conclusão: atualiza status do boletim
+  const stats = await db.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      COUNT(*) FILTER (WHERE status = 'emitida')   AS emitidas,
+      COUNT(*) FILTER (WHERE status = 'erro')      AS erros,
+      COUNT(*) FILTER (WHERE status = 'pendente')  AS pendentes
+    FROM bol_boletins_nfs_planejadas WHERE boletim_id = ?
+  `).get(boletimId);
+
+  let novoStatus = 'emitido';
+  if (stats.erros > 0 && stats.emitidas === 0) novoStatus = 'erro_emissao';
+  else if (stats.erros > 0) novoStatus = 'emitido';   // parcial = considera emitido (com erros)
+  else if (stats.pendentes > 0) novoStatus = 'aprovado_para_emissao'; // ainda tem pendente
+
+  await db.prepare(`UPDATE bol_boletins SET status = ?, updated_at = NOW() WHERE id = ?`).run(novoStatus, boletimId);
+
+  _emissaoEmit(boletimId, { type: 'done', status_boletim: novoStatus, ...stats });
+
+  // Cleanup do job (mantém por 60s pra clientes lentos terem tempo de receber)
+  setTimeout(() => {
+    const job = _emissaoJobs.get(boletimId);
+    if (job) {
+      for (const r of job.listeners) try { r.end(); } catch (_) {}
+      _emissaoJobs.delete(boletimId);
+    }
+  }, 60000);
+}
+
+// GET /boletins/:id/emissao-status — SSE stream do progresso
+router.get('/:id([0-9]+)/emissao-status', async (req, res) => {
+  const boletimId = Number(req.params.id);
+
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',  // Nginx: desabilita buffer
+  });
+  res.flushHeaders?.();
+
+  // Estado inicial
+  const boletim = await req.db.prepare('SELECT status FROM bol_boletins WHERE id = ?').get(boletimId);
+  const stats = await req.db.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      COUNT(*) FILTER (WHERE status = 'emitida')  AS emitidas,
+      COUNT(*) FILTER (WHERE status = 'erro')     AS erros,
+      COUNT(*) FILTER (WHERE status = 'pendente') AS pendentes,
+      COUNT(*) FILTER (WHERE status = 'emitindo') AS emitindo
+    FROM bol_boletins_nfs_planejadas WHERE boletim_id = ?
+  `).get(boletimId);
+  res.write(`event: snapshot\ndata: ${JSON.stringify({ status_boletim: boletim?.status, ...stats })}\n\n`);
+
+  // Se já tá tudo concluído, encerra
+  if (!_emissaoJobs.has(boletimId)) {
+    res.write(`event: done\ndata: ${JSON.stringify({ reason: 'no-active-job', ...stats })}\n\n`);
+    return res.end();
+  }
+
+  // Adiciona listener
+  const job = _emissaoJobs.get(boletimId);
+  job.listeners.add(res);
+
+  // Cleanup ao desconectar
+  req.on('close', () => {
+    job.listeners.delete(res);
+  });
+});
+
 // ─── HELPER: aplica aditivos sobre um valor base ──────────────────
 // Exportado pra usar em /boletins/previa (Fase 3)
 async function aplicarAditivos(db, contratoId, competencia, valorBase) {
