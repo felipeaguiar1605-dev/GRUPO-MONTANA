@@ -5,35 +5,80 @@
 
 ---
 
+## 🚨 PRÉ-FLIGHT — leia ANTES de qualquer incidente
+
+### Acesso ao servidor
+
+| Recurso | Como acessar |
+|---------|--------------|
+| **SSH** (preferido) | `ssh montana-prod` (alias) ou Console GCP → Compute Engine → `montana-app-sp` → SSH |
+| **IP da VM** | Console GCP → VM `montana-app-sp` (caso DNS caia) |
+| **Console GCP** | https://console.cloud.google.com → projeto `propane-highway-492418-d0` |
+| **PostgreSQL** | `35.247.208.7:5432` — db `montana_erp`, user `montana` |
+| **Senha PG** | Vault (1Password / KeePass) → entry "Montana-Prod-PG" |
+| **JWT_SECRET** | Vault → "Montana-Prod-JWT" (rotacionar invalida sessões) |
+
+### Comando 1ª linha quando aparecer no SSH
+
+```bash
+# Carrega vars (não exponha senha em screen-share)
+source ~/.montana_secrets   # arquivo 600 com export PG_PASSWORD=...
+cd /opt/montana/app_unificado
+pm2 status
+curl -fsS http://localhost:3002/healthz | jq .
+```
+
+### Como decidir severidade (1 segundo)
+
+| Sintoma                                              | Severidade | Resposta |
+|------------------------------------------------------|------------|----------|
+| Cliente NÃO consegue trabalhar agora                 | **P0**     | Acordar Felipe imediatamente, qualquer hora |
+| Algo quebrado, mas tem workaround                    | **P1**     | Resolver em até 2h (horário comercial) |
+| Falha em job batch / relatório / tela secundária    | **P2**     | Próximo dia útil |
+| Pendência cosmética / UX / sugestão                  | **P3**     | Backlog |
+
+### Postmortem express (10 linhas, copy-paste ao final do incidente)
+
+```
+## Postmortem YYYY-MM-DD HH:MM
+- Sintoma observado:
+- Quem reportou:
+- Severidade:
+- Causa raiz (1 linha):
+- O que tentei antes de funcionar:
+- Como detectar antes da próxima vez:
+- TODO criado: <link issue/asana>
+- Tempo total down: ____ min
+```
+
+---
+
 ## Índice de incidentes
 
-| # | Sintoma                                  | Severidade | Tempo p/ resolver |
-|---|------------------------------------------|------------|-------------------|
-| 1 | App offline (timeout / 502 / 504)        | P0         | 5–15 min          |
-| 2 | Erro 500 generalizado                    | P0         | 10–30 min         |
-| 3 | Banco PostgreSQL inacessível             | P0         | 15–60 min         |
-| 4 | Login não funciona / JWT inválido        | P1         | 5–15 min          |
-| 5 | Backup falhou / não está rodando         | P1         | 30 min            |
-| 6 | WebISS / BB sync falhou                  | P2         | 1h (manual hoje)  |
-| 7 | Disco cheio / memória alta               | P1         | 15–30 min         |
-| 8 | Conciliação bancária com divergência     | P2         | 1–2h              |
-| 9 | Performance degradada (lentidão)         | P1         | 30–60 min         |
-| 10| Vazamento de credencial / 2FA comprometido | P0       | imediato          |
+| # | Sintoma                                  | Severidade | Tempo |
+|---|------------------------------------------|------------|-------|
+| 1 | App offline (timeout / 502 / 504)        | P0         | 5–15 min |
+| 2 | Erro 500 generalizado                    | P0         | 10–30 min |
+| 3 | Banco PostgreSQL inacessível             | P0         | 15–60 min |
+| 4 | Login não funciona / JWT inválido        | P1         | 5–15 min |
+| 5 | Backup falhou / não está rodando         | P1         | 30 min |
+| 6 | WebISS / BB sync falhou                  | P2         | 1h |
+| 7 | Disco cheio / memória alta               | P1         | 15–30 min |
+| 8 | Conciliação bancária com divergência     | P2         | 1–2h |
+| 9 | Performance degradada (lentidão)         | P1         | 30–60 min |
+| 10| Vazamento de credencial / 2FA comprometido | P0       | imediato |
 
 ---
 
 ## Antes de tudo: triagem (60s)
 
 ```bash
-ssh montana-prod
-cd /opt/montana/app_unificado
-
 # 1. App está vivo?
 pm2 status
 curl -fsS http://localhost:3002/healthz | jq
 
 # 2. DB responde?
-psql -h 35.247.208.7 -U montana -d montana_erp -c "SELECT 1"
+PGPASSWORD="$PG_PASSWORD" psql -h 35.247.208.7 -U montana -d montana_erp -c "SELECT 1"
 
 # 3. Disco ok?
 df -h /opt/montana
@@ -99,7 +144,7 @@ grep -c "ERROR" logs/erros.log | tail
 
 **Verificar:**
 ```bash
-psql -h 35.247.208.7 -U montana -d montana_erp -c "SELECT now()"
+PGPASSWORD="$PG_PASSWORD" psql -h 35.247.208.7 -U montana -d montana_erp -c "SELECT now()"
 # Se timeout:
 nc -zv 35.247.208.7 5432
 ```
@@ -136,13 +181,17 @@ VACUUM FULL audit_log;
 pm2 env 0 | grep JWT_SECRET
 # Se mudou → todos os tokens antigos invalidaram (esperado pós-deploy)
 
-# 2. Usuário bloqueado?
-psql -c "SELECT usuario, tentativas_login, bloqueado_ate FROM assessoria.usuarios WHERE usuario='X'"
+# 2. Usuário bloqueado por tentativas?
+PGPASSWORD="$PG_PASSWORD" psql -h 35.247.208.7 -U montana -d montana_erp -c \
+  "SELECT usuario, tentativas_login, bloqueado_ate FROM assessoria.usuarios WHERE usuario='X'"
+
 # Desbloquear:
-psql -c "UPDATE assessoria.usuarios SET tentativas_login=0, bloqueado_ate=NULL WHERE usuario='X'"
+PGPASSWORD="$PG_PASSWORD" psql -h 35.247.208.7 -U montana -d montana_erp -c \
+  "UPDATE assessoria.usuarios SET tentativas_login=0, bloqueado_ate=NULL WHERE usuario='X'"
 
 # 3. 2FA comprometido / usuário perdeu device:
-psql -c "UPDATE assessoria.usuarios SET totp_enabled=FALSE, totp_secret=NULL WHERE usuario='X'"
+PGPASSWORD="$PG_PASSWORD" psql -h 35.247.208.7 -U montana -d montana_erp -c \
+  "UPDATE assessoria.usuarios SET totp_enabled=FALSE, totp_secret=NULL WHERE usuario='X'"
 # Avisar usuário pra re-cadastrar
 ```
 
@@ -150,7 +199,8 @@ psql -c "UPDATE assessoria.usuarios SET totp_enabled=FALSE, totp_secret=NULL WHE
 ```bash
 node -e "console.log(require('bcryptjs').hashSync('NovaSenha@2026', 10))"
 # Pegar o hash e:
-psql -c "UPDATE assessoria.usuarios SET senha_hash='<HASH>' WHERE usuario='admin'"
+PGPASSWORD="$PG_PASSWORD" psql -h 35.247.208.7 -U montana -d montana_erp -c \
+  "UPDATE assessoria.usuarios SET senha_hash='<HASH>' WHERE usuario='admin'"
 ```
 
 ---
@@ -162,26 +212,26 @@ psql -c "UPDATE assessoria.usuarios SET senha_hash='<HASH>' WHERE usuario='admin
 ls -lh /opt/montana/backups/ | tail
 # Último arquivo deve ser de hoje (após 03h)
 
-gsutil ls gs://montana-erp-backups/ | tail
+gsutil ls gs://montana-backups-2026/ | tail
 # Pasta com data de hoje deve existir
 ```
 
 **Diagnóstico:**
 ```bash
-cat /opt/montana/logs/cron-backup-err.log | tail -50
-cat /opt/montana/backups/backup_*.log | tail -100
+tail -50 /opt/montana/logs/cron-backup.log
+tail -50 /opt/montana/backups/backup_*.log | tail -100
 ```
 
 **Causas comuns:**
-- `gsutil: command not found` → `sudo apt install google-cloud-sdk` + `gcloud auth login`
+- `pg_dump: server version mismatch` → reinstalar `postgresql-client-16` (v15 não dumpa v16)
+- `gsutil: command not found` → `sudo apt install google-cloud-sdk`
 - `pg_dump: connection refused` → ver #3
-- `permission denied` → `chmod +x scripts/backup_postgres.sh`
+- `permission denied` no script → `sudo chmod +x scripts/backup_postgres.sh`
 - Disco cheio → ver #7
 
 **Rodar backup manual:**
 ```bash
-cd /opt/montana/app_unificado
-PG_PASSWORD='<senha>' bash scripts/backup_postgres.sh
+sudo PG_PASSWORD="$PG_PASSWORD" bash /opt/montana/app_unificado/scripts/backup_postgres.sh
 ```
 
 ---
@@ -264,18 +314,19 @@ Diferença > 5% → checar:
 
 ```bash
 # Conexões DB ativas
-psql -c "SELECT count(*), state FROM pg_stat_activity GROUP BY state"
+PGPASSWORD="$PG_PASSWORD" psql -h 35.247.208.7 -U montana -d montana_erp -c \
+  "SELECT count(*), state FROM pg_stat_activity GROUP BY state"
 
 # Queries lentas (último minuto)
-psql -c "
+PGPASSWORD="$PG_PASSWORD" psql -h 35.247.208.7 -U montana -d montana_erp -c "
 SELECT pid, now()-query_start AS dur, left(query,80)
 FROM pg_stat_activity
 WHERE state='active' AND now()-query_start > interval '5 seconds'
 ORDER BY dur DESC"
 
 # Matar query travada
-psql -c "SELECT pg_cancel_backend(<pid>)"
-psql -c "SELECT pg_terminate_backend(<pid>)"  # se cancel não resolver
+PGPASSWORD="$PG_PASSWORD" psql -c "SELECT pg_cancel_backend(<pid>)"
+PGPASSWORD="$PG_PASSWORD" psql -c "SELECT pg_terminate_backend(<pid>)"  # se cancel não resolver
 ```
 
 **Frontend lento:**
@@ -327,16 +378,21 @@ psql -c "SELECT pg_terminate_backend(<pid>)"  # se cancel não resolver
 
 ---
 
-## Pós-incidente — sempre
+## Setup do `~/.montana_secrets` (uma vez, no servidor)
 
-Após resolver, **antes de fechar o ticket**:
+Pra que `$PG_PASSWORD` funcione nos comandos acima sem ficar visível em screen-share:
 
-1. Postar resumo no canal interno (#montana-ops):
-   - O que aconteceu
-   - Causa raiz (5 whys)
-   - Ação tomada
-   - O que mudar pra não acontecer de novo
+```bash
+# No SSH do servidor:
+cat > ~/.montana_secrets <<'EOF'
+export PG_PASSWORD='<senha-real-aqui>'
+export JWT_SECRET='<jwt-real-aqui>'
+export GCS_BUCKET='gs://montana-backups-2026'
+EOF
+chmod 600 ~/.montana_secrets
 
-2. Se foi P0 ou P1 → criar ação de melhoria no backlog (índice, monitor, alert).
+# Auto-carrega no login (adicionar ao .bashrc):
+echo '[ -f ~/.montana_secrets ] && source ~/.montana_secrets' >> ~/.bashrc
+```
 
-3. Atualizar este `RUNBOOK.md` se descobriu procedimento novo.
+Depois disso, qualquer comando `$PG_PASSWORD` neste runbook funciona direto sem expor senha.

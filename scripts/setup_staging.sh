@@ -126,23 +126,32 @@ done
 
 # ── Sanitização: anonimizar dados sensíveis em staging ──────────────
 log "▶ Sanitizando PII em staging (LGPD-friendly)"
-PGPASSWORD="${STAGING_PG_PASSWORD:-?}" psql -h "$STAGING_PG_HOST" -U "$STAGING_PG_USER" -d "$STAGING_PG_DB" <<'SQL'
-DO $$
+
+# Gera senha admin random pra ESTE setup (não vaza no script)
+ADMIN_PASS=$(openssl rand -base64 18 | tr -d '/+=' | head -c 16)
+ADMIN_HASH=$(node -e "console.log(require('bcryptjs').hashSync('$ADMIN_PASS', 10))")
+
+PGPASSWORD="${STAGING_PG_PASSWORD:-?}" psql -h "$STAGING_PG_HOST" -U "$STAGING_PG_USER" -d "$STAGING_PG_DB" <<SQL
+DO \$\$
 DECLARE sch text;
 BEGIN
   FOR sch IN SELECT unnest(ARRAY['assessoria','seguranca','portodovau','mustang'])
   LOOP
-    -- Anonimiza emails de usuários (mantém domínio)
     EXECUTE format('UPDATE %I.usuarios SET email = ''staging+'' || id || ''@montana.local''', sch);
-    -- Reset 2FA em staging (não importar secrets de prod)
     EXECUTE format('UPDATE %I.usuarios SET totp_secret=NULL, totp_enabled=FALSE', sch);
-    -- Senha admin = staging123! (NUNCA usar isso em prod)
-    EXECUTE format($q$UPDATE %I.usuarios SET senha_hash='$2a$10$MFqWY7fBxg.GqLqXr.mZtuG3jhU3ZmGgkfX5pqHJ4YSNQ4kJF2DNa' WHERE usuario='admin'$q$, sch);
-    -- Limpa configurações de SMTP/WhatsApp/BB (não dispara prod)
+    EXECUTE format(\$q\$UPDATE %I.usuarios SET senha_hash='${ADMIN_HASH}' WHERE usuario='admin'\$q\$, sch);
     EXECUTE format('DELETE FROM %I.configuracoes WHERE chave LIKE ''smtp_%%'' OR chave LIKE ''bb_%%'' OR chave LIKE ''whatsapp_%%''', sch);
   END LOOP;
-END $$;
+END \$\$;
 SQL
+
+log ""
+log "═══════════════════════════════════════════════════"
+log "  CREDENCIAIS DO STAGING (anote agora!)"
+log "  user:  admin"
+log "  senha: $ADMIN_PASS"
+log "═══════════════════════════════════════════════════"
+log ""
 
 # ── Subir app ───────────────────────────────────────────────────────
 log "▶ Subindo app no staging"
@@ -153,8 +162,8 @@ log "▶ Aguardando healthz responder..."
 for i in {1..10}; do
   if ssh "$STAGING_HOST" "curl -fsS http://localhost:3002/healthz" >/dev/null 2>&1; then
     log "✅ Staging UP em http://$STAGING_HOST:3002"
-    log "   Login: admin / staging123!"
-    log "   ⚠ Trocar senha admin antes de uso real"
+    log "   Login: admin / $ADMIN_PASS"
+    log "   ⚠ Anote esta senha — não fica no script."
     exit 0
   fi
   sleep 3

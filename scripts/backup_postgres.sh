@@ -26,8 +26,10 @@ set -euo pipefail
 PG_HOST="${PG_HOST:-35.247.208.7}"
 PG_PORT="${PG_PORT:-5432}"
 PG_USER="${PG_USER:-montana}"
-PG_PASSWORD="${PG_PASSWORD:-montana2026}"
 PG_DB="${PG_DB:-montana_erp}"
+
+# PG_PASSWORD obrigatória — sem default. Carregar via ~/.montana_secrets ou pm2 env.
+: "${PG_PASSWORD:?ERRO: PG_PASSWORD não definida. Execute: source ~/.montana_secrets}"
 GCS_BUCKET="${GCS_BUCKET:-gs://montana-erp-backups}"
 BACKUP_DIR="${BACKUP_DIR:-/opt/montana/backups}"
 LOCAL_RETENTION_DAYS=7
@@ -66,6 +68,8 @@ for schema in "${SCHEMAS[@]}"; do
     log "  ✓ $FILE (${SIZE_MB} MB)"
   else
     log "  ✗ ERRO ao fazer dump de $schema"
+    log "  Últimas linhas do log (provável causa):"
+    tail -3 "$LOG_FILE" | sed 's/^/      /'
     rm -f "$FILE"
     exit 1
   fi
