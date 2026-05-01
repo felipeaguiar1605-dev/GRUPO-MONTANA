@@ -50,7 +50,9 @@ function parseArgs() {
 
 async function classifyEmpresa(key, opts) {
   const db = getDb(key);
-  const stats = { saldo: 0, sinal_invertido: 0, financeira: 0, intragrupo: 0, retirada_socio: 0, duplicata: 0 };
+  const stats = { saldo: 0, sinal_invertido: 0, financeira: 0, intragrupo: 0,
+                  retirada_socio: 0, duplicata: 0, investimento: 0,
+                  volus: 0, tarifa_pequena: 0 };
   const dateFilter = opts.since ? `AND data_iso >= '${opts.since}'` : '';
   const sufix = opts.apply ? '' : ' (DRY-RUN)';
 
@@ -157,7 +159,65 @@ async function classifyEmpresa(key, opts) {
   }
   log(`RETIRADA_SOCIO: ${stats.retirada_socio}${sufix}`);
 
-  // ── 6. DUPLICATA cruzada (off-by-cent entre 2 contas no mesmo dia) ─
+  // ── 6.1 INVESTIMENTO (BB Rende Facil, CDB, Aplicação, Resgate) ─────
+  const investSql = `
+    UPDATE extratos
+    SET status_conciliacao = 'INVESTIMENTO',
+        historico = historico || ' [AUTO-INVEST]'
+    WHERE (status_conciliacao IS NULL OR status_conciliacao = 'PENDENTE')
+      AND (UPPER(historico) LIKE '%BB RENDE%'
+        OR UPPER(historico) LIKE '%RENDE FACIL%'
+        OR UPPER(historico) LIKE '%RENDE F_CIL%'
+        OR UPPER(historico) LIKE '%CDB%'
+        OR UPPER(historico) LIKE '%LCI%'
+        OR UPPER(historico) LIKE '%LCA%'
+        OR UPPER(historico) LIKE '%POUPAN%'
+        OR UPPER(historico) LIKE '%APLICAC%'
+        OR UPPER(historico) LIKE '%RESGATE%'
+        OR UPPER(historico) LIKE '%INVEST. RESGATE%')
+      ${dateFilter}`;
+  if (opts.apply) {
+    const r = await db.prepare(investSql).run();
+    stats.investimento = r.changes || 0;
+  }
+  log(`INVESTIMENTO: ${stats.investimento}${sufix}`);
+
+  // ── 6.2 VOLUS (vale alimentação dos funcionários) → DESPESA ────────
+  const volusSql = `
+    UPDATE extratos
+    SET status_conciliacao = 'DESPESA',
+        historico = historico || ' [AUTO-VOLUS]'
+    WHERE (status_conciliacao IS NULL OR status_conciliacao = 'PENDENTE')
+      AND debito > 0
+      AND UPPER(historico) LIKE '%VOLUS%'
+      ${dateFilter}`;
+  if (opts.apply) {
+    const r = await db.prepare(volusSql).run();
+    stats.volus = r.changes || 0;
+  }
+  log(`VOLUS→DESPESA: ${stats.volus}${sufix}`);
+
+  // ── 6.3 Tarifas bancárias pequenas (<R$100) → CONCILIADO_AUTO ──────
+  const tarifaSql = `
+    UPDATE extratos
+    SET status_conciliacao = 'CONCILIADO_AUTO',
+        historico = historico || ' [AUTO-TARIFA]'
+    WHERE (status_conciliacao IS NULL OR status_conciliacao = 'PENDENTE')
+      AND debito > 0 AND debito < 100
+      AND (UPPER(historico) LIKE '%TARIFA%'
+        OR UPPER(historico) LIKE '%TAR PAG%'
+        OR UPPER(historico) LIKE '%COBR PARC%'
+        OR UPPER(historico) LIKE '%TAR ABASTECIM%'
+        OR UPPER(historico) LIKE '%TAR EMISSAO%'
+        OR UPPER(historico) LIKE '%TAR DOC%')
+      ${dateFilter}`;
+  if (opts.apply) {
+    const r = await db.prepare(tarifaSql).run();
+    stats.tarifa_pequena = r.changes || 0;
+  }
+  log(`TARIFA: ${stats.tarifa_pequena}${sufix}`);
+
+  // ── 7. DUPLICATA cruzada (off-by-cent entre 2 contas no mesmo dia) ─
   // Versão simplificada usando UPDATE com alias direto (PG-friendly)
   // dateFilter aqui precisa qualificar como "a.data_iso" (vez de só "data_iso")
   const dateFilterAlias = opts.since ? `AND a.data_iso >= '${opts.since}'` : '';
@@ -201,7 +261,9 @@ async function main() {
   console.log(`  Período: ${opts.since || 'todos'}`);
   console.log('═══════════════════════════════════════════════════════════');
 
-  const total = { saldo: 0, sinal_invertido: 0, financeira: 0, intragrupo: 0, retirada_socio: 0, duplicata: 0 };
+  const total = { saldo: 0, sinal_invertido: 0, financeira: 0, intragrupo: 0,
+                  retirada_socio: 0, duplicata: 0, investimento: 0,
+                  volus: 0, tarifa_pequena: 0 };
   for (const key of empresas) {
     if (!COMPANIES[key]) {
       console.warn(`  ⚠ Empresa desconhecida: ${key}`);
@@ -216,7 +278,7 @@ async function main() {
   }
 
   console.log('');
-  console.log(`  TOTAL: SALDO=${total.saldo} SINAL=${total.sinal_invertido} FINANCEIRA=${total.financeira} INTRAGRUPO=${total.intragrupo} RETIRADA=${total.retirada_socio} DUP=${total.duplicata}`);
+  console.log(`  TOTAL: SALDO=${total.saldo} SINAL=${total.sinal_invertido} FINANCEIRA=${total.financeira} INTRAGRUPO=${total.intragrupo} RETIRADA=${total.retirada_socio} DUP=${total.duplicata} INVEST=${total.investimento} VOLUS=${total.volus} TARIFA=${total.tarifa_pequena}`);
   console.log(`  Tempo: ${Math.round((Date.now() - start) / 1000)}s`);
   if (!opts.apply) console.log(`  ℹ DRY-RUN — adicione --apply pra executar`);
 
