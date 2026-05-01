@@ -47,6 +47,29 @@ module.exports = {
       error_file   : '/opt/montana/logs/cron-boletins-err.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
       merge_logs   : true,
+    },
+
+    // ─── Cron diário: backup PostgreSQL → GCS, todo dia às 3h ───────────
+    {
+      name         : 'montana-cron-backup',
+      script       : 'scripts/backup_postgres.sh',
+      interpreter  : 'bash',
+      cwd          : '/opt/montana/app_unificado',
+      autorestart  : false,
+      cron_restart : '0 3 * * *',          // diário 3h da manhã
+      out_file     : '/opt/montana/logs/cron-backup-out.log',
+      error_file   : '/opt/montana/logs/cron-backup-err.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+      merge_logs   : true,
+      env: {
+        PG_HOST     : '35.247.208.7',
+        PG_PORT     : '5432',
+        PG_USER     : 'montana',
+        PG_DB       : 'montana_erp',
+        GCS_BUCKET  : 'gs://montana-erp-backups',
+        BACKUP_DIR  : '/opt/montana/backups',
+        // PG_PASSWORD: definir via `pm2 set` ou .env (NÃO commitar)
+      },
     }
   ]
 };

@@ -9,7 +9,18 @@
     "migrate": "node src/migrate.js",
     "seed": "node src/seed.js",
     "seed-boletins": "node src/seed-boletins.js",
-    "test": "node tests/smoke.js"
+    "test": "node tests/smoke.js",
+    "backup": "bash scripts/backup_postgres.sh",
+    "healthz": "curl -fsS http://localhost:3002/healthz | jq",
+    "setup:staging": "bash scripts/setup_staging.sh",
+    "install:observability": "npm install --save @sentry/node @sentry/profiling-node",
+    "install:2fa": "npm install --save speakeasy qrcode"
+  },
+  "optionalDependencies": {
+    "@sentry/node": "^8.0.0",
+    "@sentry/profiling-node": "^8.0.0",
+    "speakeasy": "^2.0.0",
+    "qrcode": "^1.5.4"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",

@@ -21,6 +21,11 @@ const { authMiddleware, loginHandler } = require('./auth');
 const app = express();
 const PORT = process.env.PORT || 3002;
 
+// ── Sentry (opcional — só ativa se SENTRY_DSN definido) ───────
+const sentry = require('./sentry');
+sentry.init();
+sentry.attachRequestHandler(app);
+
 // ── Compressão gzip/brotli em todas as respostas ──────────────
 app.use(compression());
 
@@ -181,6 +186,11 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, uptime: process.uptime(), env: process.env.NODE_ENV || 'development' });
 });
 
+// ── /healthz robusto (DB + memória + disco) ────────────────────
+// Endpoints: /healthz (full), /healthz/live, /healthz/ready
+// Retorna 503 quando algum componente está down (uso para load balancer / monitoramento)
+app.use('/healthz', require('./healthz'));
+
 // ── Log viewer — apenas admin (últimas N linhas) ─────────────
 app.get('/api/logs', (req, res) => {
   // Verifica JWT manualmente (authMiddleware ignora GET)
@@ -204,6 +214,9 @@ app.get('/api/logs', (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// Sentry error handler — antes do error handler global
+sentry.attachErrorHandler(app);
 
 // Error handler global — não expõe detalhes internos
 // eslint-disable-next-line no-unused-vars
