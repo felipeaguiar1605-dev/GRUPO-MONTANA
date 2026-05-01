@@ -1,6 +1,8 @@
 /**
  * Montana Multi-Empresa — Módulo de Boletins de Medição
  * CRUD de contratos, postos, itens + geração de PDFs
+ *
+ * P2 (2026-04-30): + endpoints de template, aditivos, prévia/aprovação/emissão
  */
 const express = require('express');
 const PDFDocument = require('pdfkit');
@@ -8,6 +10,7 @@ const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
 const companyMw = require('../companyMiddleware');
+const tplEngine = require('../lib/templateRenderer');
 
 const router = express.Router();
 router.use(companyMw);
@@ -155,12 +158,13 @@ router.post('/contratos', async (req, res) => {
 
 router.put('/contratos/:id', async (req, res) => {
   const b = req.body;
-  // FIX2: inclui contrato_ref, orgao (CNPJ tomador), insc_municipal
+  // P2 (2026-04-30): + template_discriminacao
   await req.db.prepare(`
     UPDATE bol_contratos SET nome=?, contratante=?, numero_contrato=?, processo=?, pregao=?,
       descricao_servico=?, escala=?, empresa_razao=?, empresa_cnpj=?, empresa_endereco=?,
       empresa_email=?, empresa_telefone=?,
       contrato_ref=?, orgao=?, insc_municipal=?,
+      template_discriminacao=?,
       updated_at=NOW()
     WHERE id=?
   `).run(
@@ -168,6 +172,7 @@ router.put('/contratos/:id', async (req, res) => {
     b.descricao_servico||'', b.escala||'12x36', b.empresa_razao||'',
     b.empresa_cnpj||'', b.empresa_endereco||'', b.empresa_email||'', b.empresa_telefone||'',
     b.contrato_ref||'', b.orgao||'', b.insc_municipal||'',
+    b.template_discriminacao||null,
     req.params.id
   );
   res.json({ ok: true });
@@ -2095,5 +2100,294 @@ router.delete('/glosas/:id', async (req, res) => {
     res.json({ ok: true, ...recalc });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+//   P2 (2026-04-30) — FLUXO PRÉVIA → APROVAÇÃO → EMISSÃO → BOLETIM FINAL
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ─── TEMPLATE: preview de discriminação ───────────────────────────
+// GET /boletins/contratos/:id/template-preview?competencia=YYYY-MM&posto_id=N
+// Renderiza o template_discriminacao do contrato com contexto montado.
+router.get('/contratos/:id/template-preview', async (req, res) => {
+  try {
+    const contrato = await req.db.prepare('SELECT * FROM bol_contratos WHERE id = ?').get(req.params.id);
+    if (!contrato) return res.status(404).json({ error: 'Contrato não encontrado' });
+
+    const { competencia, posto_id, valor_total } = req.query;
+    if (!competencia) return res.status(400).json({ error: 'competencia (YYYY-MM) obrigatória' });
+
+    let posto = null;
+    if (posto_id) {
+      posto = await req.db.prepare('SELECT * FROM bol_postos WHERE id = ? AND contrato_id = ?')
+        .get(Number(posto_id), Number(req.params.id));
+    }
+
+    const template = contrato.template_discriminacao || tplEngine.sugerirTemplateDefault(contrato);
+    const ctx = tplEngine.buildContext({
+      contrato, posto, competencia,
+      valor_total: Number(valor_total || 0),
+    });
+    const renderizado = tplEngine.render(template, ctx);
+    const inspect = tplEngine.inspect(template);
+
+    res.json({
+      ok: true,
+      template,
+      template_default_sugerido: contrato.template_discriminacao ? null : tplEngine.sugerirTemplateDefault(contrato),
+      renderizado,
+      contexto: ctx,
+      variaveis_usadas: inspect.vars,
+      variaveis_desconhecidas: inspect.desconhecidas,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /boletins/templates/variaveis — lista todas variáveis disponíveis (helper UI)
+router.get('/templates/variaveis', async (req, res) => {
+  res.json({
+    variaveis: [
+      { var: '{COMPETENCIA}',       desc: 'YYYY-MM', exemplo: '2026-04' },
+      { var: '{MES_NOME}',          desc: 'Nome do mês em maiúsculo', exemplo: 'ABRIL' },
+      { var: '{ANO}',               desc: 'Ano com 4 dígitos', exemplo: '2026' },
+      { var: '{PERIODO_INICIO}',    desc: 'Primeiro dia do mês (ISO)', exemplo: '2026-04-01' },
+      { var: '{PERIODO_FIM}',       desc: 'Último dia do mês (ISO)', exemplo: '2026-04-30' },
+      { var: '{PERIODO_INICIO_BR}', desc: 'Primeiro dia (DD/MM/YYYY)', exemplo: '01/04/2026' },
+      { var: '{PERIODO_FIM_BR}',    desc: 'Último dia (DD/MM/YYYY)',    exemplo: '30/04/2026' },
+      { var: '{POSTO_NOME}',        desc: 'Nome do campus/posto',       exemplo: 'CAMPUS PALMAS' },
+      { var: '{POSTO_MUNICIPIO}',   desc: 'Município do posto',         exemplo: 'PALMAS/TO' },
+      { var: '{POSTO_DESCRICAO}',   desc: 'Descrição do serviço no posto', exemplo: 'Vigilância 12x36' },
+      { var: '{CONTRATO_NUMERO}',   desc: 'Número do contrato',         exemplo: '02/2024' },
+      { var: '{CONTRATO_NOME}',     desc: 'Nome do contrato no sistema', exemplo: 'DETRAN-TO Limpeza' },
+      { var: '{CONTRATANTE}',       desc: 'Razão social do tomador',    exemplo: 'DEPARTAMENTO ESTADUAL DE TRANSITO' },
+      { var: '{PROCESSO}',          desc: 'Número do processo',         exemplo: '23101.004080/2022-53' },
+      { var: '{PREGAO}',            desc: 'Número do pregão',           exemplo: '10/2022' },
+      { var: '{VALOR_TOTAL}',       desc: 'Valor total (formato 1234.56)', exemplo: '5039.00' },
+      { var: '{VALOR_TOTAL_BR}',    desc: 'Valor formatado BR (1.234,56)', exemplo: '5.039,00' },
+      { var: '{EMPRESA_RAZAO}',     desc: 'Razão social da emissora',   exemplo: 'MONTANA SEGURANÇA PRIVADA LTDA' },
+      { var: '{EMPRESA_CNPJ}',      desc: 'CNPJ da emissora',           exemplo: '19.200.109/0001-09' },
+    ],
+    sintaxe_fallback: '{VAR|fallback}',
+    sintaxe_fallback_exemplo: '{POSTO_DESCRICAO|VIGILÂNCIA}'
+  });
+});
+
+// ─── ADITIVOS — CRUD ──────────────────────────────────────────────
+
+// GET /boletins/aditivos?contrato_id=N
+router.get('/aditivos', async (req, res) => {
+  try {
+    const where = req.query.contrato_id ? 'WHERE contrato_id = ?' : '';
+    const params = req.query.contrato_id ? [Number(req.query.contrato_id)] : [];
+    const rows = await req.db.prepare(`
+      SELECT a.*, c.nome AS contrato_nome, c.numero_contrato
+      FROM bol_aditivos a
+      JOIN bol_contratos c ON c.id = a.contrato_id
+      ${where}
+      ORDER BY a.contrato_id, a.vigencia_de DESC
+    `).all(...params);
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /boletins/aditivos/:id
+router.get('/aditivos/:id', async (req, res) => {
+  try {
+    const r = await req.db.prepare('SELECT * FROM bol_aditivos WHERE id = ?').get(req.params.id);
+    if (!r) return res.status(404).json({ error: 'Aditivo não encontrado' });
+    res.json(r);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /boletins/aditivos
+// Body: { contrato_id, tipo, data_assinatura, vigencia_de, vigencia_ate, fator, base_legal, observacao }
+router.post('/aditivos', async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.contrato_id) return res.status(400).json({ error: 'contrato_id obrigatório' });
+    if (!b.tipo)         return res.status(400).json({ error: 'tipo obrigatório (reajuste|prorrogacao|apostilamento|reequilibrio)' });
+    if (!b.vigencia_de)  return res.status(400).json({ error: 'vigencia_de obrigatória' });
+
+    const tipos = ['reajuste','prorrogacao','apostilamento','reequilibrio'];
+    if (!tipos.includes(b.tipo)) {
+      return res.status(400).json({ error: `tipo inválido. Use: ${tipos.join(', ')}` });
+    }
+
+    const fator = Number(b.fator || 1.0);
+    if (b.tipo === 'reajuste' && (fator <= 0 || fator > 5)) {
+      return res.status(400).json({ error: 'fator de reajuste suspeito (precisa estar entre 0 e 5, ex: 1.0825 para +8.25%)' });
+    }
+
+    const r = await req.db.prepare(`
+      INSERT INTO bol_aditivos
+        (contrato_id, tipo, data_assinatura, vigencia_de, vigencia_ate,
+         fator, base_legal, observacao, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'rascunho')
+    `).run(
+      Number(b.contrato_id), b.tipo,
+      b.data_assinatura || null,
+      b.vigencia_de, b.vigencia_ate || null,
+      fator,
+      b.base_legal || '', b.observacao || ''
+    );
+    res.json({ ok: true, id: r.lastInsertRowid, status: 'rascunho' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PATCH /boletins/aditivos/:id
+router.patch('/aditivos/:id', async (req, res) => {
+  try {
+    const cur = await req.db.prepare('SELECT * FROM bol_aditivos WHERE id = ?').get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Aditivo não encontrado' });
+    if (cur.status === 'aplicado') {
+      return res.status(409).json({ error: 'Aditivo já aplicado — não pode editar. Cadastre um aditivo de reequilíbrio para corrigir.' });
+    }
+
+    const b = req.body || {};
+    await req.db.prepare(`
+      UPDATE bol_aditivos SET
+        tipo            = COALESCE(?, tipo),
+        data_assinatura = COALESCE(?, data_assinatura),
+        vigencia_de     = COALESCE(?, vigencia_de),
+        vigencia_ate    = COALESCE(?, vigencia_ate),
+        fator           = COALESCE(?, fator),
+        base_legal      = COALESCE(?, base_legal),
+        observacao      = COALESCE(?, observacao),
+        updated_at      = NOW()
+      WHERE id = ?
+    `).run(
+      b.tipo || null, b.data_assinatura || null, b.vigencia_de || null,
+      b.vigencia_ate || null, b.fator !== undefined ? Number(b.fator) : null,
+      b.base_legal || null, b.observacao || null,
+      req.params.id
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PATCH /boletins/aditivos/:id/validar — humano confere e valida (Q3 semi-automático)
+router.patch('/aditivos/:id/validar', async (req, res) => {
+  try {
+    const cur = await req.db.prepare('SELECT * FROM bol_aditivos WHERE id = ?').get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Aditivo não encontrado' });
+    if (cur.status !== 'rascunho') {
+      return res.status(409).json({ error: `aditivo já está ${cur.status}` });
+    }
+
+    const usuario = req.user?.usuario || 'sistema';
+    await req.db.prepare(`
+      UPDATE bol_aditivos
+      SET status = 'validado', validado_por = ?, validado_em = NOW(), updated_at = NOW()
+      WHERE id = ?
+    `).run(usuario, req.params.id);
+
+    res.json({ ok: true, status: 'validado' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PATCH /boletins/aditivos/:id/cancelar
+router.patch('/aditivos/:id/cancelar', async (req, res) => {
+  try {
+    const cur = await req.db.prepare('SELECT * FROM bol_aditivos WHERE id = ?').get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Aditivo não encontrado' });
+    await req.db.prepare(`
+      UPDATE bol_aditivos SET status = 'cancelado', updated_at = NOW() WHERE id = ?
+    `).run(req.params.id);
+    res.json({ ok: true, status: 'cancelado' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /boletins/aditivos/:id (apenas rascunho)
+router.delete('/aditivos/:id', async (req, res) => {
+  try {
+    const cur = await req.db.prepare('SELECT status FROM bol_aditivos WHERE id = ?').get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Aditivo não encontrado' });
+    if (cur.status !== 'rascunho') {
+      return res.status(409).json({ error: 'Só é permitido excluir aditivos em rascunho. Use cancelar para os outros estados.' });
+    }
+    await req.db.prepare('DELETE FROM bol_aditivos WHERE id = ?').run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /boletins/aditivos/:id/preview-impacto?competencia=YYYY-MM
+// Mostra qual seria o impacto do aditivo na próxima prévia
+router.get('/aditivos/:id/preview-impacto', async (req, res) => {
+  try {
+    const adit = await req.db.prepare(`
+      SELECT a.*, c.nome AS contrato_nome, c.numero_contrato
+      FROM bol_aditivos a
+      JOIN bol_contratos c ON c.id = a.contrato_id
+      WHERE a.id = ?
+    `).get(req.params.id);
+    if (!adit) return res.status(404).json({ error: 'Aditivo não encontrado' });
+
+    const comp = req.query.competencia || new Date().toISOString().slice(0,7);
+
+    // Pega último boletim do contrato pra projetar valor
+    const refBoletim = await req.db.prepare(`
+      SELECT competencia, total_geral FROM bol_boletins
+      WHERE contrato_id = ? ORDER BY competencia DESC LIMIT 1
+    `).get(adit.contrato_id);
+
+    const fator = Number(adit.fator || 1.0);
+    const valorBase = Number(refBoletim?.total_geral || 0);
+    const valorAjustado = adit.tipo === 'reajuste' ? valorBase * fator : valorBase;
+
+    res.json({
+      ok: true,
+      aditivo: adit,
+      preview: {
+        competencia: comp,
+        valor_base_referencia: valorBase,
+        ref_boletim_competencia: refBoletim?.competencia,
+        fator_aplicado: fator,
+        valor_apos_aditivo: valorAjustado,
+        diferenca: valorAjustado - valorBase,
+        diferenca_pct: valorBase > 0 ? +((valorAjustado - valorBase) / valorBase * 100).toFixed(2) : 0,
+      },
+      observacao: adit.tipo === 'reajuste'
+        ? `Reajuste de ${((fator - 1) * 100).toFixed(2)}% será aplicado à próxima prévia em ${comp}`
+        : `Aditivo do tipo ${adit.tipo} não altera valor diretamente (verifique itens)`
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── HELPER: aplica aditivos sobre um valor base ──────────────────
+// Exportado pra usar em /boletins/previa (Fase 3)
+async function aplicarAditivos(db, contratoId, competencia, valorBase) {
+  // Pega aditivos VALIDADOS ou APLICADOS cuja vigência cobre a competência
+  const compInicio = `${competencia}-01`;
+  const aditivos = await db.prepare(`
+    SELECT * FROM bol_aditivos
+    WHERE contrato_id = ?
+      AND status IN ('validado', 'aplicado')
+      AND vigencia_de <= ?
+      AND (vigencia_ate IS NULL OR vigencia_ate >= ?)
+    ORDER BY vigencia_de
+  `).all(Number(contratoId), compInicio, compInicio);
+
+  let valor = Number(valorBase || 0);
+  const aplicados = [];
+  for (const a of aditivos) {
+    if (a.tipo === 'reajuste') {
+      const novo = valor * Number(a.fator || 1.0);
+      aplicados.push({
+        aditivo_id: a.id, tipo: a.tipo, fator: Number(a.fator),
+        antes: valor, depois: novo, base_legal: a.base_legal,
+      });
+      valor = novo;
+    } else {
+      aplicados.push({
+        aditivo_id: a.id, tipo: a.tipo, fator: 1.0,
+        antes: valor, depois: valor, base_legal: a.base_legal,
+        observacao: 'Tipo não-multiplicativo, valor preservado',
+      });
+    }
+  }
+  return { valor_final: valor, aditivos_aplicados: aplicados };
+}
+
+// Expor pro módulo (Fase 3 vai usar)
+router.aplicarAditivos = aplicarAditivos;
 
 module.exports = router;
