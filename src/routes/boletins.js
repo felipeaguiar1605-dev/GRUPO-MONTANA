@@ -2352,6 +2352,213 @@ router.get('/aditivos/:id/preview-impacto', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── PRÉVIA — gera/atualiza boletim em estado 'previa' ─────────────
+// POST /boletins/previa
+// Body: { competencia: 'YYYY-MM', empresa?: 'seguranca' (opcional, usa req.companyKey),
+//         contrato_id?: N (filtra um contrato), apply: false (default dry-run) }
+//
+// Lógica:
+//   1. Para cada bol_contrato ATIVO (ou só o filtrado):
+//      a. Para cada bol_posto do contrato (ou linha única se sem posto):
+//         - Calcula valor base via SUM(bol_itens) ou fallback SUM(NFs)
+//         - Aplica aditivos validados/aplicados (fator multiplicativo)
+//         - Renderiza template_discriminacao (ou default sugerido)
+//      b. UPSERT em bol_boletins (contrato_id, posto_id, competencia)
+//         status='previa', expira_em=+7 d.u.
+//      c. Cria/atualiza linhas em bol_boletins_nfs_planejadas
+//
+// Retorna: { previas: [...], total_geral, total_nfs_planejadas }
+router.post('/previa', async (req, res) => {
+  try {
+    const { competencia, contrato_id, apply = false } = req.body || {};
+    if (!competencia || !/^\d{4}-\d{2}$/.test(competencia)) {
+      return res.status(400).json({ error: 'competencia (YYYY-MM) obrigatória' });
+    }
+
+    const db = req.db;
+    const usuario = req.user?.usuario || 'sistema';
+
+    // Calcular expiração: hoje + 7 dias úteis (pula sáb/dom)
+    function add7Du() {
+      const d = new Date();
+      let added = 0;
+      while (added < 7) {
+        d.setDate(d.getDate() + 1);
+        const dow = d.getDay();
+        if (dow !== 0 && dow !== 6) added++;
+      }
+      return d.toISOString().slice(0, 10);
+    }
+    const expiraEm = add7Du();
+
+    // Período ISO
+    const { inicio: periodoInicio, fim: periodoFim } = tplEngine.periodoDoMes(competencia);
+
+    // Buscar contratos ativos
+    let contratos;
+    if (contrato_id) {
+      contratos = await db.prepare('SELECT * FROM bol_contratos WHERE id = ? AND ativo = 1').all(Number(contrato_id));
+    } else {
+      contratos = await db.prepare('SELECT * FROM bol_contratos WHERE ativo = 1 ORDER BY id').all();
+    }
+
+    const previas = [];
+    let totalNfsPlanejadas = 0;
+
+    for (const c of contratos) {
+      // Pega postos do contrato
+      const postos = await db.prepare('SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem, id').all(c.id);
+      // Se não tem posto cadastrado, gera 1 boletim consolidado (posto_id=NULL)
+      const linhas = postos.length > 0 ? postos : [null];
+
+      for (const posto of linhas) {
+        // Calcular valor base
+        let valorBase = 0;
+        let origemValor = 'sem_ref';
+        let qtdNfs = 0;
+
+        if (posto) {
+          // Soma dos itens do posto (quando há cadastro estruturado)
+          const sumItens = await db.prepare(`
+            SELECT COALESCE(SUM(quantidade * valor_unitario), 0) AS total, COUNT(*) AS qtd
+            FROM bol_itens WHERE posto_id = ?
+          `).get(posto.id);
+          if (sumItens && Number(sumItens.total) > 0) {
+            valorBase = Number(sumItens.total);
+            origemValor = `sum_itens(${sumItens.qtd})`;
+          }
+        }
+
+        // Fallback: SUM das NFs do mês alvo via numero_contrato
+        if (!valorBase && c.numero_contrato && c.numero_contrato !== 'undefined') {
+          const sumNfs = await db.prepare(`
+            SELECT COALESCE(SUM(valor_bruto), 0) AS total, COUNT(*) AS qtd
+            FROM notas_fiscais
+            WHERE contrato_ref ILIKE @pat AND data_emissao LIKE @ym
+              AND COALESCE(status_conciliacao, '') NOT IN ('CANCELADA')
+          `).get({ pat: `%${c.numero_contrato}%`, ym: `${competencia}-%` });
+          if (sumNfs && Number(sumNfs.total) > 0) {
+            valorBase = Number(sumNfs.total);
+            origemValor = `sum_nfs(${sumNfs.qtd})`;
+            qtdNfs = sumNfs.qtd;
+          }
+        }
+
+        // Aplica aditivos
+        const aditResult = await aplicarAditivos(db, c.id, competencia, valorBase);
+        const valorFinal = aditResult.valor_final;
+
+        // Renderiza template
+        const template = c.template_discriminacao || tplEngine.sugerirTemplateDefault(c);
+        const ctx = tplEngine.buildContext({
+          contrato: c, posto, competencia, valor_total: valorFinal,
+        });
+        const discriminacaoRender = tplEngine.render(template, ctx);
+
+        previas.push({
+          contrato_id: c.id,
+          contrato_numero: c.numero_contrato,
+          contrato_nome: c.nome,
+          posto_id: posto?.id || null,
+          posto_nome: posto?.campus_nome || null,
+          posto_municipio: posto?.municipio || null,
+          competencia,
+          periodo_inicio: periodoInicio,
+          periodo_fim: periodoFim,
+          valor_base: valorBase,
+          origem_valor: origemValor,
+          qtd_nfs_referencia: qtdNfs,
+          aditivos_aplicados: aditResult.aditivos_aplicados,
+          valor_final: valorFinal,
+          template_renderizado: discriminacaoRender,
+          template_origem: c.template_discriminacao ? 'cadastrado' : 'default_sugerido',
+          expira_em: expiraEm,
+        });
+      }
+    }
+
+    if (!apply) {
+      return res.json({
+        ok: true,
+        modo: 'dry-run',
+        competencia,
+        total_previas: previas.length,
+        previas,
+      });
+    }
+
+    // APPLY: UPSERT em bol_boletins + NFs planejadas
+    let criados = 0, atualizados = 0;
+    const trans = db.transaction(async (tx) => {
+      const upsertBoletim = tx.prepare(`
+        INSERT INTO bol_boletins
+          (contrato_id, posto_id, competencia, data_emissao, periodo_inicio, periodo_fim,
+           status, total_geral, valor_base, glosas, acrescimos, nfse_status,
+           expira_em, template_renderizado)
+        VALUES
+          (@cid, @pid, @comp, @demit, @ini, @fim, 'previa', @tot, 0, 0, 0, 'PENDENTE',
+           @exp, @tpl)
+        ON CONFLICT (contrato_id, COALESCE(posto_id, 0), competencia) DO UPDATE SET
+          total_geral          = EXCLUDED.total_geral,
+          template_renderizado = EXCLUDED.template_renderizado,
+          expira_em            = EXCLUDED.expira_em,
+          status               = CASE WHEN bol_boletins.status IN ('previa', 'gerado', 'sem_nf') THEN 'previa' ELSE bol_boletins.status END,
+          updated_at           = NOW()
+        RETURNING id, (xmax = 0) AS inserted
+      `);
+      const insertNfPlanejada = tx.prepare(`
+        INSERT INTO bol_boletins_nfs_planejadas
+          (boletim_id, ordem, posto_id, descricao_template, valor, status)
+        VALUES (?, 1, ?, ?, ?, 'pendente')
+        ON CONFLICT DO NOTHING
+      `);
+      for (const p of previas) {
+        const r = await upsertBoletim.run({
+          cid: p.contrato_id, pid: p.posto_id, comp: p.competencia,
+          demit: p.periodo_fim, ini: p.periodo_inicio, fim: p.periodo_fim,
+          tot: p.valor_final, exp: p.expira_em, tpl: p.template_renderizado,
+        });
+        const boletimId = r.lastInsertRowid;
+        if (boletimId) {
+          // Garante 1 NF planejada por boletim (modelo 1:1 boletim:NF para DETRAN/UFT)
+          // Se já existia e tem nfse_numero, não toca (preserva)
+          const existing = await tx.prepare(`
+            SELECT id, nfse_numero FROM bol_boletins_nfs_planejadas
+            WHERE boletim_id = ? ORDER BY ordem LIMIT 1
+          `).get(boletimId);
+          if (!existing) {
+            await insertNfPlanejada.run(boletimId, p.posto_id, p.template_renderizado, p.valor_final);
+            totalNfsPlanejadas++;
+          } else if (!existing.nfse_numero) {
+            // Atualiza valor + descrição se ainda não emitiu
+            await tx.prepare(`
+              UPDATE bol_boletins_nfs_planejadas
+              SET valor = ?, descricao_template = ?, updated_at = NOW()
+              WHERE id = ?
+            `).run(p.valor_final, p.template_renderizado, existing.id);
+          }
+          if (r.changes > 0) criados++; else atualizados++;
+        }
+      }
+    });
+    await trans();
+
+    res.json({
+      ok: true,
+      modo: 'apply',
+      competencia,
+      criados,
+      atualizados,
+      total_previas: previas.length,
+      total_nfs_planejadas: totalNfsPlanejadas,
+      expira_em: expiraEm,
+    });
+  } catch (e) {
+    console.error('[POST /boletins/previa] erro:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── HELPER: aplica aditivos sobre um valor base ──────────────────
 // Exportado pra usar em /boletins/previa (Fase 3)
 async function aplicarAditivos(db, contratoId, competencia, valorBase) {
