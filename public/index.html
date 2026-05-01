@@ -129,23 +129,24 @@
       <span class="ng-icon">💼</span><span class="ng-label">Financeiro</span><span class="ng-chevron">▾</span>
     </div>
     <div class="nav-group-items" style="display:none">
-      <div class="tab" data-tab="ext" onclick="navGo('ext',this)">🏦 Extratos</div>
-      <div class="tab" data-tab="nfs" onclick="navGo('nfs',this)">🧾 Notas Fiscais</div>
-      <!-- Modelos NF virou sub-aba de Notas Fiscais (2026-04). Tab oculta mas rota mantida. -->
-      <div class="tab" data-tab="nf-modelos" onclick="navGo('nf-modelos',this);setTimeout(()=>window.nfModelosInit&&window.nfModelosInit(),50)" style="display:none">🧰 Modelos NF</div>
+      <!-- Reordenado em 2026-04-30 — fluxo: Contratos → Boletins → NFs → Conta Vinculada → Extratos -->
       <div class="tab" data-tab="cont" onclick="navGo('cont',this)">📋 Contratos</div>
       <!-- Adimplência por Contrato virou sub-aba de Contratos (2026-04). Tab oculta mas rota mantida. -->
       <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)" style="display:none">💰 Adimplência por Contrato</div>
       <!-- Faturamento Previsto: sub-aba de Contratos (2026-04). Tab oculta. -->
       <div class="tab" data-tab="faturamento-prev" onclick="navGo('faturamento-prev',this)" style="display:none">📅 Faturamento Previsto</div>
       <div class="tab" data-tab="boletins" onclick="navGo('boletins',this)">📄 Boletins</div>
-      <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
-      <!-- Comprovantes de Pagamento virou sub-aba de Despesas (2026-04). Tab oculta mas rota mantida. -->
-      <div class="tab" data-tab="pag" onclick="navGo('pag',this);setTimeout(()=>compListar&&compListar(),50)" style="display:none">🧾 Comprovantes de Pagamento</div>
+      <div class="tab" data-tab="nfs" onclick="navGo('nfs',this)">🧾 Notas Fiscais</div>
+      <!-- Modelos NF virou sub-aba de Notas Fiscais (2026-04). Tab oculta mas rota mantida. -->
+      <div class="tab" data-tab="nf-modelos" onclick="navGo('nf-modelos',this);setTimeout(()=>window.nfModelosInit&&window.nfModelosInit(),50)" style="display:none">🧰 Modelos NF</div>
       <div class="tab" data-tab="conta-vinculada" onclick="navGo('conta-vinculada',this)">🏦 Conta Vinculada</div>
+      <div class="tab" data-tab="ext" onclick="navGo('ext',this)">🏦 Extratos</div>
       <div class="tab" data-tab="conciliacao3v" onclick="navGo('conciliacao3v',this)">🔗 Conciliação</div>
       <!-- Conciliação IA virou sub-aba de Conciliação (2026-04). Tab oculta mas rota mantida. -->
       <div class="tab" data-tab="concilia-robusta" onclick="navGo('concilia-robusta',this);setTimeout(()=>crInit&&crInit(),50)" style="display:none">🧩 Conciliação IA</div>
+      <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
+      <!-- Comprovantes de Pagamento virou sub-aba de Despesas (2026-04). Tab oculta mas rota mantida. -->
+      <div class="tab" data-tab="pag" onclick="navGo('pag',this);setTimeout(()=>compListar&&compListar(),50)" style="display:none">🧾 Comprovantes de Pagamento</div>
       <div class="tab" data-tab="import" onclick="navGo('import',this)">📥 Importar</div>
     </div>
   </div>
