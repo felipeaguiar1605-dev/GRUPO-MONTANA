@@ -87,6 +87,18 @@ A **Assessoria** funciona de fato como **holding pagadora** do grupo:
 - **Tempo desejado**: estruturação em até 90 dias; transição completa em 180 dias
 - **Custo**: aceitamos R$ 5-15k/mês de retainer + sucesso/economia em casos específicos
 
+## Contexto adicional (informações relevantes)
+
+- **Em processo de troca de escritório de contabilidade** (atual saindo, novo entrando) — momento ideal pra estruturar o novo modelo desde o start
+- **Em processo de revisão de CAPAG** — qualquer passivo latente pode impactar avaliação; preferimos resolver antes
+- **Retiradas do sócio (Felipe Aguiar) de R$ 7.2M acumulados em 2024-2025**, declaradas como distribuição de dividendos. Precisa validar se cumpre os 4 requisitos da Lei 9.249/95 art. 10:
+  1. Apuração de lucros suficiente na ECF/ECD
+  2. Registro contábil como "Lucros a Distribuir"
+  3. Ata de Assembleia documentando deliberação
+  4. Declaração na DIRPF como Rendimento Isento (linha 09)
+
+**Pedido específico à consultoria**: confirmar com o novo escritório que esses 4 requisitos foram atendidos para o passado. Se houver lacunas, propor caminho de regularização (declarações retificadoras se possível).
+
 ---
 
 ## Informações que podemos disponibilizar
