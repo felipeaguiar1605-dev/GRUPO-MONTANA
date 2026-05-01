@@ -8,13 +8,27 @@ const COMPANIES_META = {
 
 let currentCompany = localStorage.getItem('montana_company') || 'assessoria';
 
+// P0-6 fix: trocar empresa exige confirmação — antes era silencioso.
+// Risco fiscal alto: emitir NF / aprovar boletim na empresa errada.
 function switchCompany(key) {
+  if (key === currentCompany) return; // sem trocar pra mesma
+  const meta = (typeof COMPANIES_META !== 'undefined' && COMPANIES_META[key]) || { nome: key, cnpj: '?' };
+  const atual = (typeof COMPANIES_META !== 'undefined' && COMPANIES_META[currentCompany]) || { nome: currentCompany };
+  const ok = confirm(
+    `Trocar empresa ativa?\n\n` +
+    `De:    ${atual.nome}\n` +
+    `Para:  ${meta.nome}  (CNPJ ${meta.cnpj})\n\n` +
+    `⚠️  Toda ação posterior (cadastro, emissão de NF, aprovação) será registrada nesta empresa.`
+  );
+  if (!ok) return;
+
   currentCompany = key;
   localStorage.setItem('montana_company', key);
   _contratos = []; // forçar reload dos contratos ao trocar empresa
   _extMes = ''; _extMesManual = false; _extMesesDisponiveis = []; _extPage = 1; // resetar filtro mês ao trocar empresa
   applyCompanyTheme();
   loadDashboard();
+  if (typeof toast === 'function') toast(`✓ Empresa ativa: ${meta.nome}`, 'info');
 }
 
 function applyCompanyTheme() {

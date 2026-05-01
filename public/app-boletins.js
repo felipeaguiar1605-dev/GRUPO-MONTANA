@@ -66,12 +66,31 @@ function renderBolLista() {
   `;
 
   if (_bolContratos.length === 0) {
+    // P0-2: empty state explicado em detalhes — antes era ambíguo
     tableHtml += `<tr><td colspan="6">
-      <div style="text-align:center;padding:30px 20px">
+      <div style="text-align:center;padding:30px 20px;max-width:640px;margin:0 auto">
         <div style="font-size:32px;margin-bottom:8px">📋</div>
-        <div style="font-weight:700;color:#334155;margin-bottom:4px">Nenhum contrato de boletim cadastrado</div>
-        <div style="font-size:12px;color:#94a3b8;margin-bottom:16px">Cadastre manualmente ou inicialize a partir dos contratos financeiros existentes</div>
-        <button onclick="bolInicializarDeContratos()" style="padding:8px 20px;font-size:12px;font-weight:700;background:#7c2d12;color:#fff;border:none;border-radius:6px;cursor:pointer">🚀 Inicializar a partir dos Contratos Financeiros</button>
+        <div style="font-weight:700;color:#334155;margin-bottom:4px;font-size:14px">Nenhum contrato cadastrado no módulo de Boletins</div>
+        <div style="font-size:11px;color:#64748b;margin-bottom:16px">
+          O módulo de Boletins é separado do módulo de Contratos Financeiros, mas pode ser populado a partir dele.
+        </div>
+
+        <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;text-align:left;margin-bottom:16px;font-size:11px;color:#78350f">
+          <strong>ℹ️ O que esse botão faz?</strong>
+          <ul style="margin:6px 0 0;padding-left:20px;line-height:1.6">
+            <li>Lê todos os contratos da aba <strong>📋 Contratos</strong> (status ATIVO)</li>
+            <li>Cria <strong>1 entrada nova aqui</strong> para cada um, copiando: nome, número, contratante, valor</li>
+            <li><strong>Não deleta nada</strong> — só adiciona registros novos.</li>
+            <li>É <strong>idempotente</strong>: rodar 2x não duplica.</li>
+            <li>Depois você ajusta postos/itens manualmente (estrutura específica do boletim).</li>
+          </ul>
+        </div>
+
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+          <button onclick="bolInicializarDeContratos()" class="btn btn-primary btn-sm">🚀 Importar dos Contratos Financeiros</button>
+          <button onclick="abrirImportarTemplate()" class="btn btn-sm" style="background:#d97706;color:#fff;border-color:#d97706">📥 Importar Template (.json)</button>
+        </div>
+        <div style="font-size:10px;color:#94a3b8;margin-top:10px">Ou cadastre um contrato manualmente clicando em "+ Novo contrato" (acima).</div>
       </div>
     </td></tr>`;
   }

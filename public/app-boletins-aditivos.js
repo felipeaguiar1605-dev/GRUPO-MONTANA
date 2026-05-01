@@ -282,11 +282,14 @@ async function aditivoValidar(id) {
 }
 
 async function aditivoCancelar(id) {
-  if (!confirm('Cancelar este aditivo? Ele não será mais aplicado em prévias futuras.')) return;
+  // P0-7: motivo obrigatório
+  const motivo = await _modalMotivo('Cancelar aditivo', 'Informe o motivo do cancelamento (obrigatório para audit):');
+  if (!motivo) return;
   const token = localStorage.getItem('montana_jwt') || '';
   const r = await fetch(`/api/boletins/aditivos/${id}/cancelar`, {
     method: 'PATCH',
-    headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+    headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify({ motivo }),
   }).then(r => r.json());
   if (r.ok) { toast('Cancelado', 'info'); await aditivosCarregar(); }
   else { toast('Erro: ' + (r.error || ''), 'error'); }

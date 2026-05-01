@@ -2285,14 +2285,25 @@ router.patch('/aditivos/:id/validar', async (req, res) => {
 });
 
 // PATCH /boletins/aditivos/:id/cancelar
+// Body: { motivo: 'descrição do motivo' } — P0-7 fix: obrigatório pra audit
 router.patch('/aditivos/:id/cancelar', async (req, res) => {
   try {
+    const motivo = (req.body?.motivo || '').trim();
+    if (!motivo || motivo.length < 5) {
+      return res.status(400).json({ error: 'Motivo obrigatório (mínimo 5 caracteres) para audit.' });
+    }
     const cur = await req.db.prepare('SELECT * FROM bol_aditivos WHERE id = ?').get(req.params.id);
     if (!cur) return res.status(404).json({ error: 'Aditivo não encontrado' });
+    const usuario = req.user?.usuario || 'sistema';
+    const carimbo = `[${new Date().toISOString().slice(0,16)} ${usuario}] CANCELADO: ${motivo}`;
     await req.db.prepare(`
-      UPDATE bol_aditivos SET status = 'cancelado', updated_at = NOW() WHERE id = ?
-    `).run(req.params.id);
-    res.json({ ok: true, status: 'cancelado' });
+      UPDATE bol_aditivos SET
+        status = 'cancelado',
+        observacao = CASE WHEN observacao IS NULL OR observacao = '' THEN ? ELSE observacao || E'\\n' || ? END,
+        updated_at = NOW()
+      WHERE id = ?
+    `).run(carimbo, carimbo, req.params.id);
+    res.json({ ok: true, status: 'cancelado', motivo_registrado: motivo });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2656,9 +2667,151 @@ router.patch('/:id([0-9]+)/aprovar', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// POST /boletins/aprovar-em-lote
+// Body: { ids: [1,2,3...], motivo?: '' }
+// Aprova múltiplos boletins em prévia em uma única transação.
+// P0-1 fix UX: bulk action — antes era 1 clique por boletim (134 cliques pra 67 boletins).
+router.post('/aprovar-em-lote', async (req, res) => {
+  try {
+    const { ids, motivo } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids (array) obrigatório' });
+    }
+    const role = req.user?.role;
+    if (role && !['financeiro', 'admin'].includes(role)) {
+      return res.status(403).json({ error: 'Apenas financeiro ou admin podem aprovar prévias.' });
+    }
+    const usuario = req.user?.usuario || 'sistema';
+
+    const resultados = { aprovados: 0, ignorados: 0, erros: [] };
+    const trans = req.db.transaction(async (tx) => {
+      for (const id of ids) {
+        const cur = await tx.prepare('SELECT * FROM bol_boletins WHERE id = ?').get(Number(id));
+        if (!cur) {
+          resultados.erros.push({ id, motivo: 'não encontrado' });
+          continue;
+        }
+        if (cur.status !== 'previa') {
+          resultados.ignorados++;
+          continue;
+        }
+        if (cur.expira_em && new Date(cur.expira_em) < new Date()) {
+          resultados.erros.push({ id, motivo: `expirada em ${cur.expira_em}` });
+          continue;
+        }
+        if (Number(cur.total_geral || 0) <= 0) {
+          resultados.erros.push({ id, motivo: 'valor zero' });
+          continue;
+        }
+        await tx.prepare(`
+          UPDATE bol_boletins
+          SET status = 'aprovado_para_emissao',
+              aprovado_por = ?, aprovado_em = NOW(),
+              obs = COALESCE(NULLIF(?, ''), obs),
+              updated_at = NOW()
+          WHERE id = ?
+        `).run(usuario, motivo || '', Number(id));
+        // Marca aditivos validados como aplicados
+        await tx.prepare(`
+          UPDATE bol_aditivos SET status = 'aplicado', updated_at = NOW()
+          WHERE contrato_id = ? AND status = 'validado'
+            AND vigencia_de <= ? AND (vigencia_ate IS NULL OR vigencia_ate >= ?)
+        `).run(Number(cur.contrato_id), cur.periodo_inicio, cur.periodo_inicio);
+        resultados.aprovados++;
+      }
+    });
+    await trans();
+
+    res.json({ ok: true, ...resultados, total_processados: ids.length });
+  } catch (e) {
+    console.error('[POST /boletins/aprovar-em-lote] erro:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /boletins/emitir-lote
+// Body: { ids: [1,2,3...] }
+// Dispara emissão de múltiplos boletins em sequência (não paralelo, pra
+// não sobrecarregar WebISS). Cada job individual é registrado em _emissaoJobs.
+// Retorna { jobs: [{id, total_nfs}], sse_url_geral: '...' }
+router.post('/emitir-lote', async (req, res) => {
+  try {
+    const { ids } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids (array) obrigatório' });
+    }
+    const role = req.user?.role;
+    if (role && !['financeiro', 'admin'].includes(role)) {
+      return res.status(403).json({ error: 'Apenas financeiro ou admin podem emitir.' });
+    }
+    const usuario = req.user?.usuario || 'sistema';
+
+    // Valida cada um
+    const aceitos = [];
+    const recusados = [];
+    for (const id of ids) {
+      const cur = await req.db.prepare('SELECT id, status FROM bol_boletins WHERE id = ?').get(Number(id));
+      if (!cur) { recusados.push({ id, motivo: 'não encontrado' }); continue; }
+      if (cur.status !== 'aprovado_para_emissao') { recusados.push({ id, motivo: `status ${cur.status}` }); continue; }
+      if (_emissaoJobs.has(Number(id))) { recusados.push({ id, motivo: 'emissão já em andamento' }); continue; }
+      aceitos.push(Number(id));
+    }
+
+    if (aceitos.length === 0) {
+      return res.status(409).json({ error: 'Nenhum boletim apto pra emissão', recusados });
+    }
+
+    // Pra cada aceito, dispara processarEmissao em sequência (sem paralelismo,
+    // pra não sobrecarregar WebISS). O usuário acompanha por boletim individual.
+    const dbRef = req.db;
+    const companyKey = req.companyKey;
+
+    // Marca todos como 'emitindo' e enfileira
+    for (const id of aceitos) {
+      const nfs = await dbRef.prepare(`
+        SELECT * FROM bol_boletins_nfs_planejadas
+        WHERE boletim_id = ? AND status = 'pendente'
+        ORDER BY ordem, id
+      `).all(id);
+      if (nfs.length === 0) continue;
+      _emissaoJobs.set(id, {
+        listeners: new Set(), started_at: new Date(), by: usuario,
+        total: nfs.length, processed: 0, sucesso: 0, erros: 0,
+      });
+      await dbRef.prepare(`UPDATE bol_boletins SET status = 'emitindo', updated_at = NOW() WHERE id = ?`).run(id);
+
+      // Dispara em background (cada boletim independente — o WebISS não suporta paralelismo
+      // efetivo por causa de mTLS + fila interna deles)
+      setImmediate(() => processarEmissao(dbRef, companyKey, id, nfs, usuario)
+        .catch(err => {
+          console.error(`[boletins/emitir-lote job=${id}] erro fatal:`, err.message);
+          _emissaoEmit(id, { type: 'fatal', erro: err.message });
+        }));
+    }
+
+    res.json({
+      ok: true,
+      total_aceitos: aceitos.length,
+      total_recusados: recusados.length,
+      aceitos,
+      recusados,
+      sse_urls: aceitos.map(id => `/api/boletins/${id}/emissao-status`),
+    });
+  } catch (e) {
+    console.error('[POST /boletins/emitir-lote] erro:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // PATCH /boletins/:id/cancelar-previa — desfaz prévia (volta a 'cancelado')
+// Body: { motivo: 'descrição do motivo' } — P0-7 fix: obrigatório pra audit fiscal
 router.patch('/:id([0-9]+)/cancelar-previa', async (req, res) => {
   try {
+    const motivo = (req.body?.motivo || '').trim();
+    if (!motivo || motivo.length < 5) {
+      return res.status(400).json({ error: 'Motivo obrigatório (mínimo 5 caracteres) para audit fiscal.' });
+    }
+
     const cur = await req.db.prepare('SELECT * FROM bol_boletins WHERE id = ?').get(req.params.id);
     if (!cur) return res.status(404).json({ error: 'Boletim não encontrado' });
     if (!['previa', 'aprovado_para_emissao'].includes(cur.status)) {
@@ -2674,10 +2827,18 @@ router.patch('/:id([0-9]+)/cancelar-previa', async (req, res) => {
         error: `Boletim tem ${temEmitida.n} NF(s) já emitidas. Cancele as NFs no WebISS antes.`
       });
     }
+
+    const usuario = req.user?.usuario || 'sistema';
+    const carimbo = `[${new Date().toISOString().slice(0,16)} ${usuario}] ${motivo}`;
+
     await req.db.prepare(`
-      UPDATE bol_boletins SET status = 'cancelado', updated_at = NOW() WHERE id = ?
-    `).run(req.params.id);
-    res.json({ ok: true, novo_status: 'cancelado' });
+      UPDATE bol_boletins SET
+        status = 'cancelado',
+        obs = CASE WHEN obs IS NULL OR obs = '' THEN ? ELSE obs || E'\\n' || ? END,
+        updated_at = NOW()
+      WHERE id = ?
+    `).run(carimbo, carimbo, req.params.id);
+    res.json({ ok: true, novo_status: 'cancelado', motivo_registrado: motivo });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
