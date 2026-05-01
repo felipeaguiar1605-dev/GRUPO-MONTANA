@@ -157,32 +157,35 @@ async function classifyEmpresa(key, opts) {
   }
   log(`RETIRADA_SOCIO: ${stats.retirada_socio}${sufix}`);
 
-  // ── 6. DUPLICATA cruzada (Apenas detecta — UPDATE só se --apply) ─
-  // Conservador: só marca como DUPLICATA se houver par com off-by-cent (<R$ 1) na MESMA DATA
+  // ── 6. DUPLICATA cruzada (off-by-cent entre 2 contas no mesmo dia) ─
+  // Versão simplificada usando UPDATE com alias direto (PG-friendly)
+  // dateFilter aqui precisa qualificar como "a.data_iso" (vez de só "data_iso")
+  const dateFilterAlias = opts.since ? `AND a.data_iso >= '${opts.since}'` : '';
   const dupSql = `
-    UPDATE extratos
+    UPDATE extratos a
     SET status_conciliacao = 'DUPLICATA',
-        historico = historico || ' [AUTO-DUP]'
-    WHERE id IN (
-      SELECT a.id FROM extratos a
-      WHERE EXISTS (
-        SELECT 1 FROM extratos b
-        WHERE b.id < a.id
-          AND b.data_iso = a.data_iso
-          AND b.conta != a.conta
-          AND ABS(COALESCE(b.debito,0) - COALESCE(a.debito,0)) < 1
-          AND ABS(COALESCE(b.credito,0) - COALESCE(a.credito,0)) < 1
-          AND COALESCE(a.debito,0) + COALESCE(a.credito,0) > 1000
-          AND b.conta != ''  -- evita duplicata de conta vazia
-      )
+        historico = a.historico || ' [AUTO-DUP]'
+    FROM extratos b
+    WHERE b.id < a.id
+      AND b.data_iso = a.data_iso
+      AND b.conta IS DISTINCT FROM a.conta
+      AND COALESCE(b.conta, '') != ''
+      AND COALESCE(a.conta, '') != ''
+      AND ABS(COALESCE(b.debito, 0) - COALESCE(a.debito, 0)) < 1
+      AND ABS(COALESCE(b.credito, 0) - COALESCE(a.credito, 0)) < 1
+      AND COALESCE(a.debito, 0) + COALESCE(a.credito, 0) > 1000
       AND (a.status_conciliacao IS NULL OR a.status_conciliacao NOT IN ('DUPLICATA','SALDO','CONCILIADO_AUTO'))
-      ${dateFilter}
-    )`;
-  if (opts.apply) {
-    const r = await db.prepare(dupSql).run();
-    stats.duplicata = r.changes || 0;
+      ${dateFilterAlias}`;
+  try {
+    if (opts.apply) {
+      const r = await db.prepare(dupSql).run();
+      stats.duplicata = r.changes || 0;
+    }
+    log(`DUPLICATA: ${stats.duplicata}${sufix}`);
+  } catch (e) {
+    log(`DUPLICATA: erro — ${e.message.slice(0, 100)}`);
+    stats.duplicata = 0;
   }
-  log(`DUPLICATA: ${stats.duplicata}${sufix}`);
 
   return stats;
 }
