@@ -888,21 +888,40 @@ router.get('/extratos', async (req, res) => {
 // ─── CONTRATOS ───────────────────────────────────────────────────
 router.get('/contratos', async (req, res) => {
   try {
+    // P1-4: + ultima_competencia_faturada (max(competencia) de NFs vinculadas)
+    //       + meses_sem_faturar (gap até hoje)
     const rowsRaw = await req.db.prepare(`
       SELECT c.*,
         c.numContrato AS "numContrato",
         COALESCE((SELECT SUM(v.valor) FROM vinculacoes v WHERE v.contrato_num = c.numContrato), 0) as total_vinculado,
         COALESCE((SELECT COUNT(*) FROM vinculacoes v WHERE v.contrato_num = c.numContrato), 0) as qtd_vinculacoes,
-        COALESCE((SELECT COUNT(*) FROM parcelas p WHERE p.contrato_num = c.numContrato), 0) as qtd_parcelas
+        COALESCE((SELECT COUNT(*) FROM parcelas p WHERE p.contrato_num = c.numContrato), 0) as qtd_parcelas,
+        (SELECT MAX(COALESCE(NULLIF(competencia, ''), to_char(safe_date(data_emissao), 'YYYY-MM')))
+           FROM notas_fiscais nf
+           WHERE nf.contrato_ref = c.numContrato
+             AND COALESCE(status_conciliacao, '') NOT IN ('CANCELADA')
+        ) as ultima_competencia_faturada
       FROM contratos c ORDER BY c.contrato
     `).all();
     // PG normaliza nomes não-quoted para lowercase no result. O alias acima
     // adiciona "numContrato" preservando o case; ainda assim, fallback defensivo:
-    const rows = (Array.isArray(rowsRaw) ? rowsRaw : []).map(r => ({
-      ...r,
-      numContrato: r.numContrato || r.numcontrato || '',
-      status: r.status || '',
-    }));
+    const hojeYM = new Date().toISOString().slice(0, 7);
+    const rows = (Array.isArray(rowsRaw) ? rowsRaw : []).map(r => {
+      const ult = r.ultima_competencia_faturada || r.ultima_competencia_faturada || '';
+      let mesesSemFaturar = null;
+      if (ult && /^\d{4}-\d{2}$/.test(ult)) {
+        const [y1, m1] = ult.split('-').map(Number);
+        const [y2, m2] = hojeYM.split('-').map(Number);
+        mesesSemFaturar = (y2 - y1) * 12 + (m2 - m1);
+      }
+      return {
+        ...r,
+        numContrato: r.numContrato || r.numcontrato || '',
+        status: r.status || '',
+        ultima_competencia_faturada: ult,
+        meses_sem_faturar: mesesSemFaturar,
+      };
+    });
 
     const summary = await req.db.prepare(`
       SELECT

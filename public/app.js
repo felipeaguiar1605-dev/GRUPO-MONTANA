@@ -333,6 +333,63 @@ function clearGlobalPeriod(){
 }
 
 // ─── Dashboard ───────────────────────────────────────────────────
+// P2-20: Painel "Fechar este mês" — agrega pendências da competência atual
+// Busca prévias pendentes, contratos sem boletim, NFs em erro de emissão.
+async function _carregarPainelFechamento() {
+  const painel = document.getElementById('dash-fechamento');
+  const itens  = document.getElementById('dash-fech-itens');
+  const titulo = document.getElementById('dash-fech-titulo');
+  if (!painel || !itens) return;
+
+  const hoje = new Date();
+  const comp = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+  const compAnterior = (() => {
+    const d = new Date(hoje); d.setDate(1); d.setMonth(d.getMonth() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  })();
+  const compAlvo = hoje.getDate() <= 5 ? compAnterior : comp;
+  if (titulo) titulo.textContent = `Fechar competência ${compAlvo}`;
+
+  try {
+    // Carrega prévias da competência alvo
+    const r = await api(`/boletins/previas?competencia=${compAlvo}`);
+    const previas = (r && r.data) || [];
+    const previaCount = previas.filter(p => p.status === 'previa').length;
+    const aprovadasCount = previas.filter(p => p.status === 'aprovado_para_emissao').length;
+    const emitindo = previas.filter(p => p.status === 'emitindo').length;
+    const erro = previas.filter(p => p.status === 'erro_emissao').length;
+    const emitido = previas.filter(p => p.status === 'emitido').length;
+    const totalBoletins = previas.length;
+
+    // Render
+    const card = (titulo, valor, cor, ico, click) => `
+      <div ${click ? `onclick="${click}"` : ''} style="background:rgba(255,255,255,.12);padding:10px 12px;border-radius:8px;${click ? 'cursor:pointer;' : ''}">
+        <div style="font-size:9px;opacity:.75;text-transform:uppercase;letter-spacing:.4px">${ico} ${titulo}</div>
+        <div style="font-size:22px;font-weight:800;color:${cor};margin-top:2px">${valor}</div>
+      </div>
+    `;
+
+    let html = '';
+    if (totalBoletins === 0) {
+      html += card('Boletins do mês', 'Nenhum', '#fde047', '⚠️', 'abrirPrevias()');
+      html += card('Próxima ação', 'Gerar prévias', '#fff', '➡️', 'abrirPrevias()');
+    } else {
+      if (previaCount > 0)    html += card('Em prévia', previaCount, '#fde047', '📋', 'abrirPrevias()');
+      if (aprovadasCount > 0) html += card('Aguardando emitir', aprovadasCount, '#86efac', '✓', 'abrirPrevias()');
+      if (emitindo > 0)       html += card('Emitindo agora', emitindo, '#fcd34d', '⏳', 'abrirPrevias()');
+      if (erro > 0)           html += card('Com erro', erro, '#fca5a5', '✗', 'abrirPrevias()');
+      if (emitido > 0)        html += card('Emitidas (OK)', emitido, '#86efac', '✅', 'abrirPrevias()');
+      const acaoNecessaria = previaCount > 0 ? 'Aprovar prévias' : aprovadasCount > 0 ? 'Emitir NFs' : erro > 0 ? 'Tentar reemissão' : 'Tudo em dia ✓';
+      html += card('Próxima ação', acaoNecessaria, '#fff', '➡️', 'abrirPrevias()');
+    }
+    itens.innerHTML = html;
+    painel.style.display = 'block';
+  } catch (e) {
+    // Silencia em caso de auth/erro — não quebra o dashboard
+    painel.style.display = 'none';
+  }
+}
+
 async function loadDashboard(){
   let url='/dashboard?';
   if(_from)url+='from='+_from+'&';
@@ -386,6 +443,9 @@ async function loadDashboard(){
   document.getElementById('h-cont').textContent=d.contratos.total;
   document.getElementById('h-pgs').textContent=d.pagamentos.total;
   document.getElementById('h-vinc').textContent=d.vinculacoes.total;
+
+  // P2-20: Painel "Fechar este mês" — pendências da competência atual
+  _carregarPainelFechamento().catch(() => {});
 
   // Saldo
   const saldo = e.total_creditos - e.total_debitos;
@@ -1259,6 +1319,15 @@ async function loadContratos(){
           <div style="min-width:120px"><div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Em Aberto</div><div style="font-size:14px;font-weight:700;color:${c.total_aberto>0?'#dc2626':'#15803d'}">${brl(c.total_aberto)}</div></div>
           ${receitaMedia ? `<div style="min-width:120px" title="Receita média efetiva / mês — baseado em NFs conciliadas"><div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Receita Média/mês</div><div style="font-size:14px;font-weight:700;color:${desvioMes !== null && desvioMes < -20 ? '#dc2626' : desvioMes !== null && desvioMes > 10 ? '#15803d' : '#475569'}">${receitaMedia}${desvioMes !== null ? ` <span style="font-size:9px;font-weight:600">(${desvioMes>0?'+':''}${desvioMes}%)</span>` : ''}</div></div>` : ''}
           <div style="min-width:80px"><div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Parcelas</div><div style="font-size:14px;font-weight:700;color:#475569">${c.qtd_parcelas}</div></div>
+          ${(() => {
+            // P1-4: última competência faturada + alerta de gap
+            const u = c.ultima_competencia_faturada;
+            const m = c.meses_sem_faturar;
+            if (!u) return `<div style="min-width:130px" title="Nenhuma NF emitida vinculada a este contrato"><div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Última Comp.</div><div style="font-size:14px;font-weight:700;color:#94a3b8">—</div></div>`;
+            const cor = m === 0 || m === null ? '#15803d' : (m === 1 ? '#d97706' : '#dc2626');
+            const tag = m === 0 ? 'em dia' : m === 1 ? '1 mês atrás' : `${m} meses atrás`;
+            return `<div style="min-width:130px" title="Última competência com NF emitida"><div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Última Comp.</div><div style="font-size:14px;font-weight:700;color:${cor}">${u}</div><div style="font-size:9px;color:${cor}">${tag}</div></div>`;
+          })()}
         </div>
         <div style="background:#f1f5f9;border-radius:6px;height:8px;overflow:hidden">
           <div style="background:${barColor};height:100%;width:${pct}%;border-radius:6px;transition:width .3s"></div>
