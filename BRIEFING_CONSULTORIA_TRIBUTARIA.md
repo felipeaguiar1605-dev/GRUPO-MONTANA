@@ -133,6 +133,93 @@ A **Assessoria** funciona de fato como **holding pagadora** do grupo:
 
 ---
 
+## Dossiê de números (atualizado 2026-05-02)
+
+### Faturamento por empresa (NFs ATIVAS, exclui canceladas)
+
+**Assessoria — T1/2026 (3 meses):**
+- 272 NFs ativas
+- R$ 10.43M faturado bruto
+- R$ 2.14M em NFs canceladas no período (16% do bruto)
+- 33 NFs canceladas (cancelamento + reemissão)
+
+**Segurança — T1/2026:**
+- 422 NFs ativas
+- R$ 10.24M faturado bruto
+
+**Histórico de NFs canceladas (suspeito):**
+- Assessoria: 563 canceladas totalizando R$ 33.86M acumulado
+- Segurança: 31 canceladas, R$ 688k
+
+> **Pergunta crítica pra consultoria**: por que tantas NFs canceladas? Erro de emissão? Problema de processo? Implicação fiscal de DCTF retificadora?
+
+### Margem operacional T1/2026 — APÓS 11 fixes em maio/2026
+
+| Métrica | Modo Normal | Modo Holding* |
+|---------|------------:|--------------:|
+| Receita Op Assessoria | R$ 12.97M | R$ 21.76M |
+| Saída Op Assessoria | R$ 15.29M | mesmo |
+| **Margem Op Assessoria** | **−R$ 2.31M** | **+R$ 6.24M** |
+| Receita Op Segurança | R$ 8.49M | R$ 16.35M |
+| Saída Op Segurança | R$ 10.68M | mesmo |
+| **Margem Op Segurança** | **−R$ 2.18M** | **−R$ 682k** |
+| **CONSOLIDADO grupo** | **−R$ 4.5M** | **+R$ 5.6M** |
+
+*Modo Holding considera transferências intergrupo recebidas como receita (premissa: regularização através de NFs intercompany pelo modelo CSC — Centro de Serviços Compartilhados).
+
+### Composição de débitos PENDENTES Assessoria (R$ 123M histórico)
+
+| Categoria | Qtd | Valor |
+|-----------|----:|------:|
+| Folha/Salários | 1.016 | R$ 61.6M |
+| Pagamento Boleto fornecedores | 2.418 | R$ 22.5M |
+| Não categorizados | 386 | R$ 21.1M |
+| PIX enviado terceiros | 2.823 | R$ 13.5M |
+| Tributos/Impostos | 126 | R$ 2.1M |
+| **RETIRADA SOCIO** ⚠ | **142** | **R$ 7.2M** |
+
+### Contratos correntes por empresa
+
+**Assessoria** (terceirização — limpeza, copeiragem, motoristas, recepção, bombeiros):
+- 12 contratos ativos com órgãos públicos
+- Maior: PREFEITURA 062/2024 (Limpeza Sec.Infraestrutura) — R$ 4.5M/mês
+- TJ 440/2024 — R$ 1.3M/mês
+- DETRAN 41/2023 — R$ 514k/mês
+- UFT 16/2025 (lotes Limpeza+Apoio) — R$ 860k/mês
+
+**Segurança** (vigilância armada/desarmada):
+- 11 contratos com órgãos públicos
+- Maior: Prefeitura Palmas 077/2025 — R$ 1.05M/mês
+- SEDUC 11/2023 — R$ 638k/mês
+- MP/TO 007/2026 — R$ 535k/mês
+- UFT 16/2025 (lote Vigilância) — R$ 364k/mês
+
+**Faturamento anual estimado**:
+- Assessoria: ~R$ 50M/ano
+- Segurança: ~R$ 50M/ano
+- **Grupo: R$ 100M+/ano**
+
+### Fluxo intergrupo (atual sem NF)
+
+R$ 105M de transferências bancárias entre as 4 empresas em 2024-2025:
+- Segurança → Assessoria: ~R$ 50M (operação fica pela Segurança, pagamento pela Assessoria?)
+- Outras direções: ~R$ 55M
+
+### CNAEs
+
+**Pergunta crítica**: a Assessoria tem TODOS os CNAEs necessários pra atividade real?
+
+Atividades faturadas hoje:
+- 8121-4/00 (Limpeza em Prédios) — confirmado em commit recente
+- 8011-1/01 (Vigilância Privada Armada) — A CONFIRMAR
+- 4929-9/02 (Transporte Rodoviário Coletivo) — A CONFIRMAR (motoristas)
+- 8011-1/02 (Vigilância Privada) — A CONFIRMAR
+- 7020-4/00 (Atividades de Consultoria) — provavelmente sim
+
+Risco: emitir NF de atividade sem CNAE registrado = potencial glosa fiscal.
+
+---
+
 ## Anexos esperados na proposta
 
 - Currículo dos sócios
