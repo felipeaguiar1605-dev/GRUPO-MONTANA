@@ -450,6 +450,16 @@ router.post('/gerar', async (req, res) => {
     const { contrato_id, competencia, data_emissao, notas_fiscais } = req.body;
     // notas_fiscais = [{ posto_id: X, nf_numero: "440" }, ...]
 
+    // Cenário 3: este endpoint é LEGADO — gera 1 boletim com N entries em
+    // bol_boletins_nfs (uma por posto). Modelo novo (Painel) usa
+    // /gerar-boletim que mantém 1:1. Aviso ao cliente via header.
+    res.set('Deprecation', 'true');
+    res.set('Link', '</api/boletins/gerar-boletim>; rel="successor-version"');
+    if (!global._warnedGerarLegado) {
+      console.warn('[boletins] /gerar (legado) ainda em uso — preferir /gerar-boletim + /emitir-nfse via Painel');
+      global._warnedGerarLegado = true;
+    }
+
     const contrato = await req.db.prepare('SELECT * FROM bol_contratos WHERE id = ?').get(contrato_id);
     if (!contrato) return res.status(404).json({ error: 'Contrato não encontrado' });
 
@@ -2149,6 +2159,70 @@ router.delete('/glosas/:id', async (req, res) => {
     await req.db.prepare('DELETE FROM bol_boletim_glosas WHERE id = ?').run(req.params.id);
     const recalc = await recalcularGlosaTotal(req.db, cur.boletim_id);
     res.json({ ok: true, ...recalc });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── DIAGNÓSTICO + MIGRAÇÃO LEGADO → PAINEL (cenário 3) ─────────
+// O fluxo /gerar (legado) cria 1 boletim com N rows em bol_boletins_nfs
+// (uma por posto). O fluxo /gerar-boletim (Painel) usa só
+// bol_boletins.nfse_numero (1:1). Coexistem — esses endpoints permitem
+// auditar e sincronizar boletins legados ao formato novo sem perda.
+
+// GET /api/boletins/_modelo-stats — quantos boletins em cada modelo
+router.get('/_modelo-stats', async (req, res) => {
+  try {
+    const tem = await req.db.prepare(`
+      SELECT COUNT(*)::int n FROM information_schema.tables
+      WHERE table_schema = current_schema() AND table_name = 'bol_boletins_nfs'
+    `).get();
+    if (!tem || tem.n === 0) {
+      return res.json({ ok: true, total: 0, painel: 0, legado: 0, hibrido: 0, sem_nf: 0 });
+    }
+
+    const r = await req.db.prepare(`
+      SELECT
+        COUNT(*)::int                                                    AS total,
+        COUNT(*) FILTER (WHERE COALESCE(b.nfse_numero,'') <> ''
+                              AND NOT EXISTS (SELECT 1 FROM bol_boletins_nfs WHERE boletim_id=b.id))::int AS painel,
+        COUNT(*) FILTER (WHERE COALESCE(b.nfse_numero,'') = ''
+                              AND EXISTS    (SELECT 1 FROM bol_boletins_nfs WHERE boletim_id=b.id))::int AS legado,
+        COUNT(*) FILTER (WHERE COALESCE(b.nfse_numero,'') <> ''
+                              AND EXISTS    (SELECT 1 FROM bol_boletins_nfs WHERE boletim_id=b.id))::int AS hibrido,
+        COUNT(*) FILTER (WHERE COALESCE(b.nfse_numero,'') = ''
+                              AND NOT EXISTS (SELECT 1 FROM bol_boletins_nfs WHERE boletim_id=b.id))::int AS sem_nf
+      FROM bol_boletins b
+    `).get();
+    res.json({ ok: true, ...r });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/boletins/_sync-legado — copia o 1º nf_numero de bol_boletins_nfs
+// para bol_boletins.nfse_numero quando este último estiver vazio. Idempotente.
+// Não apaga bol_boletins_nfs (preserva histórico de PDFs por posto).
+router.post('/_sync-legado', async (req, res) => {
+  try {
+    const tem = await req.db.prepare(`
+      SELECT COUNT(*)::int n FROM information_schema.tables
+      WHERE table_schema = current_schema() AND table_name = 'bol_boletins_nfs'
+    `).get();
+    if (!tem || tem.n === 0) {
+      return res.json({ ok: true, sincronizados: 0, motivo: 'tabela bol_boletins_nfs não existe nesta empresa' });
+    }
+
+    const r = await req.db.prepare(`
+      UPDATE bol_boletins b
+      SET nfse_numero = sub.primeira_nf,
+          updated_at  = NOW()
+      FROM (
+        SELECT boletim_id, MIN(nf_numero) AS primeira_nf
+        FROM bol_boletins_nfs
+        WHERE COALESCE(nf_numero,'') <> ''
+        GROUP BY boletim_id
+      ) sub
+      WHERE b.id = sub.boletim_id
+        AND COALESCE(b.nfse_numero,'') = ''
+    `).run();
+    res.json({ ok: true, sincronizados: r?.changes || 0 });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
