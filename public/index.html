@@ -138,6 +138,7 @@
       <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)" style="display:none">💰 Adimplência por Contrato</div>
       <!-- Faturamento Previsto: sub-aba de Contratos (2026-04). Tab oculta. -->
       <div class="tab" data-tab="faturamento-prev" onclick="navGo('faturamento-prev',this)" style="display:none">📅 Faturamento Previsto</div>
+      <div class="tab" data-tab="faturamento" onclick="navGo('faturamento',this)">📊 Faturamento</div>
       <div class="tab" data-tab="boletins" onclick="navGo('boletins',this)">📄 Boletins</div>
       <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
       <!-- Comprovantes de Pagamento virou sub-aba de Despesas (2026-04). Tab oculta mas rota mantida. -->
@@ -2241,6 +2242,11 @@
       </table>
     </div>
   </div>
+</div>
+
+<!-- Painel de Faturamento — aba de nível 1 (espelha pg-boletins em modo painel) -->
+<div id="pg-faturamento" class="pg">
+  <div id="fat-content"><div class="loading">Carregando painel…</div></div>
 </div>
 
 <!-- Modal: A Receber por Contrato -->
