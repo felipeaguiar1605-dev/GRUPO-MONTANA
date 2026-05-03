@@ -199,15 +199,22 @@
                   <th style="text-align:left;padding:8px 12px">Cargo</th>
                   <th style="text-align:right;padding:8px 12px">Salário base</th>
                   <th style="text-align:left;padding:8px 12px">Lotação</th>
+                  <th style="text-align:center;padding:8px 12px">Ação</th>
                 </tr>
               </thead>
               <tbody>
                 ${funcs.map(f => `
-                  <tr style="border-top:1px solid #f1f5f9">
+                  <tr style="border-top:1px solid #f1f5f9" id="pe-row-${f.id}">
                     <td style="padding:8px 12px"><strong>${escapeHtml(f.nome)}</strong></td>
                     <td style="padding:8px 12px">${escapeHtml(f.cargo_nome || '—')}</td>
                     <td style="padding:8px 12px;text-align:right">${brl(f.salario_base || 0)}</td>
                     <td style="padding:8px 12px;color:#64748b">${escapeHtml(f.lotacao || '—')}</td>
+                    <td style="padding:8px 12px;text-align:center">
+                      <button onclick="moverFuncionarioPosto(${f.id}, '${escapeHtml(f.nome).replace(/'/g, "\\'")}')"
+                              style="background:#f59e0b;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;font-size:10px">
+                        ↔ Mover
+                      </button>
+                    </td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -218,15 +225,15 @@
     }
   };
 
-  // ─── Sem posto (modal) ─────────────────────────────────────────────
+  // ─── Sem posto (modal) com botão pra atribuir ────────────────────
   window.mostrarSemPosto = async function() {
     const modal = document.createElement('div');
     modal.id = 'pe-modal-semposto';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999';
     modal.innerHTML = `
-      <div style="background:#fff;border-radius:10px;max-width:900px;width:95%;max-height:90vh;overflow:auto">
+      <div style="background:#fff;border-radius:10px;max-width:1000px;width:95%;max-height:90vh;overflow:auto">
         <div style="padding:14px 18px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between">
-          <strong>⚠ Funcionários sem posto definido</strong>
+          <strong>⚠ Funcionários sem posto definido — clique pra atribuir</strong>
           <button onclick="document.getElementById('pe-modal-semposto').remove()" style="background:none;border:none;font-size:18px;cursor:pointer">×</button>
         </div>
         <div id="pe-sp-body" style="padding:16px">Carregando…</div>
@@ -235,19 +242,50 @@
     document.body.appendChild(modal);
 
     try {
+      // Busca lista de postos pra dropdown
+      const postosResp = _postosCache || await api('/postos-equipe');
+      const postos = (postosResp.postos || []).slice().sort((a,b) =>
+        (a.contrato_nome||'').localeCompare(b.contrato_nome||'') || (a.campus_nome||'').localeCompare(b.campus_nome||'')
+      );
+      const postoOptions = postos.map(p =>
+        `<option value="${p.id}">${escapeHtml((p.contrato_nome||'') + ' · ' + (p.campus_nome||p.descricao_posto||''))}</option>`
+      ).join('');
+
       const r = await api('/postos-equipe/sem-posto');
       const grupos = r.por_lotacao || {};
-      let html = `<p>Total: <strong>${r.total}</strong> funcionário${r.total !== 1 ? 's' : ''} ativo${r.total !== 1 ? 's' : ''} sem posto resolvível.</p>`;
+      let html = `<p>Total: <strong>${r.total}</strong> funcionário${r.total !== 1 ? 's' : ''} ativo${r.total !== 1 ? 's' : ''} sem posto.</p>`;
 
       Object.keys(grupos).sort().forEach(lotacao => {
+        const pessoas = grupos[lotacao];
         html += `
           <details style="margin-bottom:8px;border:1px solid #e2e8f0;border-radius:6px;padding:6px 12px">
             <summary style="cursor:pointer;font-weight:600">
-              📍 ${escapeHtml(lotacao)} <span style="color:#64748b;font-weight:400;font-size:11px">${grupos[lotacao].length} pessoa${grupos[lotacao].length !== 1 ? 's' : ''}</span>
+              📍 ${escapeHtml(lotacao)}
+              <span style="color:#64748b;font-weight:400;font-size:11px">${pessoas.length} pessoa${pessoas.length !== 1 ? 's' : ''}</span>
             </summary>
-            <ul style="margin-top:8px;padding-left:20px">
-              ${grupos[lotacao].map(f => `<li>${escapeHtml(f.nome)} <span style="color:#64748b;font-size:10px">— ${escapeHtml(f.cargo_nome || 'sem cargo')}</span></li>`).join('')}
-            </ul>
+            <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:6px">
+              <thead style="background:#f1f5f9">
+                <tr><th style="text-align:left;padding:6px">Nome</th><th style="text-align:left;padding:6px">Cargo</th><th style="text-align:left;padding:6px">Atribuir posto</th></tr>
+              </thead>
+              <tbody>
+              ${pessoas.map(f => `
+                <tr style="border-top:1px solid #f1f5f9">
+                  <td style="padding:6px">${escapeHtml(f.nome)}</td>
+                  <td style="padding:6px;color:#64748b">${escapeHtml(f.cargo_nome || 'sem cargo')}</td>
+                  <td style="padding:6px">
+                    <select id="pe-sel-${f.id}" style="font-size:10px;padding:2px 4px;max-width:280px">
+                      <option value="">— escolher posto —</option>
+                      ${postoOptions}
+                    </select>
+                    <button onclick="atribuirPostoFuncionario(${f.id})"
+                            style="background:#15803d;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;font-size:10px;margin-left:4px">
+                      ✓ Atribuir
+                    </button>
+                  </td>
+                </tr>
+              `).join('')}
+              </tbody>
+            </table>
           </details>
         `;
       });
@@ -255,6 +293,91 @@
       document.getElementById('pe-sp-body').innerHTML = html;
     } catch (e) {
       document.getElementById('pe-sp-body').innerHTML = `<div style="color:#dc2626">Erro: ${e.message}</div>`;
+    }
+  };
+
+  // Move funcionário pra outro posto (a partir do modal detalhe)
+  window.moverFuncionarioPosto = async function(funcionario_id, nome) {
+    // Busca lista de postos pra dropdown
+    const postosResp = _postosCache || await api('/postos-equipe');
+    const postos = (postosResp.postos || []).slice().sort((a,b) =>
+      (a.contrato_nome||'').localeCompare(b.contrato_nome||'') || (a.campus_nome||'').localeCompare(b.campus_nome||'')
+    );
+
+    // Cria modal compacto
+    const m = document.createElement('div');
+    m.id = 'pe-modal-mover';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:10000';
+    m.innerHTML = `
+      <div style="background:#fff;border-radius:8px;max-width:520px;width:90%;padding:20px">
+        <h3 style="margin:0 0 8px;font-size:15px">Mover ${escapeHtml(nome)}</h3>
+        <p style="font-size:11px;color:#64748b;margin:0 0 12px">Escolha o novo posto:</p>
+        <select id="pe-mover-sel" style="width:100%;padding:6px;font-size:12px;border:1px solid #cbd5e1;border-radius:4px">
+          <option value="">— escolher posto —</option>
+          ${postos.map(p => `<option value="${p.id}">${escapeHtml((p.contrato_nome||'') + ' · ' + (p.campus_nome||p.descricao_posto||''))}</option>`).join('')}
+        </select>
+        <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:12px">
+          <button onclick="document.getElementById('pe-modal-mover').remove()"
+                  style="background:#e2e8f0;color:#1f2937;border:none;padding:6px 12px;border-radius:4px;cursor:pointer">Cancelar</button>
+          <button id="pe-btn-confirmar-mover"
+                  style="background:#15803d;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer">Confirmar</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(m);
+
+    document.getElementById('pe-btn-confirmar-mover').onclick = async () => {
+      const sel = document.getElementById('pe-mover-sel');
+      if (!sel.value) { alert('Escolha um posto'); return; }
+      try {
+        const r = await api(`/postos-equipe/${funcionario_id}/atribuir-posto`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ posto_id: parseInt(sel.value) })
+        });
+        if (r && r.ok) {
+          // Remove linha do modal de detalhe (se aberto)
+          const row = document.getElementById('pe-row-' + funcionario_id);
+          if (row) row.remove();
+          m.remove();
+          _postosCache = null;
+          if (typeof window.toast === 'function') window.toast('✓ Funcionário movido', 'success');
+          else alert('✓ Funcionário movido — recarregue pra atualizar lista');
+        } else {
+          alert('Erro: ' + (r.error || 'desconhecido'));
+        }
+      } catch (e) {
+        alert('Erro: ' + e.message);
+      }
+    };
+  };
+
+  // Atribui posto a funcionário e remove linha visualmente
+  window.atribuirPostoFuncionario = async function(funcionario_id) {
+    const sel = document.getElementById('pe-sel-' + funcionario_id);
+    if (!sel || !sel.value) {
+      alert('Escolha um posto antes');
+      return;
+    }
+    const posto_id = parseInt(sel.value);
+    try {
+      const r = await api(`/postos-equipe/${funcionario_id}/atribuir-posto`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ posto_id })
+      });
+      if (r && r.ok) {
+        // Remove a linha do funcionário do modal
+        sel.closest('tr').remove();
+        if (typeof window.toast === 'function') window.toast('✓ Posto atribuído', 'success');
+        else console.log('✓ Posto atribuído pra func ' + funcionario_id);
+        // Limpa cache pra próxima abertura mostrar atualizado
+        _postosCache = null;
+      } else {
+        alert('Erro: ' + (r.error || 'desconhecido'));
+      }
+    } catch (e) {
+      alert('Erro: ' + e.message);
     }
   };
 
