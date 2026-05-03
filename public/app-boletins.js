@@ -1236,6 +1236,20 @@ async function renderPainelFaturamento() {
     Clique em ✏️ Editar no contrato e preencha <strong>contrato_ref</strong> ou <strong>CNPJ do Tomador</strong>.
   </div>` : ''}
 
+  <!-- Aviso duplicatas (mesmo contrato/competência) -->
+  ${stats.duplicatas > 0 ? `
+  <div style="background:#fee2e2;border:1px solid #dc2626;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#991b1b;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div>
+      🛑 <strong>${stats.duplicatas} boletim(ns) duplicado(s)</strong> detectado(s) neste mês —
+      mais de um boletim para o mesmo contrato/competência. O painel mostra o mais "vivo"
+      (NFS-e emitida → aprovado → maior valor); os demais ficam ocultos.
+    </div>
+    <div style="display:flex;gap:6px">
+      <button onclick="painelListarDuplicatas()" style="padding:6px 12px;background:#fff;color:#991b1b;border:1px solid #dc2626;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">📋 Listar</button>
+      <button onclick="painelDeduplicar()" style="padding:6px 12px;background:#dc2626;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🧹 Limpar duplicatas</button>
+    </div>
+  </div>` : ''}
+
   <!-- Ações em lote -->
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
     <button onclick="painelGerarTodos('${mes}')"
@@ -1441,6 +1455,74 @@ async function painelEditar(boletim_id, mes, bolObj) {
     painelAjustar(boletim_id, mes, novo);
   } catch (err) {
     toast('Erro ao reabrir: ' + err.message, 'error');
+  }
+}
+
+// Lista os grupos duplicados em modal (somente leitura — pra revisar antes de mergear)
+async function painelListarDuplicatas() {
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch('/api/boletins/_duplicatas', {
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token }
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+
+    const brl = v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const corStatus = s => ({rascunho:'#92400e',aprovado:'#1d4ed8'}[s] || '#475569');
+    const html = d.grupos.map(g => `
+      <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:10px">
+        <div style="font-weight:700;color:#1e293b;margin-bottom:6px">${g.contrato_nome || '—'} — ${g.competencia} (${g.qtd}× duplicados)</div>
+        <table style="width:100%;font-size:11px">
+          <thead><tr style="color:#64748b"><th align="left">ID</th><th>Status</th><th>NFS-e</th><th align="right">Valor</th><th>Criado</th></tr></thead>
+          <tbody>${g.boletins.map(b => `<tr>
+            <td>${b.id}</td>
+            <td style="text-align:center;color:${corStatus(b.status)};font-weight:700">${(b.status||'').toUpperCase()}</td>
+            <td style="text-align:center">${b.nfse_status || '—'}</td>
+            <td style="text-align:right">${brl(b.valor_total || b.total_geral)}</td>
+            <td style="text-align:center;color:#64748b">${(b.created_at||'').slice(0,10)}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>`).join('') || '<div style="text-align:center;color:#94a3b8;padding:20px">Sem duplicatas</div>';
+
+    document.getElementById('modal-duplicatas')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'modal-duplicatas';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:30px;overflow:auto';
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:12px;padding:22px;width:760px;max-width:96vw;box-shadow:0 20px 60px rgba(0,0,0,.35)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <h3 style="margin:0;font-size:16px;font-weight:800;color:#1e293b">📋 Boletins Duplicados — ${d.total} grupo(s)</h3>
+          <button onclick="document.getElementById('modal-duplicatas').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:#64748b">✕</button>
+        </div>
+        ${html}
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0">
+          <button onclick="document.getElementById('modal-duplicatas').remove()" style="padding:8px 16px;background:#f1f5f9;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">Fechar</button>
+          ${d.total > 0 ? `<button onclick="document.getElementById('modal-duplicatas').remove();painelDeduplicar()" style="padding:8px 16px;background:#dc2626;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">🧹 Limpar todas</button>` : ''}
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+  }
+}
+
+// Executa o dedup (merge) — mantém o mais "vivo" e remove os duplicados
+async function painelDeduplicar() {
+  if (!confirm('Limpar boletins duplicados?\n\nA regra é: mantém o boletim com NFS-e emitida; senão o aprovado mais recente; senão o de maior valor. Os outros são DELETADOS (vínculos a colaboradores/glosas vão junto).\n\nNFS-e emitida nunca é apagada.')) return;
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch('/api/boletins/_dedup', {
+      method: 'POST',
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    toast(`🧹 ${d.removidos} duplicata(s) removida(s) em ${d.grupos_analisados} grupo(s)`, 'success');
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
   }
 }
 

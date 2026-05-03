@@ -38,6 +38,21 @@ router.use(async (req, res, next) => {
     try { await db.prepare(`ALTER TABLE bol_boletins ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
   }
 
+  // Garantia de unicidade (1 boletim por contrato/competência). Se já existem
+  // duplicatas, o CREATE UNIQUE INDEX falha com 23505 — logamos uma vez e
+  // seguimos. O usuário pode listar via GET /_duplicatas e mergear via
+  // POST /_dedup. Após a limpeza, esse próprio middleware aplica o índice
+  // na próxima request.
+  try {
+    await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bol_uniq_contrato_comp
+                      ON bol_boletins(contrato_id, competencia)`).run();
+  } catch (e) {
+    if (!global._warnedBolDup) {
+      console.warn('[boletins] UNIQUE(contrato_id, competencia) não pôde ser aplicado — provável duplicata existente. Use GET /api/boletins/_duplicatas + POST /api/boletins/_dedup. Detalhe:', e.message);
+      global._warnedBolDup = true;
+    }
+  }
+
   // Colunas adicionais na tabela bol_contratos (necessárias para vinculação contrato financeiro + NFS-e)
   const contrCols = [
     ['contrato_ref',    "TEXT DEFAULT ''"],  // numContrato da tabela contratos
@@ -432,6 +447,19 @@ router.post('/gerar', async (req, res) => {
 
     const contrato = await req.db.prepare('SELECT * FROM bol_contratos WHERE id = ?').get(contrato_id);
     if (!contrato) return res.status(404).json({ error: 'Contrato não encontrado' });
+
+    // Anti-duplicação: 1 boletim por (contrato, competência). Mantém paridade
+    // com /gerar-boletim que já fazia esse check. Antes esse endpoint criava
+    // boletins novos sem verificar — gerando duplicatas no DB.
+    const dupExist = await req.db.prepare(
+      'SELECT id FROM bol_boletins WHERE contrato_id = ? AND competencia = ?'
+    ).get(contrato_id, competencia);
+    if (dupExist) {
+      return res.status(409).json({
+        error: `Já existe boletim para esse contrato/competência (id=${dupExist.id}). Reabra/edite o existente em vez de gerar outro.`,
+        boletim_id: dupExist.id,
+      });
+    }
 
     const postos = await req.db.prepare('SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem').all(contrato_id);
     for (const p of postos) {
@@ -1587,11 +1615,29 @@ router.get('/painel-faturamento', async (req, res) => {
 
     const resultado = await Promise.all(contratos.map(async bc => {
       // FIX1: COALESCE(valor_total, total_geral)
+      // FIX5 (2026-05): se há duplicatas (mesmo contrato/competência), retorna o
+      // mais "vivo" primeiro: NFS-e EMITIDA > status='aprovado' > maior valor.
+      // Sem essa ordenação, .get() retorna não-determinístico — usuário podia
+      // ver "R$ 0,00" porque caía no rascunho órfão. Ver POST /_dedup para limpar.
       const boletim = await db.prepare(`
         SELECT *, COALESCE(valor_total, total_geral, 0) AS valor_efetivo
         FROM bol_boletins
         WHERE contrato_id = ? AND competencia = ?
+        ORDER BY
+          CASE WHEN nfse_status = 'EMITIDA' THEN 4
+               WHEN status      = 'aprovado' THEN 3
+               WHEN COALESCE(valor_total, total_geral, 0) > 0 THEN 2
+               ELSE 1 END DESC,
+          COALESCE(valor_total, total_geral, 0) DESC,
+          created_at DESC
+        LIMIT 1
       `).get(bc.id, mes);
+
+      // Conta dups deste par (contrato/competência) — pra frontend avisar se >1
+      const dupRow = await db.prepare(
+        'SELECT COUNT(*)::int AS n FROM bol_boletins WHERE contrato_id = ? AND competencia = ?'
+      ).get(bc.id, mes);
+      const dup_count = dupRow ? (dupRow.n - 1) : 0; // qtd duplicatas além do mostrado
 
       const [ano, mesNum] = mes.split('-');
       const mesNome = MESES_NOME_COMPLETO[parseInt(mesNum)] || mes;
@@ -1607,6 +1653,7 @@ router.get('/painel-faturamento', async (req, res) => {
         insc_municipal:    bc.insc_municipal || '',
         cnpj_tomador_contrato: bc.cnpj_tomador_contrato || '',
         mes_nome:          `${mesNome}/${ano}`,
+        dup_count, // qtd duplicatas além do exibido (frontend avisa se > 0)
         boletim: boletim ? {
           id:          boletim.id,
           status:      boletim.status,
@@ -1638,6 +1685,7 @@ router.get('/painel-faturamento', async (req, res) => {
       // FIX1: usa valor_efetivo
       valor_total: resultado.reduce((s, r) => s + (r.boletim?.valor_total || 0), 0),
       sem_cnpj:    semCnpj.length,
+      duplicatas:  resultado.reduce((s, r) => s + (r.dup_count || 0), 0),
     };
 
     res.json({ mes, contratos: resultado, stats });
@@ -2093,6 +2141,129 @@ router.delete('/glosas/:id', async (req, res) => {
     await req.db.prepare('DELETE FROM bol_boletim_glosas WHERE id = ?').run(req.params.id);
     const recalc = await recalcularGlosaTotal(req.db, cur.boletim_id);
     res.json({ ok: true, ...recalc });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── DEDUPLICAÇÃO DE BOLETINS ───────────────────────────────────
+// Diagnóstico e cleanup de duplicatas (mesmo contrato_id + competencia).
+// O middleware no topo tenta aplicar UNIQUE INDEX automaticamente; se há
+// dups pré-existentes, esses 2 endpoints permitem listar e mergear.
+
+// GET /api/boletins/_duplicatas — lista grupos com mais de 1 boletim
+router.get('/_duplicatas', async (req, res) => {
+  try {
+    const grupos = await req.db.prepare(`
+      SELECT contrato_id, competencia, COUNT(*) AS qtd,
+             ARRAY_AGG(id ORDER BY id) AS ids
+      FROM bol_boletins
+      GROUP BY contrato_id, competencia
+      HAVING COUNT(*) > 1
+      ORDER BY contrato_id, competencia
+    `).all();
+    if (!Array.isArray(grupos) || grupos.length === 0) {
+      return res.json({ ok: true, total: 0, grupos: [] });
+    }
+    // Enriquece com nome do contrato e detalhe de cada boletim
+    for (const g of grupos) {
+      const c = await req.db.prepare('SELECT nome, contratante FROM bol_contratos WHERE id=?').get(g.contrato_id);
+      g.contrato_nome = c?.nome || '';
+      g.contratante   = c?.contratante || '';
+      g.boletins = await req.db.prepare(`
+        SELECT id, status, nfse_status, nfse_numero, valor_total, total_geral,
+               created_at, updated_at
+        FROM bol_boletins WHERE id = ANY(?::int[])
+        ORDER BY id
+      `).all(g.ids);
+    }
+    res.json({ ok: true, total: grupos.length, grupos });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/boletins/_dedup — mergea duplicatas seguindo a regra:
+// "vencedor" do grupo = NFS-e EMITIDA > status='aprovado' > maior valor_total
+// > created_at mais recente. Os perdedores são apagados (FK CASCADE remove
+// dependências em bol_boletim_colaboradores e bol_boletim_glosas; manter os
+// vínculos em bol_boletins_nfs do vencedor — outros são removidos). Sem
+// dry_run=true, executa de fato.
+router.post('/_dedup', async (req, res) => {
+  try {
+    const dryRun = req.query.dry_run === 'true' || req.body?.dry_run === true;
+    const grupos = await req.db.prepare(`
+      SELECT contrato_id, competencia, ARRAY_AGG(id ORDER BY id) AS ids
+      FROM bol_boletins
+      GROUP BY contrato_id, competencia
+      HAVING COUNT(*) > 1
+    `).all();
+
+    if (!Array.isArray(grupos) || grupos.length === 0) {
+      return res.json({ ok: true, dry_run: dryRun, grupos_analisados: 0, removidos: 0, plano: [] });
+    }
+
+    const plano = [];
+    let removidos = 0;
+    for (const g of grupos) {
+      const bols = await req.db.prepare(`
+        SELECT id, status, nfse_status, COALESCE(valor_total, total_geral, 0) AS valor,
+               created_at
+        FROM bol_boletins WHERE id = ANY(?::int[])
+      `).all(g.ids);
+
+      // Score: EMITIDA=4, aprovado=3, rascunho com valor>0=2, demais=1, +
+      // tiebreak por created_at desc.
+      const score = (b) => {
+        if (b.nfse_status === 'EMITIDA') return 4;
+        if (b.status === 'aprovado')      return 3;
+        if ((b.valor || 0) > 0)           return 2;
+        return 1;
+      };
+      bols.sort((a, b) => {
+        const ds = score(b) - score(a);
+        if (ds !== 0) return ds;
+        const dv = (b.valor || 0) - (a.valor || 0);
+        if (dv !== 0) return dv;
+        return new Date(b.created_at) - new Date(a.created_at);
+      });
+      const vencedor = bols[0];
+      const perdedores = bols.slice(1);
+
+      plano.push({
+        contrato_id: g.contrato_id,
+        competencia: g.competencia,
+        manter:  { id: vencedor.id, status: vencedor.status, nfse_status: vencedor.nfse_status, valor: vencedor.valor },
+        remover: perdedores.map(p => ({ id: p.id, status: p.status, nfse_status: p.nfse_status, valor: p.valor })),
+      });
+
+      if (!dryRun) {
+        for (const p of perdedores) {
+          // Reapontar bol_boletins_nfs do perdedor pro vencedor (caso tenha PDFs/NFs gravadas lá)
+          try {
+            await req.db.prepare(
+              `UPDATE bol_boletins_nfs SET boletim_id = ? WHERE boletim_id = ?`
+            ).run(vencedor.id, p.id);
+          } catch (_) {}
+          // Apaga o perdedor (cascade em colaboradores/glosas via FK)
+          await req.db.prepare(`DELETE FROM bol_boletins WHERE id = ?`).run(p.id);
+          removidos++;
+        }
+      }
+    }
+
+    // Tenta aplicar a UNIQUE constraint depois do dedup
+    if (!dryRun) {
+      try {
+        await req.db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bol_uniq_contrato_comp
+                              ON bol_boletins(contrato_id, competencia)`).run();
+        global._warnedBolDup = false;
+      } catch (_) {}
+    }
+
+    res.json({
+      ok: true,
+      dry_run: dryRun,
+      grupos_analisados: grupos.length,
+      removidos,
+      plano,
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
