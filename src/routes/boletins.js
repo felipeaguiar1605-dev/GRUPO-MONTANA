@@ -53,6 +53,11 @@ router.use(async (req, res, next) => {
     }
   }
 
+  // Cenário 1: vínculo NF↔boletim. Garante coluna boletim_id em notas_fiscais
+  // e índice. Idempotente. (também é garantido em /emitir-nfse e webiss.js)
+  try { await db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN boletim_id BIGINT`).run(); } catch (_) {}
+  try { await db.prepare(`CREATE INDEX IF NOT EXISTS idx_nf_boletim ON notas_fiscais(boletim_id)`).run(); } catch (_) {}
+
   // Colunas adicionais na tabela bol_contratos (necessárias para vinculação contrato financeiro + NFS-e)
   const contrCols = [
     ['contrato_ref',    "TEXT DEFAULT ''"],  // numContrato da tabela contratos
@@ -767,17 +772,19 @@ router.post('/:id/emitir-nfse', async (req, res) => {
           const tomador      = bol.bc_contratante || tomadorRazao;
           const cnpjTomador  = tomadorCnpj ? formatCnpj(tomadorCnpj) : '';
 
-          // Garante colunas webiss_numero_nfse e discriminacao
+          // Garante colunas webiss_numero_nfse, discriminacao e boletim_id
           try { await db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN webiss_numero_nfse TEXT`).run(); } catch (_) {}
           try { await db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN discriminacao TEXT`).run(); } catch (_) {}
+          try { await db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN boletim_id BIGINT`).run(); } catch (_) {}
+          try { await db.prepare(`CREATE INDEX IF NOT EXISTS idx_nf_boletim ON notas_fiscais(boletim_id)`).run(); } catch (_) {}
 
           await db.prepare(`INSERT INTO notas_fiscais
             (numero, competencia, cidade, tomador, cnpj_tomador,
              valor_bruto, valor_liquido,
              inss, ir, iss, csll, pis, cofins, retencao,
              data_emissao, status_conciliacao,
-             webiss_numero_nfse, discriminacao)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+             webiss_numero_nfse, discriminacao, boletim_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
               nfseNum,
               competencia,
               'Palmas/TO',
@@ -796,8 +803,9 @@ router.post('/:id/emitir-nfse', async (req, res) => {
               'PENDENTE',
               nfseNum,
               bol.discriminacao || '',
+              bol.id, // FIX: vincula a NF ao boletim que a originou (cenário 1)
           );
-          console.log(`[boletins] Auto-sync NF ${nfseNum} → notas_fiscais`);
+          console.log(`[boletins] Auto-sync NF ${nfseNum} → notas_fiscais (boletim_id=${bol.id})`);
         }
       } catch (syncErr) {
         console.error('[boletins] Aviso: falha no auto-sync NF:', syncErr.message);
@@ -2141,6 +2149,70 @@ router.delete('/glosas/:id', async (req, res) => {
     await req.db.prepare('DELETE FROM bol_boletim_glosas WHERE id = ?').run(req.params.id);
     const recalc = await recalcularGlosaTotal(req.db, cur.boletim_id);
     res.json({ ok: true, ...recalc });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── VÍNCULO NF ↔ BOLETIM (cenário 1) ───────────────────────────
+// Backfill: linka NFs em notas_fiscais com seu boletim correspondente em
+// bol_boletins via match exato de número (notas_fiscais.numero =
+// bol_boletins.nfse_numero). Idempotente — só toca rows com boletim_id NULL.
+router.post('/_link-nfs', async (req, res) => {
+  try {
+    const r = await req.db.prepare(`
+      UPDATE notas_fiscais nf
+      SET boletim_id = b.id
+      FROM bol_boletins b
+      WHERE nf.boletim_id IS NULL
+        AND COALESCE(NULLIF(b.nfse_numero,''), '') <> ''
+        AND nf.numero = b.nfse_numero
+    `).run();
+    const linked = r?.changes || 0;
+
+    // Diagnóstico: NFs ainda órfãs (sem boletim) e boletins emitidos sem NF
+    const orfaos = await req.db.prepare(`
+      SELECT COUNT(*)::int n FROM notas_fiscais
+      WHERE boletim_id IS NULL
+    `).get();
+    const boletinsEmitidosSemNf = await req.db.prepare(`
+      SELECT COUNT(*)::int n FROM bol_boletins b
+      WHERE b.nfse_status = 'EMITIDA'
+        AND NOT EXISTS (SELECT 1 FROM notas_fiscais nf WHERE nf.numero = b.nfse_numero)
+    `).get();
+
+    res.json({
+      ok: true,
+      linked,
+      nfs_sem_boletim:        orfaos?.n || 0,
+      boletins_emitidos_sem_nf: boletinsEmitidosSemNf?.n || 0,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/boletins/:id/nf — devolve a NF de notas_fiscais ligada a este
+// boletim (via boletim_id ou fallback por nfse_numero match).
+router.get('/:id/nf', async (req, res) => {
+  try {
+    const bol = await req.db.prepare('SELECT * FROM bol_boletins WHERE id = ?').get(req.params.id);
+    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+
+    let nf = await req.db.prepare(
+      'SELECT * FROM notas_fiscais WHERE boletim_id = ? LIMIT 1'
+    ).get(bol.id);
+
+    if (!nf && bol.nfse_numero) {
+      nf = await req.db.prepare(
+        'SELECT * FROM notas_fiscais WHERE numero = ? LIMIT 1'
+      ).get(bol.nfse_numero);
+      // Auto-link oportunista se achou via fallback
+      if (nf && !nf.boletim_id) {
+        try {
+          await req.db.prepare('UPDATE notas_fiscais SET boletim_id = ? WHERE id = ?').run(bol.id, nf.id);
+          nf.boletim_id = bol.id;
+        } catch (_) {}
+      }
+    }
+
+    res.json({ ok: true, boletim_id: bol.id, nfse_numero: bol.nfse_numero || null, nf: nf || null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
