@@ -165,6 +165,9 @@ app.get('/api/diagnostico/ultimo', (req, res) => {
 // ─── Módulo Usuários (gestão de acesso) ─────────────────────────
 app.use('/api/usuarios',     require('./routes/usuarios').router);
 
+// ─── Postos & Equipes (visão operacional) ───────────────────────
+app.use('/api/postos-equipe', require('./routes/postos-equipe'));
+
 // ─── Módulo Alertas WhatsApp ─────────────────────────────────────
 try {
   app.use('/api/whatsapp', require('./routes/whatsapp'));
