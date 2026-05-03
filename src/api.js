@@ -657,11 +657,17 @@ router.get('/dashboard', async (req, res) => {
 // NFs são consideradas pagas quando: status_conciliacao='CONCILIADO' E
 //   - data_pagamento BETWEEN from..to (preferencial), OU
 //   - extrato_id → extratos.data_iso BETWEEN from..to (fallback)
+async function ensureNFCaixaCols(db) {
+  // Auto-cura: bancos antigos (mustang, seguranca) podem não ter data_pagamento.
+  // ADD COLUMN IF NOT EXISTS é no-op se já existe (PostgreSQL 9.6+).
+  try { await db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS data_pagamento TEXT`).run(); } catch (_) {}
+}
 router.get('/dashboard/apuracao-caixa', async (req, res) => {
   try {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from e to obrigatórios (YYYY-MM-DD)' });
 
+    await ensureNFCaixaCols(req.db);
     // Usa COALESCE: prefere data_pagamento; cai em data_iso do extrato vinculado se faltar
     const rowsRaw = await req.db.prepare(`
       SELECT
@@ -5397,28 +5403,38 @@ router.get('/conciliacao/duplicatas', async (req, res) => {
 
     let dateWhere = '';
     const dateParams = {};
-    if (from) { dateWhere += ' AND a.data_iso >= @from'; dateParams.from = from; }
-    if (to)   { dateWhere += ' AND a.data_iso <= @to';   dateParams.to   = to; }
+    if (from) { dateWhere += ' AND data_iso >= @from'; dateParams.from = from; }
+    if (to)   { dateWhere += ' AND data_iso <= @to';   dateParams.to   = to; }
 
-    // Busca pares de créditos em bancos diferentes com valor idêntico e datas próximas
+    // CTE pré-filtra rows válidos: credito>0 + data_iso em formato ISO YYYY-MM-DD.
+    // Sem isso, mustang/seguranca quebravam por:
+    //  (a) divisão por zero quando credito=0 (PG reordena predicados antes do a.credito>0)
+    //  (b) cast ::timestamp falhando em rows com data_iso='' ou inválido
+    // Tolerância usa multiplicação (tol * credito) — equivalente, sem divisão.
     const _paresRaw = await db.prepare(`
+      WITH cred AS (
+        SELECT id, data, banco, conta, credito, historico, status_conciliacao,
+               data_iso::date AS data_d
+        FROM extratos
+        WHERE credito > 0
+          AND data_iso ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+          ${dateWhere}
+      )
       SELECT
         a.id as id_a, a.data as data_a, a.banco as banco_a, a.conta as conta_a,
         a.credito as credito_a, a.historico as historico_a, a.status_conciliacao as status_a,
         b.id as id_b, b.data as data_b, b.banco as banco_b, b.conta as conta_b,
         b.credito as credito_b, b.historico as historico_b, b.status_conciliacao as status_b,
         ABS(a.credito - b.credito) as diferenca_valor,
-        ABS(EXTRACT(EPOCH FROM (a.data_iso::timestamp - b.data_iso::timestamp))/86400) as diferenca_dias
-      FROM extratos a
-      JOIN extratos b ON (
+        ABS(a.data_d - b.data_d) as diferenca_dias
+      FROM cred a
+      JOIN cred b ON (
         a.id < b.id
         AND (a.banco != b.banco OR a.conta != b.conta)
-        AND ABS(a.credito - b.credito) / a.credito <= @tol
-        AND ABS(EXTRACT(EPOCH FROM (a.data_iso::timestamp - b.data_iso::timestamp))/86400) <= @janela
-        AND a.credito > 0 AND b.credito > 0
+        AND ABS(a.credito - b.credito) <= @tol * a.credito
+        AND ABS(a.data_d - b.data_d) <= @janela
       )
-      WHERE 1=1 ${dateWhere}
-      ORDER BY a.data_iso DESC, a.credito DESC
+      ORDER BY a.data_d DESC, a.credito DESC
       LIMIT 100
     `).all({ ...dateParams, tol: parseFloat(tolerancia_valor), janela });
     const pares = Array.isArray(_paresRaw) ? _paresRaw : [];
