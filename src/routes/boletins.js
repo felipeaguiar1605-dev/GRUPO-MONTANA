@@ -1708,15 +1708,21 @@ router.post('/gerar-mes', async (req, res) => {
 
 // ─── APROVAR BOLETIM ───────────────────────────────────────────
 // POST /api/boletins/:id/aprovar
+// Permissão: financeiro ou admin (não bloqueia se role indefinido p/ retrocompatibilidade)
 router.post('/:id/aprovar', async (req, res) => {
   try {
+    const role = req.usuario && req.usuario.role;
+    if (role && !['financeiro', 'admin'].includes(role)) {
+      return res.status(403).json({ error: 'Apenas usuários financeiro ou admin podem aprovar boletins.' });
+    }
     const db = req.db;
     const bol = await db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id);
     if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
     if (bol.nfse_status === 'EMITIDA') {
       return res.status(400).json({ error: 'NFS-e já emitida — não é possível alterar status' });
     }
-    await db.prepare(`UPDATE bol_boletins SET status='aprovado', updated_at=NOW() WHERE id=?`).run(req.params.id);
+    await db.prepare(`UPDATE bol_boletins SET status='aprovado', aprovado_por=?, aprovado_em=NOW(), updated_at=NOW() WHERE id=?`)
+      .run(req.usuario && req.usuario.usuario || 'sistema', req.params.id);
     res.json({ ok: true, data: await db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id) });
   } catch (err) {
     res.status(500).json({ error: err.message });
