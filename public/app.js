@@ -124,6 +124,14 @@ function resetLoading(){
 }
 window.showLoading=showLoading; window.hideLoading=hideLoading; window.resetLoading=resetLoading;
 
+// Toggle Modo Holding (exibe receitas considerando transferências intergrupo como receita)
+window.toggleModoHolding = function() {
+  const atual = localStorage.getItem('modo_holding') === '1';
+  localStorage.setItem('modo_holding', atual ? '0' : '1');
+  if (typeof renderDashboard === 'function') renderDashboard();
+  else location.reload();
+};
+
 async function api(url,opts){
   const headers={'X-Company':currentCompany};
   const token=localStorage.getItem('montana_jwt');
@@ -452,13 +460,19 @@ async function loadDashboard(){
   const pctConc = e.total > 0 ? ((e.conciliados / e.total) * 100).toFixed(1) : 0;
 
   // Receita operacional = créditos - INTERNO - INVESTIMENTO - TRANSFERENCIA - DEVOLVIDO - CONTA VINCULADA - hist. não-operacional
-  const recOp = e.receita_operacional || 0;
+  const recOpNormal = e.receita_operacional || 0;
+  const recOpHolding = e.receita_holding || (recOpNormal + (e.cr_interno||0) + (e.cr_transferencia||0));
   const excInt = e.cr_interno || 0;
   const excInv = e.cr_investimento || 0;
   const excTrf = e.cr_transferencia || 0;
   const excDev = e.cr_devolvido || 0;
   const excCV  = e.cr_conta_vinculada || 0;
   const totalExc = excInt + excInv + excTrf + excDev + excCV;
+
+  // Modo Holding: persiste localmente, default OFF
+  const modoHolding = localStorage.getItem('modo_holding') === '1';
+  const recOp = modoHolding ? recOpHolding : recOpNormal;
+
   const tooltipExc = [
     excInt && `INTERNO: ${brl(excInt)}`,
     excInv && `INVESTIMENTO: ${brl(excInv)}`,
@@ -474,20 +488,23 @@ async function loadDashboard(){
       <div class="kpi-v blue">${e.total}</div>
       <div class="kpi-s">extratos bancários</div>
     </div>
-    <div class="kpi" style="border-left:4px solid #15803d" title="${tooltipExc}">
-      <div class="kpi-l">💰 Receita Operacional</div>
+    <div class="kpi" style="border-left:4px solid #15803d;position:relative" title="${tooltipExc}">
+      <div class="kpi-l">💰 Receita Operacional ${modoHolding ? '<span style="background:#1d4ed8;color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600">HOLDING</span>' : ''}</div>
       <div class="kpi-v green">${brl(recOp)}</div>
-      <div class="kpi-s">bruto ${brl(e.total_creditos)}${totalExc>0?` · excluído ${brl(totalExc)}`:''}</div>
+      <div class="kpi-s">${modoHolding
+        ? `inclui R$ ${brl(excInt+excTrf)} de transferências intergrupo`
+        : `bruto ${brl(e.total_creditos)}${totalExc>0?` · excluído ${brl(totalExc)}`:''}`}</div>
+      <button onclick="toggleModoHolding()" style="position:absolute;top:8px;right:8px;background:${modoHolding?'#1d4ed8':'#e5e7eb'};color:${modoHolding?'#fff':'#374151'};border:none;border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer;font-weight:600" title="Modo Holding: considera transferências intergrupo recebidas como receita (útil pra empresas holding-pagadoras sem NF intercompany)">⚙ ${modoHolding?'ON':'OFF'}</button>
     </div>
     <div class="kpi" style="border-left:4px solid #dc2626" title="Total débitos ${brl(e.total_debitos)} − Aplicações ${brl(e.debito_aplicacoes||0)} − Intragrupo ${brl(e.debito_intragrupo||0)}">
       <div class="kpi-l">📤 Saída de Caixa Operacional</div>
       <div class="kpi-v red">${brl(e.despesa_operacional||e.total_debitos)}</div>
       <div class="kpi-s">débitos − aplic./intragrupo · bruto ${brl(e.total_debitos)}${(e.debito_aplicacoes||0)+(e.debito_intragrupo||0)>0?` · excluído ${brl((e.debito_aplicacoes||0)+(e.debito_intragrupo||0))}`:''}</div>
     </div>
-    <div class="kpi" style="border-left:4px solid ${(recOp-(e.despesa_operacional||e.total_debitos))>=0?'#15803d':'#dc2626'}" title="Receita Operacional − Saída de Caixa Operacional">
-      <div class="kpi-l">📊 Margem Operacional</div>
+    <div class="kpi" style="border-left:4px solid ${(recOp-(e.despesa_operacional||e.total_debitos))>=0?'#15803d':'#dc2626'}" title="${modoHolding ? 'Receita Holding (inclui intragrupo) − Saída de Caixa Operacional' : 'Receita Operacional − Saída de Caixa Operacional'}">
+      <div class="kpi-l">📊 Margem Operacional ${modoHolding ? '<span style="background:#1d4ed8;color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600">HOLDING</span>' : ''}</div>
       <div class="kpi-v" style="color:${(recOp-(e.despesa_operacional||e.total_debitos))>=0?'#15803d':'#dc2626'}">${brl(recOp-(e.despesa_operacional||e.total_debitos))}</div>
-      <div class="kpi-s">receita op. − saída op.</div>
+      <div class="kpi-s">${modoHolding ? 'receita+intragrupo − saída op.' : 'receita op. − saída op.'}</div>
     </div>
     <div class="kpi" style="border-left:4px solid ${saldo>=0?'#15803d':'#dc2626'}" title="Crédito bruto − Débito bruto (variação da conta bancária no período)">
       <div class="kpi-l">🏦 Saldo de Caixa (bruto)</div>

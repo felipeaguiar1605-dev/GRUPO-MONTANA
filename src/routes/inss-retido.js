@@ -111,7 +111,7 @@ router.get('/competencias', async (req, res) => {
     const rowsRaw = await db.prepare(`
       SELECT DISTINCT competencia, COUNT(*) cnt
       FROM notas_fiscais
-      WHERE competencia IS NOT NULL AND competencia != ''
+      WHERE (WHERE.status_conciliacao IS NULL OR WHERE.status_conciliacao != 'CANCELADA') AND competencia IS NOT NULL AND competencia != ''
       GROUP BY competencia
     `).all();
 

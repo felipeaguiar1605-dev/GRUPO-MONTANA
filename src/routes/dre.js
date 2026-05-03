@@ -27,7 +27,7 @@ async function buscarDRE(db, dateFrom, dateTo) {
     SELECT COALESCE(SUM(valor_bruto),0) bruta,
            COUNT(*) qtd_nfs
     FROM notas_fiscais
-    WHERE data_emissao>=@from AND data_emissao<=@to
+    WHERE (WHERE.status_conciliacao IS NULL OR WHERE.status_conciliacao != 'CANCELADA') AND data_emissao>=@from AND data_emissao<=@to
   `).get(p);
 
   // 2. Retenções nas mesmas NFs (já filtradas pelo mesmo período)
@@ -45,7 +45,7 @@ async function buscarDRE(db, dateFrom, dateTo) {
              COALESCE(SUM(CASE WHEN retencao_efetiva IS NOT NULL THEN retencao_efetiva ELSE 0 END),0) ret_efetiva,
              COALESCE(SUM(CASE WHEN retencao_efetiva IS NOT NULL THEN 1 ELSE 0 END),0) qtd_com_efetiva
       FROM notas_fiscais
-      WHERE data_emissao>=@from AND data_emissao<=@to
+      WHERE (WHERE.status_conciliacao IS NULL OR WHERE.status_conciliacao != 'CANCELADA') AND data_emissao>=@from AND data_emissao<=@to
     `).get(p);
   } catch (_) {
     // Fallback se migração ainda não rodou
@@ -55,7 +55,7 @@ async function buscarDRE(db, dateFrom, dateTo) {
              COALESCE(SUM(pis),0) pis,  COALESCE(SUM(cofins),0) cofins,
              COALESCE(SUM(retencao),0) total_ret
       FROM notas_fiscais
-      WHERE data_emissao>=@from AND data_emissao<=@to
+      WHERE (WHERE.status_conciliacao IS NULL OR WHERE.status_conciliacao != 'CANCELADA') AND data_emissao>=@from AND data_emissao<=@to
     `).get(p);
     ret.ret_efetiva = 0;
     ret.qtd_com_efetiva = 0;
@@ -87,7 +87,7 @@ async function buscarDRE(db, dateFrom, dateTo) {
            COALESCE(SUM(valor_bruto),0) receita,
            0 saidas
     FROM notas_fiscais
-    WHERE data_emissao>=@from AND data_emissao<=@to
+    WHERE (WHERE.status_conciliacao IS NULL OR WHERE.status_conciliacao != 'CANCELADA') AND data_emissao>=@from AND data_emissao<=@to
       AND data_emissao != ''
     GROUP BY substr(data_emissao,1,7) ORDER BY mes_ano
   `).all(p);

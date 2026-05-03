@@ -182,7 +182,7 @@ router.get('/', async (req, res) => {
           COALESCE(SUM(CASE WHEN (?::date - data_emissao::date) > 90
                        THEN valor_bruto END), 0) val_90plus
         FROM notas_fiscais
-        WHERE status_conciliacao = 'PENDENTE'
+        WHERE (WHERE.status_conciliacao IS NULL OR WHERE.status_conciliacao != 'CANCELADA') AND status_conciliacao = 'PENDENTE'
           AND data_emissao >= ? || '-01-01'
           AND data_emissao != ''
       `).get(hoje, hoje, hoje, hoje, ano);
@@ -274,7 +274,7 @@ router.get('/aging', async (req, res) => {
         COALESCE(SUM(CASE WHEN (?::date - nf.data_emissao::date) > 90
                      THEN nf.valor_bruto END), 0) val_90plus
       FROM notas_fiscais nf
-      WHERE nf.status_conciliacao = 'PENDENTE'
+      WHERE (nf.status_conciliacao IS NULL OR nf.status_conciliacao != 'CANCELADA') AND nf.status_conciliacao = 'PENDENTE'
         AND nf.data_emissao >= ? || '-01-01'
         AND nf.data_emissao != ''
         AND COALESCE(nf.contrato_ref,'') != ''

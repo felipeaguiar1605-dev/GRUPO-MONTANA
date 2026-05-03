@@ -29,7 +29,7 @@ async function buildContexto(db, company) {
     const from = `${ano}-${mes}-01`;
     const to   = `${ano}-${mes}-31`;
 
-    const fat  = await db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) v FROM notas_fiscais WHERE (data_emissao>=? AND data_emissao<=?)`).get(from, to);
+    const fat  = await db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) v FROM notas_fiscais WHERE (WHERE.status_conciliacao IS NULL OR WHERE.status_conciliacao != 'CANCELADA') AND (data_emissao>=? AND data_emissao<=?)`).get(from, to);
     const desp = await db.prepare(`SELECT COALESCE(SUM(valor_bruto),0) v FROM despesas WHERE data_iso>=? AND data_iso<=?`).get(from, to);
     const pend = await db.prepare(`SELECT COUNT(*) n FROM extratos WHERE status_conciliacao='PENDENTE'`).get();
     const ctrs = await db.prepare(`SELECT numContrato, contrato, valor_mensal_bruto FROM contratos WHERE LOWER(COALESCE(status,'')) NOT LIKE '%encerrad%' AND LOWER(COALESCE(numContrato,'')) NOT LIKE '%encerrad%' LIMIT 5`).all();

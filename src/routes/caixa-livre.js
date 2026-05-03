@@ -102,7 +102,7 @@ async function calcularMes(db, mes, params) {
     const r = await db.prepare(
       `SELECT COALESCE(SUM(valor_bruto), 0) AS bruto, COUNT(*) AS qtd
          FROM notas_fiscais
-        WHERE data_emissao >= @from AND data_emissao <= @to`
+        WHERE (WHERE.status_conciliacao IS NULL OR WHERE.status_conciliacao != 'CANCELADA') AND data_emissao >= @from AND data_emissao <= @to`
     ).get(p);
     receitaBruta = parseFloat(r?.bruto || 0);
     qtdNfs = parseInt(r?.qtd || 0);
