@@ -1274,6 +1274,10 @@ async function renderPainelFaturamento() {
       ${qtdAprovados===0?'disabled':''}>
       🚀 Emitir NFS-e Lote (${qtdAprovados} aprovados)
     </button>
+    <button onclick="painelManutencao()" title="Auto-correção: vincula NFs, sincroniza legado, deduplica, cria fantasmas"
+      style="padding:8px 16px;background:#fff;color:#475569;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;margin-left:auto">
+      🛠️ Manutenção
+    </button>
   </div>
 
   <!-- Tabela de contratos -->
@@ -1533,6 +1537,74 @@ async function painelDeduplicar() {
   } catch (err) {
     toast('Erro: ' + err.message, 'error');
   }
+}
+
+// ─── Sequência de manutenção: roda 4 endpoints idempotentes em ordem ──
+// 1) _link-nfs       → vincula boletim_id em notas_fiscais por nfse_numero
+// 2) _sync-legado    → preenche bol_boletins.nfse_numero a partir do legado
+// 3) _dedup          → mergea boletins duplicados (contrato+competencia)
+// 4) _criar-fantasmas → cria boletim aprovado/EMITIDA pra NF órfã
+// 5) _modelo-stats   → leitura final pra exibir distribuição
+async function painelManutencao() {
+  if (!confirm('Manutenção do Painel de Faturamento\n\n' +
+      'Vai rodar 4 operações em ordem:\n' +
+      ' 1. Vincular NFs aos boletins (por nº da NFS-e)\n' +
+      ' 2. Sincronizar boletins legados pro modelo Painel\n' +
+      ' 3. Deduplicar boletins (mantém o mais "vivo")\n' +
+      ' 4. Criar boletins fantasma para NFs órfãs com contrato resolvível\n\n' +
+      'Boletins/NFs com NFS-e EMITIDA são preservados — exclusões só atingem rascunhos/aprovados duplicados.\n\nContinuar?')) return;
+
+  const token = localStorage.getItem('montana_jwt') || '';
+  const headers = { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+
+  // Modal de progresso
+  document.getElementById('modal-manutencao')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-manutencao';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:30px;overflow:auto';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:12px;padding:22px;width:600px;max-width:96vw;box-shadow:0 20px 60px rgba(0,0,0,.35)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <h3 style="margin:0;font-size:16px;font-weight:800;color:#1e293b">🛠️ Manutenção em andamento</h3>
+        <button onclick="document.getElementById('modal-manutencao').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:#64748b">✕</button>
+      </div>
+      <div id="manut-log" style="font-family:ui-monospace,monospace;font-size:12px;background:#0f172a;color:#e2e8f0;border-radius:8px;padding:14px;min-height:220px;max-height:60vh;overflow-y:auto;line-height:1.6">⏳ Iniciando…</div>
+      <div style="display:flex;justify-content:flex-end;margin-top:14px">
+        <button id="manut-fechar" onclick="document.getElementById('modal-manutencao').remove();renderPainelFaturamento()"
+          style="padding:8px 16px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700;display:none">Fechar e atualizar painel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const log = document.getElementById('manut-log');
+  const append = (msg) => { log.innerHTML += '\n' + msg; log.scrollTop = log.scrollHeight; };
+  log.innerHTML = '';
+
+  // Helper: chama endpoint, captura erro, loga
+  async function step(label, method, url, body) {
+    append(`▶ ${label}…`);
+    try {
+      const r = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      // Mostra os campos relevantes da resposta
+      const pares = Object.entries(d).filter(([k]) => !['ok','plano','grupos'].includes(k))
+                              .map(([k,v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`);
+      append(`  ✅ ${pares.join(' · ')}`);
+      return d;
+    } catch (err) {
+      append(`  ❌ ${err.message}`);
+      return null;
+    }
+  }
+
+  await step('1/5  Vincular NFs ↔ boletins', 'POST', '/api/boletins/_link-nfs');
+  await step('2/5  Sincronizar boletins legados', 'POST', '/api/boletins/_sync-legado');
+  await step('3/5  Deduplicar boletins', 'POST', '/api/boletins/_dedup', {});
+  await step('4/5  Criar boletins fantasma', 'POST', '/api/boletins/_criar-fantasmas');
+  await step('5/5  Distribuição final',     'GET',  '/api/boletins/_modelo-stats');
+
+  append('\n✓ Manutenção concluída.');
+  document.getElementById('manut-fechar').style.display = 'inline-block';
 }
 
 async function painelReabrir(boletim_id, mes) {
