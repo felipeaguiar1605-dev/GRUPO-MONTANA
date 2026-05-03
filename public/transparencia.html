@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Transparência Pública — Montana ERP</title>
+<style>
+  * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
+  body { margin: 0; padding: 24px; background: #f5f7fa; color: #1f2937; }
+  h1 { color: #1f2937; margin: 0 0 16px; }
+  .subtitle { color: #6b7280; margin-bottom: 24px; }
+  .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-bottom: 16px; }
+  .kpi { text-align: center; padding: 16px; background: white; border-radius: 8px; border-left: 4px solid #3b82f6; }
+  .kpi .label { font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }
+  .kpi .value { font-size: 24px; font-weight: 700; color: #1f2937; margin: 4px 0; }
+  .kpi .meta { font-size: 11px; color: #9ca3af; }
+  .kpi.green { border-left-color: #10b981; }
+  .kpi.orange { border-left-color: #f59e0b; }
+  .kpi.purple { border-left-color: #8b5cf6; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: #f9fafb; padding: 10px; text-align: left; border-bottom: 2px solid #e5e7eb; font-weight: 600; color: #374151; }
+  td { padding: 10px; border-bottom: 1px solid #f3f4f6; }
+  tr:hover td { background: #fafbfc; }
+  .brl { font-variant-numeric: tabular-nums; text-align: right; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .badge-fed { background: #dbeafe; color: #1e40af; }
+  .badge-mpto { background: #fef3c7; color: #92400e; }
+  .badge-prodata { background: #dcfce7; color: #166534; }
+  .filter-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .filter-bar select, .filter-bar input, .filter-bar button { padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; }
+  .filter-bar button { background: #3b82f6; color: white; border: 0; cursor: pointer; }
+  .filter-bar button:hover { background: #2563eb; }
+  .muted { color: #9ca3af; }
+  .empty { text-align: center; padding: 40px; color: #9ca3af; }
+  .login-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .login-card { background: white; padding: 24px; border-radius: 8px; min-width: 320px; }
+  .login-card input { width: 100%; padding: 10px; margin: 8px 0; border: 1px solid #d1d5db; border-radius: 6px; }
+  .login-card button { width: 100%; padding: 10px; background: #3b82f6; color: white; border: 0; border-radius: 6px; cursor: pointer; font-weight: 600; }
+  .loading { display: inline-block; padding: 40px; color: #9ca3af; }
+  .tab-bar { display: flex; gap: 4px; border-bottom: 2px solid #e5e7eb; margin-bottom: 16px; }
+  .tab { padding: 10px 16px; cursor: pointer; border-radius: 6px 6px 0 0; color: #6b7280; font-weight: 500; }
+  .tab.active { background: white; color: #1f2937; border-top: 2px solid #3b82f6; }
+  .tab:hover { background: #f3f4f6; }
+</style>
+</head>
+<body>
+
+<div class="login-overlay" id="login" style="display:none">
+  <div class="login-card">
+    <h2 style="margin:0 0 12px;">Transparência Montana</h2>
+    <input id="loginUsuario" placeholder="Usuário" value="admin">
+    <input id="loginSenha" type="password" placeholder="Senha" value="">
+    <select id="loginEmpresa">
+      <option value="assessoria">Assessoria</option>
+      <option value="seguranca">Segurança</option>
+    </select>
+    <button onclick="fazerLogin()">Entrar</button>
+    <p id="loginErro" style="color:#ef4444;margin-top:8px;min-height:20px;"></p>
+  </div>
+</div>
+
+<h1 data-embedded-hide>📊 Transparência Pública</h1>
+<p class="subtitle" data-embedded-hide>Dados coletados automaticamente dos portais de transparência (Federal + MP-TO)</p>
+
+<div class="filter-bar">
+  <label>Empresa:
+    <select id="filtroEmpresa" onchange="carregar()">
+      <option value="assessoria">Assessoria</option>
+      <option value="seguranca">Segurança</option>
+    </select>
+  </label>
+  <label>Ano:
+    <select id="filtroAno" onchange="carregar()">
+      <option value="">Todos</option>
+      <option value="2026" selected>2026</option>
+      <option value="2025">2025</option>
+    </select>
+  </label>
+  <button onclick="coletar()">🔄 Coletar agora</button>
+  <span id="ultimaColeta" class="muted" style="margin-left:auto;"></span>
+</div>
+
+<div class="grid" id="kpis">
+  <div class="kpi"><div class="label">Carregando...</div><div class="value">—</div></div>
+</div>
+
+<div class="card">
+  <div class="tab-bar">
+    <div class="tab active" onclick="switchTab('portal')" id="tabPortal">Por Portal</div>
+    <div class="tab" onclick="switchTab('mensal')" id="tabMensal">Mensal</div>
+    <div class="tab" onclick="switchTab('ug')" id="tabUg">Por Órgão</div>
+  </div>
+
+  <div id="content" class="loading">Carregando...</div>
+</div>
+
+<script>
+const API = '/api';
+let TOKEN = localStorage.getItem('montana_token') || '';
+let EMPRESA = localStorage.getItem('montana_empresa') || 'assessoria';
+let tab = 'portal';
+let dados = { portal: [], mensal: [], ug: [] };
+
+document.getElementById('filtroEmpresa').value = EMPRESA;
+
+async function fazerLogin() {
+  const usuario = document.getElementById('loginUsuario').value;
+  const senha = document.getElementById('loginSenha').value;
+  const empresa = document.getElementById('loginEmpresa').value;
+  try {
+    const r = await fetch(API + '/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuario, senha, company: empresa }),
+    });
+    const d = await r.json();
+    if (d.token) {
+      TOKEN = d.token;
+      EMPRESA = empresa;
+      localStorage.setItem('montana_token', TOKEN);
+      localStorage.setItem('montana_empresa', EMPRESA);
+      document.getElementById('filtroEmpresa').value = EMPRESA;
+      document.getElementById('login').style.display = 'none';
+      carregar();
+    } else {
+      document.getElementById('loginErro').textContent = d.error || 'Erro ao entrar';
+    }
+  } catch (e) {
+    document.getElementById('loginErro').textContent = e.message;
+  }
+}
+
+function headers() {
+  return {
+    'Authorization': 'Bearer ' + TOKEN,
+    'x-company': document.getElementById('filtroEmpresa').value,
+    'Content-Type': 'application/json',
+  };
+}
+
+async function fetchAPI(url, opts = {}) {
+  const r = await fetch(API + url, { headers: headers(), ...opts });
+  if (r.status === 401) {
+    document.getElementById('login').style.display = 'flex';
+    throw new Error('Não autenticado');
+  }
+  return r.json();
+}
+
+const brl = v => 'R$ ' + (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const num = v => (Number(v) || 0).toLocaleString('pt-BR');
+
+async function carregar() {
+  const ano = document.getElementById('filtroAno').value;
+  EMPRESA = document.getElementById('filtroEmpresa').value;
+  localStorage.setItem('montana_empresa', EMPRESA);
+
+  document.getElementById('content').innerHTML = '<div class="loading">Carregando...</div>';
+
+  try {
+    const [fed, mp, pd] = await Promise.all([
+      fetchAPI('/transparencia/federal/resumo').catch(() => ({ data: [] })),
+      fetchAPI('/transparencia/mpto/resumo').catch(() => ({ data: [] })),
+      fetchAPI('/transparencia/prodata/resumo').catch(() => ({ data: [] })),
+    ]);
+
+    // Agregados
+    const todosRegistros = [
+      ...(fed.data || []).map(r => ({ ...r, portal: 'portal-federal' })),
+      ...(mp.data || []).map(r => ({ ...r, portal: 'athenas-mpto' })),
+      ...(pd.data || []).map(r => ({ ...r, portal: 'prodata-palmas' })),
+    ];
+
+    const filtrados = ano
+      ? todosRegistros.filter(r => String(r.ano) === ano)
+      : todosRegistros;
+
+    // KPIs
+    const totalQtd = filtrados.reduce((s, r) => s + (r.qtd || 0), 0);
+    const totalEmp = filtrados.reduce((s, r) => s + (r.empenhado || r.total_empenhado || r.total || 0), 0);
+    const totalPago = filtrados.reduce((s, r) => s + (r.pago || r.total_pago || 0), 0);
+
+    document.getElementById('kpis').innerHTML = `
+      <div class="kpi"><div class="label">Documentos coletados</div><div class="value">${num(totalQtd)}</div><div class="meta">${ano || 'Todos os anos'}</div></div>
+      <div class="kpi orange"><div class="label">Total empenhado</div><div class="value">${brl(totalEmp)}</div><div class="meta">Reserva orçamentária</div></div>
+      <div class="kpi green"><div class="label">Total pago</div><div class="value">${brl(totalPago)}</div><div class="meta">Já pago aos fornecedores</div></div>
+      <div class="kpi purple"><div class="label">Saldo a pagar</div><div class="value">${brl(totalEmp - totalPago)}</div><div class="meta">Empenhado - pago</div></div>
+    `;
+
+    // Dados por agrupamento
+    dados.portal = agrupar(filtrados, ['portal']);
+    dados.mensal = agrupar(filtrados, ['ano', 'mes', 'portal']);
+    dados.ug = agrupar(filtrados, ['gestao', 'portal']);
+
+    render();
+  } catch (e) {
+    document.getElementById('content').innerHTML = `<div class="empty">Erro: ${e.message}</div>`;
+  }
+}
+
+function agrupar(arr, campos) {
+  const mapa = {};
+  for (const r of arr) {
+    const key = campos.map(c => r[c] || '').join('|');
+    if (!mapa[key]) {
+      const base = Object.fromEntries(campos.map(c => [c, r[c]]));
+      mapa[key] = { ...base, qtd: 0, empenhado: 0, pago: 0 };
+    }
+    mapa[key].qtd += r.qtd || 0;
+    mapa[key].empenhado += r.empenhado || r.total_empenhado || 0;
+    mapa[key].pago += r.pago || r.total_pago || 0;
+  }
+  return Object.values(mapa).sort((a, b) => b.pago - a.pago);
+}
+
+function switchTab(t) {
+  tab = t;
+  document.querySelectorAll('.tab').forEach(e => e.classList.remove('active'));
+  document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1)).classList.add('active');
+  render();
+}
+
+function render() {
+  const data = dados[tab];
+  if (!data || data.length === 0) {
+    document.getElementById('content').innerHTML = '<div class="empty">Sem dados. Clique em "Coletar agora".</div>';
+    return;
+  }
+
+  let html = '<table><thead><tr>';
+  if (tab === 'portal') html += '<th>Portal</th>';
+  if (tab === 'mensal') html += '<th>Ano</th><th>Mês</th><th>Portal</th>';
+  if (tab === 'ug') html += '<th>Órgão/Gestão</th><th>Portal</th>';
+  html += '<th class="brl">Docs</th><th class="brl">Empenhado</th><th class="brl">Pago</th></tr></thead><tbody>';
+
+  for (const r of data) {
+    html += '<tr>';
+    if (tab === 'portal') html += `<td>${badgePortal(r.portal)}</td>`;
+    if (tab === 'mensal') html += `<td>${r.ano || '-'}</td><td>${String(r.mes || '').padStart(2,'0')}</td><td>${badgePortal(r.portal)}</td>`;
+    if (tab === 'ug') html += `<td>${r.gestao || '<span class="muted">-</span>'}</td><td>${badgePortal(r.portal)}</td>`;
+    html += `<td class="brl">${num(r.qtd)}</td><td class="brl">${brl(r.empenhado)}</td><td class="brl">${brl(r.pago)}</td></tr>`;
+  }
+
+  html += '</tbody></table>';
+  document.getElementById('content').innerHTML = html;
+}
+
+function badgePortal(p) {
+  if (p === 'portal-federal') return '<span class="badge badge-fed">Federal</span>';
+  if (p === 'athenas-mpto') return '<span class="badge badge-mpto">MP-TO</span>';
+  if (p === 'prodata-palmas') return '<span class="badge badge-prodata">Palmas</span>';
+  return '<span class="badge">' + (p || '-') + '</span>';
+}
+
+async function coletar() {
+  const empresa = document.getElementById('filtroEmpresa').value;
+  const cnpj = empresa === 'assessoria' ? '14092519000151' : '19200109000109';
+  const ano = document.getElementById('filtroAno').value || new Date().getFullYear();
+  if (!confirm(`Coletar dados de ${empresa} para ${ano}? Pode demorar alguns segundos.`)) return;
+
+  document.getElementById('content').innerHTML = '<div class="loading">Coletando do Portal Federal + MP-TO...</div>';
+  try {
+    await Promise.all([
+      fetchAPI('/transparencia/federal/coletar', {
+        method: 'POST',
+        body: JSON.stringify({ cnpj, ano, fases: ['pagamento', 'empenho'] }),
+      }),
+      empresa === 'seguranca' ? fetchAPI('/transparencia/mpto/coletar', {
+        method: 'POST',
+        body: JSON.stringify({ cnpj }),
+      }) : Promise.resolve(),
+    ]);
+    alert('Coleta concluída!');
+    carregar();
+  } catch (e) {
+    alert('Erro: ' + e.message);
+  }
+}
+
+// Start
+if (!TOKEN) {
+  document.getElementById('login').style.display = 'flex';
+} else {
+  carregar();
+}
+</script>
+
+
+<script>
+// Detectar modo embedded (dentro do iframe do ERP)
+(function(){
+  const params = new URLSearchParams(location.search);
+  if (params.get('embedded') === '1') {
+    document.body.classList.add('embedded-mode');
+    // Sincronizar empresa vinda via querystring
+    const emp = params.get('empresa');
+    if (emp) { localStorage.setItem('montana_empresa', emp); }
+    // Usar token do localStorage do parent (mesma origem)
+    try {
+      const parentToken = window.parent.localStorage.getItem('montana_token');
+      if (parentToken) localStorage.setItem('montana_token', parentToken);
+    } catch(e) {}
+  }
+})();
+</script>
+</body>
+</html>

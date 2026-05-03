@@ -40,25 +40,21 @@ const diffDias = (iso1, iso2) => {
 router.get('/status', async (req, res) => {
   const e = getEmpresa(req, res); if (!e) return;
   try {
-    const [rAliases, rIdent, rPend, rPendTot, rNfsPend] = await Promise.all([
-      req.db.prepare('SELECT COUNT(*) c FROM pagador_alias WHERE ativo=1').get(),
-      req.db.prepare(`SELECT COUNT(*) c FROM extratos WHERE pagador_identificado<>''`).get(),
-      req.db.prepare(`SELECT COUNT(*) c FROM extratos WHERE credito>0 AND COALESCE(status_conciliacao,'PENDENTE')='PENDENTE'`).get(),
-      req.db.prepare(`SELECT COALESCE(SUM(credito),0) t FROM extratos WHERE credito>0 AND COALESCE(status_conciliacao,'PENDENTE')='PENDENTE'`).get(),
-      req.db.prepare(`SELECT COUNT(*) c FROM notas_fiscais WHERE valor_liquido>0 AND COALESCE(status_conciliacao,'PENDENTE')='PENDENTE'`).get(),
-    ]);
-    const aliases    = rAliases?.c   || 0;
-    const extIdent   = rIdent?.c     || 0;
-    const extPend    = rPend?.c      || 0;
-    const extPendTot = Number(rPendTot?.t) || 0;
-    const nfsPend    = rNfsPend?.c   || 0;
+    // FIX 2026-04: `e.e.db` (errado, herdado de SQLite onde getEmpresa retornava {e:{db}})
+    // → `e.db`. Também movido `.c/.t` pra DEPOIS do await (era acessado em Promise).
+    // pagador_alias.ativo é SMALLINT (0/1) — NÃO usar comparação com boolean
+    const aliasRow   = await e.db.prepare(`SELECT COUNT(*) c FROM pagador_alias WHERE COALESCE(ativo,1)=1`).get();
+    const extIdRow   = await e.db.prepare(`SELECT COUNT(*) c FROM extratos WHERE pagador_identificado<>''`).get();
+    const extPendRow = await e.db.prepare(`SELECT COUNT(*) c FROM extratos WHERE credito>0 AND COALESCE(status_conciliacao,'PENDENTE')='PENDENTE'`).get();
+    const extPendTotRow = await e.db.prepare(`SELECT COALESCE(SUM(credito),0) t FROM extratos WHERE credito>0 AND COALESCE(status_conciliacao,'PENDENTE')='PENDENTE'`).get();
+    const nfsPendRow = await e.db.prepare(`SELECT COUNT(*) c FROM notas_fiscais WHERE valor_liquido>0 AND COALESCE(status_conciliacao,'PENDENTE')='PENDENTE'`).get();
     res.json({
       ok: true,
-      aliases_ativos: aliases,
-      extratos_com_pagador: extIdent,
-      extratos_pendentes: extPend,
-      extratos_pendentes_valor: +extPendTot.toFixed(2),
-      nfs_pendentes: nfsPend,
+      aliases_ativos: Number(aliasRow?.c || 0),
+      extratos_com_pagador: Number(extIdRow?.c || 0),
+      extratos_pendentes: Number(extPendRow?.c || 0),
+      extratos_pendentes_valor: +Number(extPendTotRow?.t || 0).toFixed(2),
+      nfs_pendentes: Number(nfsPendRow?.c || 0),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -90,7 +86,7 @@ router.get('/extratos-sem-nf', async (req, res) => {
       ORDER BY data_iso DESC, credito DESC
       LIMIT 500
     `;
-    const rows = e; await db.prepare(sql).all(...params);
+    const rows = await e.db.prepare(sql).all(...params);
 
     // Agrupa por pagador (incluindo "(não identificado)")
     const grupos = {};
@@ -117,7 +113,7 @@ router.get('/sugestoes', async (req, res) => {
   if (!extId) return res.status(400).json({ error: 'extrato_id obrigatório' });
 
   try {
-    const ext = e; await db.prepare(`
+    const ext = await e.db.prepare(`
       SELECT id, data_iso, historico, credito, pagador_identificado, pagador_cnpj
       FROM extratos WHERE id = ?
     `).get(extId);
@@ -126,7 +122,7 @@ router.get('/sugestoes', async (req, res) => {
     // Alias correspondente (se identificado)
     let alias = null;
     if (ext.pagador_identificado) {
-      alias = e; await db.prepare('SELECT * FROM pagador_alias WHERE nome_canonico = ? AND ativo=1').get(ext.pagador_identificado);
+      alias = await e.db.prepare('SELECT * FROM pagador_alias WHERE nome_canonico = ? AND ativo=1').get(ext.pagador_identificado);
     }
     const jan = (alias && alias.janela_dias) || 120;
     const tol = (alias && alias.tolerancia_pct) || 0.10;
@@ -135,7 +131,7 @@ router.get('/sugestoes', async (req, res) => {
     const dtMin = new Date(ext.data_iso); dtMin.setDate(dtMin.getDate() - jan);
     const isoMin = dtMin.toISOString().substring(0, 10);
 
-    const nfs = e; await db.prepare(`
+    const nfs = await e.db.prepare(`
       SELECT id, numero, tomador, valor_liquido, data_emissao, competencia, contrato_ref
       FROM notas_fiscais
       WHERE COALESCE(status_conciliacao,'PENDENTE') = 'PENDENTE'
@@ -200,15 +196,15 @@ router.post('/vincular', async (req, res) => {
     return res.status(400).json({ error: 'extrato_id e nf_ids[] obrigatórios' });
   }
   try {
-    const ext = e; await db.prepare('SELECT id, data_iso, credito FROM extratos WHERE id = ?').get(extrato_id);
+    const ext = await e.db.prepare('SELECT id, data_iso, credito FROM extratos WHERE id = ?').get(extrato_id);
     if (!ext) return res.status(404).json({ error: 'Extrato não encontrado' });
 
     // Atualiza apenas extrato_id + data_pagamento; recalcularNF deriva o status
     // (CONCILIADO só quando comprovante anexado, senão PAGO_SEM_COMPROVANTE)
-    const updNf = e; db.prepare(`
+    const updNf = await e.db.prepare(`
       UPDATE notas_fiscais SET data_pagamento=?, extrato_id=? WHERE id = ?
     `);
-    const updExt = e; db.prepare(`
+    const updExt = await e.db.prepare(`
       UPDATE extratos SET
         status_conciliacao='CONCILIADO',
         obs = CASE WHEN obs='' THEN ? ELSE obs || ' | ' || ? END,
@@ -225,7 +221,7 @@ router.post('/vincular', async (req, res) => {
       const tag = `manual NFs:${nf_ids.join(',')}`;
       updExt.run(tag, tag, ext.id);
     });
-    trx();
+    await trx();
     res.json({ ok: true, vinculadas: nf_ids.length, status: statusResults });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -239,13 +235,13 @@ router.post('/desvincular', async (req, res) => {
   if (!extrato_id) return res.status(400).json({ error: 'extrato_id obrigatório' });
   try {
     // Captura ids das NFs antes de zerar o extrato_id
-    const nfRows = e; await db.prepare('SELECT id FROM notas_fiscais WHERE extrato_id = ?').all(extrato_id);
+    const nfRows = await e.db.prepare('SELECT id FROM notas_fiscais WHERE extrato_id = ?').all(extrato_id);
     const trx = e.db.transaction(async () => {
-      e; await db.prepare(`UPDATE notas_fiscais SET data_pagamento='', extrato_id=NULL WHERE extrato_id = ?`).run(extrato_id);
-      e; await db.prepare(`UPDATE extratos SET status_conciliacao='PENDENTE', obs='' WHERE id = ?`).run(extrato_id);
+      await e.db.prepare(`UPDATE notas_fiscais SET data_pagamento='', extrato_id=NULL WHERE extrato_id = ?`).run(extrato_id);
+      await e.db.prepare(`UPDATE extratos SET status_conciliacao='PENDENTE', obs='' WHERE id = ?`).run(extrato_id);
       for (const { id } of nfRows) recalcularNF(e.db, id);
     });
-    trx();
+    await trx();
     res.json({ ok: true, nfs_recalculadas: nfRows.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -260,7 +256,7 @@ router.post('/marcar-status', async (req, res) => {
   if (!extrato_id || !status) return res.status(400).json({ error: 'extrato_id e status obrigatórios' });
   if (!STATUS_OK.includes(status)) return res.status(400).json({ error: `status deve ser um de: ${STATUS_OK.join(', ')}` });
   try {
-    e; await db.prepare(`UPDATE extratos SET status_conciliacao=?, obs=COALESCE(?, obs), updated_at=NOW() WHERE id=?`).run(status, obs || null, extrato_id);
+    await e.db.prepare(`UPDATE extratos SET status_conciliacao=?, obs=COALESCE(?, obs), updated_at=NOW() WHERE id=?`).run(status, obs || null, extrato_id);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -271,7 +267,7 @@ router.post('/marcar-status', async (req, res) => {
 router.get('/pagador-aliases', async (req, res) => {
   const e = getEmpresa(req, res); if (!e) return;
   try {
-    const rows = e; await db.prepare(`SELECT * FROM pagador_alias ORDER BY prioridade ASC, nome_canonico ASC`).all();
+    const rows = await e.db.prepare(`SELECT * FROM pagador_alias ORDER BY prioridade ASC, nome_canonico ASC`).all();
     res.json({ ok: true, aliases: rows });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -283,7 +279,7 @@ router.post('/pagador-alias', async (req, res) => {
   const b = req.body || {};
   if (!b.nome_canonico) return res.status(400).json({ error: 'nome_canonico obrigatório' });
   try {
-    const r = e; await db.prepare(`
+    const r = await e.db.prepare(`
       INSERT INTO pagador_alias
         (cnpj, cnpj_raiz, padrao_historico, nome_canonico, tomador_match,
          contrato_default, empresa_dono, janela_dias, tolerancia_pct, prioridade, obs, ativo)
@@ -316,7 +312,7 @@ router.put('/pagador-alias/:id', async (req, res) => {
     if (sets.length === 0) return res.status(400).json({ error: 'Nenhum campo para atualizar' });
     sets.push(`updated_at=NOW()`);
     vals.push(id);
-    e; await db.prepare(`UPDATE pagador_alias SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+    await e.db.prepare(`UPDATE pagador_alias SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -327,7 +323,7 @@ router.delete('/pagador-alias/:id', async (req, res) => {
   const e = getEmpresa(req, res); if (!e) return;
   const id = parseInt(req.params.id);
   try {
-    e; await db.prepare(`UPDATE pagador_alias SET ativo = 0, updated_at=NOW() WHERE id = ?`).run(id);
+    await e.db.prepare(`UPDATE pagador_alias SET ativo = 0, updated_at=NOW() WHERE id = ?`).run(id);
     res.json({ ok: true, soft_delete: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

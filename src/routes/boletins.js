@@ -1,6 +1,8 @@
 /**
  * Montana Multi-Empresa — Módulo de Boletins de Medição
  * CRUD de contratos, postos, itens + geração de PDFs
+ *
+ * P2 (2026-04-30): + endpoints de template, aditivos, prévia/aprovação/emissão
  */
 const express = require('express');
 const PDFDocument = require('pdfkit');
@@ -8,6 +10,7 @@ const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
 const companyMw = require('../companyMiddleware');
+const tplEngine = require('../lib/templateRenderer');
 
 const router = express.Router();
 router.use(companyMw);
@@ -21,6 +24,8 @@ router.use(async (req, res, next) => {
   // Colunas NFS-e na tabela bol_boletins
   const bolCols = [
     ['valor_base',        'REAL DEFAULT 0'],
+    ['valor_total',       'REAL DEFAULT 0'],   // FIX 2026-04: faltava em alguns schemas
+    ['total_geral',       'REAL DEFAULT 0'],   // legado (algumas instalações usam só esse)
     ['glosas',            'REAL DEFAULT 0'],
     ['acrescimos',        'REAL DEFAULT 0'],
     ['discriminacao',     'TEXT'],
@@ -45,6 +50,45 @@ router.use(async (req, res, next) => {
   for (const [col, def] of contrCols) {
     try { await db.prepare(`ALTER TABLE bol_contratos ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
   }
+
+  // ─── Feature: colaboradores opt-in por posto + glosas detalhadas ───
+  // Flag por posto: TRUE (default) → posto exibe lista de colaboradores no boletim/NF
+  //                 FALSE → posto NÃO nomina (segurança/sigilo, ex: vigilância armada)
+  try { await db.prepare(`ALTER TABLE bol_postos ADD COLUMN mostrar_colaboradores BOOLEAN DEFAULT TRUE`).run(); } catch (_) {}
+
+  // Lista de colaboradores que compuseram o posto naquele boletim (nominal)
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS bol_boletim_colaboradores (
+      id BIGSERIAL PRIMARY KEY,
+      boletim_id BIGINT NOT NULL REFERENCES bol_boletins(id) ON DELETE CASCADE,
+      posto_id BIGINT REFERENCES bol_postos(id) ON DELETE SET NULL,
+      nome_colaborador TEXT NOT NULL,
+      cpf TEXT,
+      funcao TEXT,
+      data_inicio DATE,
+      data_fim DATE,
+      observacao TEXT,
+      ordem INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )`).run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_bbc_boletim ON bol_boletim_colaboradores(boletim_id)`).run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_bbc_posto ON bol_boletim_colaboradores(posto_id)`).run();
+  } catch (_) {}
+
+  // Glosas detalhadas (substitui o uso isolado do campo agregado bol_boletins.glosas)
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS bol_boletim_glosas (
+      id BIGSERIAL PRIMARY KEY,
+      boletim_id BIGINT NOT NULL REFERENCES bol_boletins(id) ON DELETE CASCADE,
+      posto_id BIGINT REFERENCES bol_postos(id) ON DELETE SET NULL,
+      motivo TEXT NOT NULL,
+      valor NUMERIC(14,2) NOT NULL CHECK (valor >= 0),
+      data_referencia DATE,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`).run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_bbg_boletim ON bol_boletim_glosas(boletim_id)`).run();
+  } catch (_) {}
 
   next();
 });
@@ -114,12 +158,13 @@ router.post('/contratos', async (req, res) => {
 
 router.put('/contratos/:id', async (req, res) => {
   const b = req.body;
-  // FIX2: inclui contrato_ref, orgao (CNPJ tomador), insc_municipal
+  // P2 (2026-04-30): + template_discriminacao
   await req.db.prepare(`
     UPDATE bol_contratos SET nome=?, contratante=?, numero_contrato=?, processo=?, pregao=?,
       descricao_servico=?, escala=?, empresa_razao=?, empresa_cnpj=?, empresa_endereco=?,
       empresa_email=?, empresa_telefone=?,
       contrato_ref=?, orgao=?, insc_municipal=?,
+      template_discriminacao=?,
       updated_at=NOW()
     WHERE id=?
   `).run(
@@ -127,6 +172,7 @@ router.put('/contratos/:id', async (req, res) => {
     b.descricao_servico||'', b.escala||'12x36', b.empresa_razao||'',
     b.empresa_cnpj||'', b.empresa_endereco||'', b.empresa_email||'', b.empresa_telefone||'',
     b.contrato_ref||'', b.orgao||'', b.insc_municipal||'',
+    b.template_discriminacao||null,
     req.params.id
   );
   res.json({ ok: true });
@@ -193,6 +239,173 @@ router.put('/itens/:id', async (req, res) => {
 router.delete('/itens/:id', async (req, res) => {
   await req.db.prepare('DELETE FROM bol_itens WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
+});
+
+// ─── SEED: Importar template de contrato (idempotente) ────────
+// Recebe { contrato: {...}, postos: [{...campos, itens: [...]}], gerar_boletim_competencia?: 'YYYY-MM',
+//          reset_postos?: bool, reset_boletim?: bool }
+// e cria/atualiza tudo. Se já existir, NÃO duplica — só completa o que faltar.
+// Flags reset_postos / reset_boletim deletam o existente antes de recriar
+// (útil quando contrato foi cadastrado antes com estrutura diferente e está
+// duplicando valores no boletim).
+router.post('/seed-template', async (req, res) => {
+  try {
+    const { contrato, postos = [], gerar_boletim_competencia,
+            reset_postos = false, reset_boletim = false,
+            force_update_contrato = false } = req.body;
+    if (!contrato || !contrato.numero_contrato || !contrato.nome) {
+      return res.status(400).json({ error: 'contrato.numero_contrato e contrato.nome obrigatórios' });
+    }
+    const db = req.db;
+
+    // 1) Contrato
+    let bc = await db.prepare(`SELECT * FROM bol_contratos WHERE numero_contrato = ?`).get(contrato.numero_contrato);
+    let contratoId;
+    let contratoAtualizado = false;
+    if (!bc) {
+      const r = await db.prepare(`
+        INSERT INTO bol_contratos (nome, contratante, numero_contrato, processo, pregao,
+          descricao_servico, escala, empresa_razao, empresa_cnpj, empresa_endereco,
+          empresa_email, empresa_telefone, contrato_ref, orgao, insc_municipal)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        contrato.nome, contrato.contratante || '', contrato.numero_contrato,
+        contrato.processo || '', contrato.pregao || '',
+        contrato.descricao_servico || '', contrato.escala || 'Mensal',
+        contrato.empresa_razao || '', contrato.empresa_cnpj || '',
+        contrato.empresa_endereco || '', contrato.empresa_email || '', contrato.empresa_telefone || '',
+        contrato.contrato_ref || '', contrato.orgao || '', contrato.insc_municipal || ''
+      );
+      contratoId = r.lastInsertRowid;
+    } else {
+      contratoId = bc.id;
+      // FLAG: força UPDATE dos campos do contrato com os valores do template
+      if (force_update_contrato) {
+        await db.prepare(`
+          UPDATE bol_contratos SET
+            nome = ?, contratante = ?, processo = ?, pregao = ?,
+            descricao_servico = ?, escala = ?, empresa_razao = ?, empresa_cnpj = ?,
+            empresa_endereco = ?, empresa_email = ?, empresa_telefone = ?,
+            contrato_ref = ?, orgao = ?, insc_municipal = ?,
+            updated_at = NOW()
+          WHERE id = ?
+        `).run(
+          contrato.nome, contrato.contratante || '', contrato.processo || '', contrato.pregao || '',
+          contrato.descricao_servico || '', contrato.escala || 'Mensal',
+          contrato.empresa_razao || '', contrato.empresa_cnpj || '',
+          contrato.empresa_endereco || '', contrato.empresa_email || '', contrato.empresa_telefone || '',
+          contrato.contrato_ref || '', contrato.orgao || '', contrato.insc_municipal || '',
+          contratoId
+        );
+        contratoAtualizado = true;
+      }
+    }
+
+    // ── RESET (opt-in): limpa postos+items+boletim antes de recriar ──
+    let resetSummary = { postos_deletados: 0, itens_deletados: 0, boletim_deletado: false };
+    if (reset_postos) {
+      const itensRes = await db.prepare(`
+        DELETE FROM bol_itens WHERE posto_id IN (SELECT id FROM bol_postos WHERE contrato_id = ?)
+      `).run(contratoId);
+      const postosRes = await db.prepare(`DELETE FROM bol_postos WHERE contrato_id = ?`).run(contratoId);
+      resetSummary.postos_deletados = postosRes.changes || 0;
+      resetSummary.itens_deletados = itensRes.changes || 0;
+    }
+    if (reset_boletim && gerar_boletim_competencia) {
+      // Não deleta boletim com NFS-e EMITIDA (proteção)
+      const bolExistente = await db.prepare(`
+        SELECT id, nfse_status FROM bol_boletins WHERE contrato_id = ? AND competencia = ?
+      `).get(contratoId, gerar_boletim_competencia);
+      if (bolExistente && bolExistente.nfse_status !== 'EMITIDA') {
+        await db.prepare(`DELETE FROM bol_boletins WHERE id = ?`).run(bolExistente.id);
+        resetSummary.boletim_deletado = true;
+      }
+    }
+
+    // 2) Postos + Items
+    let postosCriados = 0, itensCriados = 0;
+    for (let i = 0; i < postos.length; i++) {
+      const p = postos[i];
+      const campusKey = p.campus_key || p.key || `POSTO_${i+1}`;
+      let posto = await db.prepare(`SELECT * FROM bol_postos WHERE contrato_id = ? AND campus_key = ?`).get(contratoId, campusKey);
+      let postoId;
+      if (!posto) {
+        const pr = await db.prepare(`
+          INSERT INTO bol_postos (contrato_id, campus_key, campus_nome, municipio, descricao_posto, label_resumo, ordem)
+          VALUES (?,?,?,?,?,?,?)
+        `).run(contratoId, campusKey, p.campus_nome || campusKey, p.municipio || '',
+               p.descricao_posto || '', p.label_resumo || p.campus_nome || campusKey, p.ordem || (i+1));
+        postoId = pr.lastInsertRowid;
+        postosCriados++;
+      } else {
+        postoId = posto.id;
+      }
+
+      // Items: se já tem algum item nesse posto, não duplica (idempotência por posto)
+      const existItens = await db.prepare(`SELECT COUNT(*)::int AS n FROM bol_itens WHERE posto_id = ?`).get(postoId);
+      if (!existItens || existItens.n === 0) {
+        for (let j = 0; j < (p.itens || []).length; j++) {
+          const it = p.itens[j];
+          await db.prepare(`
+            INSERT INTO bol_itens (posto_id, descricao, quantidade, valor_unitario, ordem)
+            VALUES (?,?,?,?,?)
+          `).run(postoId, it.descricao || it.desc || '', it.quantidade || it.qtd || 1,
+                 it.valor_unitario || it.valor || 0, j+1);
+          itensCriados++;
+        }
+      }
+    }
+
+    // 3) Gera boletim de competência (se solicitado e ainda não existe)
+    let boletimId = null;
+    let boletimStatus = 'nao_solicitado';
+    if (gerar_boletim_competencia && /^\d{4}-\d{2}$/.test(gerar_boletim_competencia)) {
+      const existeBol = await db.prepare(`SELECT id FROM bol_boletins WHERE contrato_id=? AND competencia=?`).get(contratoId, gerar_boletim_competencia);
+      if (existeBol) {
+        boletimId = existeBol.id;
+        boletimStatus = 'ja_existia';
+      } else {
+        // Soma dos itens × quantidade
+        const totRow = await db.prepare(`
+          SELECT COALESCE(SUM(bi.quantidade * bi.valor_unitario), 0) AS tot
+          FROM bol_itens bi
+          JOIN bol_postos bp ON bp.id = bi.posto_id
+          WHERE bp.contrato_id = ?
+        `).get(contratoId);
+        const valorBase = +(totRow?.tot || 0);
+
+        const [ano, mes] = gerar_boletim_competencia.split('-');
+        const MESES_NOME = {'01':'JANEIRO','02':'FEVEREIRO','03':'MARÇO','04':'ABRIL','05':'MAIO','06':'JUNHO','07':'JULHO','08':'AGOSTO','09':'SETEMBRO','10':'OUTUBRO','11':'NOVEMBRO','12':'DEZEMBRO'};
+        const mesNome = MESES_NOME[mes] || mes;
+        const numCt = (bc?.contrato_ref || contrato.numero_contrato || '').toUpperCase();
+        const tipoServ = (contrato.descricao_servico || 'SERVIÇOS').toUpperCase();
+        const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServ.slice(0, 200)} CONFORME CONTRATO Nº ${numCt}, COMPETÊNCIA ${mesNome}/${ano}.`;
+
+        const br = await db.prepare(`
+          INSERT INTO bol_boletins
+            (contrato_id, competencia, data_emissao, valor_base, valor_total, glosas, acrescimos,
+             discriminacao, status, nfse_status)
+          VALUES (?, ?, CURRENT_DATE, ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')
+        `).run(contratoId, gerar_boletim_competencia, valorBase, valorBase, discriminacao);
+        boletimId = br.lastInsertRowid;
+        boletimStatus = 'criado';
+      }
+    }
+
+    res.json({
+      ok: true,
+      contrato_id: contratoId,
+      contrato_existia_antes: !!bc,
+      contrato_atualizado: contratoAtualizado,
+      reset: resetSummary,
+      postos_criados: postosCriados,
+      itens_criados: itensCriados,
+      boletim: { id: boletimId, status: boletimStatus, competencia: gerar_boletim_competencia || null },
+    });
+  } catch (e) {
+    console.error('[seed-template]', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─── BOLETINS — HISTÓRICO ─────────────────────────────────────
@@ -967,6 +1180,210 @@ function gerarResumoPDF(dadosResumo, contrato, ano, outputPath) {
   return totalMensal;
 }
 
+// ─── DIAGNÓSTICO: lista boletins existentes (debug) ────────────
+// GET /api/boletins/_diag
+router.get('/_diag', async (req, res) => {
+  try {
+    const boletins = await req.db.prepare(`
+      SELECT b.id, b.contrato_id, b.competencia, b.status, b.nfse_status,
+             b.valor_base, b.valor_total,
+             bc.nome AS contrato_nome
+      FROM bol_boletins b
+      LEFT JOIN bol_contratos bc ON bc.id = b.contrato_id
+      ORDER BY b.id DESC
+      LIMIT 50
+    `).all();
+    res.json({
+      ok: true,
+      total: boletins.length,
+      boletins,
+      empresa: req.companyKey || req.company?.key || 'desconhecida',
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── PREVIEW PDF do boletim (gera em memória e devolve inline) ──
+// GET /api/boletins/:id/preview-pdf
+// Útil pra visualizar o layout sem precisar acionar /gerar e salvar em disco.
+router.get('/:id/preview-pdf', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'ID inválido' });
+
+    // Queries separadas (evita conflito de colunas duplicadas com SELECT b.*, bc.*)
+    let boletim = await req.db.prepare(`SELECT * FROM bol_boletins WHERE id = ?`).get(id);
+
+    // FALLBACK: se id stale (frontend com cache), usar contrato_id+competencia
+    // como localizadores alternativos via query string.
+    if (!boletim && req.query.contrato_id && req.query.competencia) {
+      boletim = await req.db.prepare(`
+        SELECT * FROM bol_boletins WHERE contrato_id = ? AND competencia = ?
+      `).get(parseInt(req.query.contrato_id, 10), req.query.competencia);
+    }
+
+    if (!boletim) {
+      // Diagnóstico: lista IDs existentes pra debug
+      const ids = await req.db.prepare(`SELECT id, contrato_id, competencia, valor_total FROM bol_boletins ORDER BY id DESC LIMIT 10`).all();
+      return res.status(404).json({
+        error: 'Boletim não encontrado (id=' + id + ')',
+        ids_disponiveis: ids,
+        dica: 'Use ?contrato_id=X&competencia=YYYY-MM como alternativa',
+      });
+    }
+
+    const contrato = await req.db.prepare(`SELECT * FROM bol_contratos WHERE id = ?`).get(boletim.contrato_id);
+    if (!contrato) return res.status(404).json({ error: 'Contrato do boletim não encontrado' });
+
+    const postos = await req.db.prepare(`SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem`).all(boletim.contrato_id);
+    for (const p of postos) {
+      p.itens = await req.db.prepare(`SELECT * FROM bol_itens WHERE posto_id = ? ORDER BY ordem`).all(p.id);
+    }
+    if (!postos.length) return res.status(400).json({ error: 'Contrato sem postos cadastrados' });
+
+    // Para preview, junta TODOS os items de TODOS os postos num "posto agregado"
+    // (mesmo formato do PDF SEDUC original — 1 boletim por contrato com todas as funções).
+    const postoAggregado = {
+      campus_nome: postos.map(p => p.campus_nome || p.label_resumo).join(' · '),
+      municipio: postos[0]?.municipio || '',
+      descricao_posto: postos.map(p => p.descricao_posto).filter(Boolean).join(' · ') || '—',
+      itens: postos.flatMap(p => p.itens || []),
+    };
+
+    // Período humano (ex.: "Abril/2026")
+    const MESES = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    const [ano, mesNum] = (boletim.competencia || '').split('-');
+    const periodo = `${MESES[parseInt(mesNum, 10)] || mesNum}/${ano}`;
+    const dataEmissao = boletim.data_emissao
+      ? new Date(boletim.data_emissao).toLocaleDateString('pt-BR')
+      : new Date().toLocaleDateString('pt-BR');
+    const nfNumero = boletim.nfse_numero || '— a emitir —';
+
+    // Gera em buffer e devolve inline. Passa contrato como base + boletim
+    // (alguns campos como `data_emissao` vêm do boletim, outros do contrato).
+    const dadosPDF = { ...contrato, ...boletim, contrato_id: boletim.contrato_id };
+    const buf = await pdfToBuffer(doc => {
+      gerarBoletimPDF_inline(doc, dadosPDF, postoAggregado, nfNumero, dataEmissao, periodo);
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="preview_boletim_${boletim.contrato_id}_${boletim.competencia}.pdf"`);
+    res.send(buf);
+  } catch (err) {
+    console.error('Erro preview-pdf:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Wrapper que reusa o desenho do gerarBoletimPDF, mas escrevendo no doc
+// fornecido em vez de criar um stream novo. Replica o layout 1:1.
+function gerarBoletimPDF_inline(doc, contrato, posto, nfNumero, dataEmissao, periodo) {
+  const pageW = doc.page.width;
+  const margin = 30;
+  const contentW = pageW - 2 * margin;
+
+  doc.rect(margin, 30, contentW, 85).fill(AZUL_ESCURO);
+  doc.fill('#FFFFFF').fontSize(18).font('Helvetica-Bold')
+     .text('BOLETIM DE MEDIÇÃO', margin, 42, { width: contentW, align: 'center' });
+  doc.moveTo(margin + 40, 65).lineTo(margin + contentW - 40, 65)
+     .strokeColor('#FFFFFF').lineWidth(0.5).stroke();
+  const textoEmpresa = `${contrato.empresa_razao || ''}    CNPJ: ${contrato.empresa_cnpj || ''}`;
+  doc.fontSize(9).font('Helvetica-Bold').text(textoEmpresa, margin, 72, { width: contentW, align: 'center' });
+  doc.fontSize(7.5).font('Helvetica').text(contrato.empresa_endereco || '', margin, 85, { width: contentW, align: 'center' });
+  doc.text(`E-mail: ${contrato.empresa_email || ''}  /  Telefone: ${contrato.empresa_telefone || ''}`,
+           margin, 96, { width: contentW, align: 'center' });
+
+  const blocoY = 130, blocoH = 130;
+  doc.rect(margin, blocoY, contentW, blocoH).strokeColor(CINZA_BORDA).lineWidth(0.5).stroke();
+  let y = blocoY + 15;
+  const lx = margin + 8;
+  function field(label, value) {
+    doc.fill('#000000').font('Helvetica-Bold').fontSize(9).text(label + ':', lx, y, { continued: true });
+    doc.font('Helvetica').text(' ' + (value || '—'));
+    y += 16;
+  }
+  function fieldSmall(label, value) {
+    doc.fill('#000000').font('Helvetica').fontSize(8.5).text(label + ': ' + (value || '—'), lx, y);
+    y += 14;
+  }
+  field('CONTRATANTE', contrato.contratante);
+  field('CONTRATO', contrato.numero_contrato);
+  fieldSmall('PROCESSO', contrato.processo);
+  fieldSmall('PREGÃO ELETRÔNICO', contrato.pregao);
+  fieldSmall('POSTO', posto.campus_nome);
+  y += 2;
+  field('PERÍODO', periodo);
+  field('MUNICÍPIO', posto.municipio);
+
+  const nfY = blocoY + blocoH + 15;
+  doc.rect(margin, nfY, contentW, 22).fill(CINZA_CLARO);
+  doc.fill('#000000').font('Helvetica-Bold').fontSize(10)
+     .text(`NOTA FISCAL: ${nfNumero}`, margin + 10, nfY + 5)
+     .text(`DATA DE EMISSÃO: ${dataEmissao}`, pageW / 2 + 30, nfY + 5);
+
+  const tableY = nfY + 35;
+  const colWidths = [contentW * 0.42, contentW * 0.12, contentW * 0.23, contentW * 0.23];
+  const headers = ['ITEM', 'QTD.', 'VALOR UNITÁRIO', 'VALOR TOTAL'];
+
+  let tx = margin;
+  doc.rect(margin, tableY, contentW, 20).fill(AZUL_ESCURO);
+  doc.fill('#FFFFFF').font('Helvetica-Bold').fontSize(8);
+  for (let i = 0; i < headers.length; i++) {
+    doc.text(headers[i], tx + 4, tableY + 5, { width: colWidths[i] - 8, align: 'center' });
+    tx += colWidths[i];
+  }
+
+  let rowY = tableY + 20;
+  let totalPosto = 0;
+  for (let idx = 0; idx < posto.itens.length; idx++) {
+    const item = posto.itens[idx];
+    const vt = (item.quantidade || 0) * (item.valor_unitario || 0);
+    totalPosto += vt;
+    if (idx % 2 === 1) doc.rect(margin, rowY, contentW, 28).fill(CINZA_CLARO);
+    tx = margin;
+    doc.fill('#000000').font('Helvetica').fontSize(8);
+    const descH = doc.heightOfString(item.descricao || '', { width: colWidths[0] - 12 });
+    const rowH = Math.max(descH + 10, 28);
+    doc.text(item.descricao || '', tx + 6, rowY + 5, { width: colWidths[0] - 12 });
+    tx += colWidths[0];
+    doc.text(String(item.quantidade || 0), tx + 4, rowY + 8, { width: colWidths[1] - 8, align: 'center' });
+    tx += colWidths[1];
+    doc.text(formatMoeda(item.valor_unitario || 0), tx + 4, rowY + 8, { width: colWidths[2] - 8, align: 'right' });
+    tx += colWidths[2];
+    doc.text(formatMoeda(vt), tx + 4, rowY + 8, { width: colWidths[3] - 8, align: 'right' });
+    doc.rect(margin, rowY, contentW, rowH).strokeColor(CINZA_BORDA).lineWidth(0.3).stroke();
+    rowY += rowH;
+  }
+
+  rowY += 4;
+  doc.font('Helvetica-Bold').fontSize(9).fill('#000000');
+  const totalX = margin + colWidths[0] + colWidths[1];
+  doc.text('TOTAL:', totalX + 4, rowY, { width: colWidths[2] - 8, align: 'right' });
+  doc.text(formatMoeda(totalPosto), totalX + colWidths[2] + 4, rowY, { width: colWidths[3] - 8, align: 'right' });
+
+  rowY += 25;
+  doc.font('Helvetica-Bold').fontSize(9).text('DESCRIÇÃO DO SERVIÇO:', margin + 5, rowY);
+  rowY += 5;
+  doc.font('Helvetica').fontSize(8).text(contrato.descricao_servico || '', margin + 5, rowY + 8, { width: contentW - 10 });
+  rowY = doc.y + 10;
+  doc.font('Helvetica-Bold').fontSize(9).text('DESCRIÇÃO DO POSTO: ', margin + 5, rowY, { continued: true });
+  doc.font('Helvetica').text(posto.descricao_posto || '');
+  rowY = doc.y + 5;
+  doc.font('Helvetica-Bold').fontSize(9).text('ESCALA: ', margin + 5, rowY, { continued: true });
+  doc.font('Helvetica').text((contrato.escala || '') + '.');
+
+  const sigY = doc.page.height - 100;
+  const sigW = (contentW - 20) / 3;
+  const labels = ['FORNECEDOR', 'FISCALIZAÇÃO', 'APROVADO'];
+  for (let i = 0; i < labels.length; i++) {
+    const x = margin + i * (sigW + 10);
+    doc.rect(x, sigY, sigW, 60).strokeColor(CINZA_BORDA).lineWidth(0.5).stroke();
+    doc.moveTo(x + 15, sigY + 40).lineTo(x + sigW - 15, sigY + 40).stroke();
+    doc.fill('#000000').font('Helvetica').fontSize(8).text(labels[i], x, sigY + 45, { width: sigW, align: 'center' });
+  }
+}
+
 // ─── PDF helpers: Espelho NFS-e e Ofício (usam buffer em memória) ──
 
 function pdfToBuffer(builder) {
@@ -1150,7 +1567,12 @@ router.get('/painel-faturamento', async (req, res) => {
     const db = req.db;
 
     // FIX2: JOIN duplo — contrato_ref exato OU LIKE numero_contrato
-    const contratos = await db.prepare(`
+    // FIX3 (2026-04): faltava `await` na .all() (era síncrono em SQLite, virou
+    // Promise em PG → frontend recebia Promise em vez de array → "contratos.map
+    // is not a function"). Corrigido também `bc.ativo = 1` → `bc.ativo = TRUE`
+    // pra schemas em que `ativo` é boolean (compatibilidade com integer 1 mantida
+    // via COALESCE — assume ativo se a coluna for NULL).
+    const _contratosRaw = await db.prepare(`
       SELECT bc.*,
         COALESCE(
           (SELECT c1.valor_mensal_bruto FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
@@ -1163,9 +1585,10 @@ router.get('/painel-faturamento', async (req, res) => {
           ''
         ) AS cnpj_tomador_contrato
       FROM bol_contratos bc
-      WHERE bc.ativo = 1
+      WHERE COALESCE(bc.ativo::text, 'true') NOT IN ('0','false','f')
       ORDER BY bc.nome
     `).all();
+    const contratos = Array.isArray(_contratosRaw) ? _contratosRaw : [];
 
     const resultado = await Promise.all(contratos.map(async bc => {
       // FIX1: COALESCE(valor_total, total_geral)
@@ -1240,37 +1663,41 @@ router.post('/gerar-mes', async (req, res) => {
     }
     const db = req.db;
 
-    const contratos = await db.prepare(`
+    // FIX 2026-04: bc.ativo = 1 falhava em PG quando ativo é boolean.
+    // Tolera ambos: integer 1 e boolean TRUE (e NULL = ativo por default).
+    const _contratosRaw = await db.prepare(`
       SELECT bc.*, c.valor_mensal_bruto
       FROM bol_contratos bc
       LEFT JOIN contratos c ON bc.contrato_ref = c.numContrato
-      WHERE bc.ativo = 1
+      WHERE COALESCE(bc.ativo::text, 'true') NOT IN ('0','false','f')
     `).all();
+    const contratos = Array.isArray(_contratosRaw) ? _contratosRaw : [];
 
     const [ano, mesNum] = mes.split('-');
     const mesNome = MESES_NOME_COMPLETO[parseInt(mesNum)] || mes;
 
-    const ins = db.prepare(`INSERT INTO bol_boletins
-      (contrato_id, competencia, data_emissao, valor_base, valor_total, glosas, acrescimos, discriminacao, status, nfse_status)
-      VALUES (?, ?, CURRENT_DATE, ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')`);
-
     let criados = 0, existentes = 0;
 
-    const criar = db.transaction(async () => {
-      for (const bc of contratos) {
-        const existe = await db.prepare('SELECT id FROM bol_boletins WHERE contrato_id=? AND competencia=?').get(bc.id, mes);
-        if (existe) { existentes++; continue; }
+    // Sem transaction wrapper — em PG cada INSERT é atômico e não precisamos
+    // de ROLLBACK se o batch falhar no meio (mais simples + sem confusão de
+    // async/sync no transaction adapter).
+    for (const bc of contratos) {
+      const existe = await db.prepare('SELECT id FROM bol_boletins WHERE contrato_id=? AND competencia=?').get(bc.id, mes);
+      if (existe) { existentes++; continue; }
 
-        const valor_base = Math.round((bc.valor_mensal_bruto || 0) * 100) / 100;
-        const tipoServico = bc.descricao_servico || 'SERVIÇOS';
-        const numContrato  = bc.contrato_ref || bc.numero_contrato || '';
-        const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServico.toUpperCase()} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. VALOR MENSAL CONFORME BOLETIM DE MEDIÇÃO APROVADO.`;
+      const valor_base = Math.round((bc.valor_mensal_bruto || 0) * 100) / 100;
+      const tipoServico = bc.descricao_servico || 'SERVIÇOS';
+      const numContrato  = bc.contrato_ref || bc.numero_contrato || '';
+      const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServico.toUpperCase()} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. VALOR MENSAL CONFORME BOLETIM DE MEDIÇÃO APROVADO.`;
 
-        ins.run(bc.id, mes, valor_base, valor_base, discriminacao);
-        criados++;
-      }
-    });
-    criar();
+      // FIX: faltava await em ins.run em PG (Promise não esperada → criados++
+      // contabilizava antes do INSERT terminar)
+      await db.prepare(`INSERT INTO bol_boletins
+        (contrato_id, competencia, data_emissao, valor_base, valor_total, glosas, acrescimos, discriminacao, status, nfse_status)
+        VALUES (?, ?, CURRENT_DATE, ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')
+      `).run(bc.id, mes, valor_base, valor_base, discriminacao);
+      criados++;
+    }
 
     res.json({ ok: true, mes, criados, existentes, total: contratos.length });
   } catch (err) {
@@ -1331,6 +1758,7 @@ router.get('/historico-mes', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 // ─── APROVAR LOTE ──────────────────────────────────────────────
 // POST /api/boletins/aprovar-lote  { mes: "YYYY-MM" }
 // Aprova automaticamente boletins em rascunho que tenham valor > 0
@@ -1450,5 +1878,1344 @@ router.post('/emitir-lote', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ════════════════════════════════════════════════════════════════════
+//  COLABORADORES POR BOLETIM (opt-in via bol_postos.mostrar_colaboradores)
+// ════════════════════════════════════════════════════════════════════
+
+// PATCH /api/boletins/postos/:id/mostrar-colaboradores  body: { mostrar: true|false }
+router.patch('/postos/:id/mostrar-colaboradores', async (req, res) => {
+  try {
+    const { mostrar } = req.body;
+    const flag = mostrar === false ? false : true;
+    await req.db.prepare('UPDATE bol_postos SET mostrar_colaboradores = ? WHERE id = ?')
+      .run(flag, req.params.id);
+    res.json({ ok: true, posto_id: req.params.id, mostrar_colaboradores: flag });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/boletins/:boletim_id/colaboradores
+router.get('/:boletim_id/colaboradores', async (req, res) => {
+  try {
+    const rowsRaw = await req.db.prepare(`
+      SELECT bbc.*, bp.descricao_posto, bp.campus_nome, bp.mostrar_colaboradores
+      FROM bol_boletim_colaboradores bbc
+      LEFT JOIN bol_postos bp ON bp.id = bbc.posto_id
+      WHERE bbc.boletim_id = ?
+      ORDER BY bbc.posto_id, bbc.ordem, bbc.nome_colaborador
+    `).all(req.params.boletim_id);
+    const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+    // Filtra: se posto tem mostrar_colaboradores=false, oculta a lista para esse posto
+    const visiveis = rows.filter(r => r.mostrar_colaboradores !== false);
+    const ocultos = rows.length - visiveis.length;
+    res.json({ ok: true, colaboradores: visiveis, total: rows.length, ocultos_por_flag: ocultos });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/boletins/:boletim_id/colaboradores  body: { colaboradores: [{ posto_id, nome, cpf?, funcao?, ... }] }
+router.post('/:boletim_id/colaboradores', async (req, res) => {
+  try {
+    const boletim_id = parseInt(req.params.boletim_id);
+    const lista = Array.isArray(req.body?.colaboradores) ? req.body.colaboradores : [];
+    if (!lista.length) return res.status(400).json({ error: 'Array colaboradores vazio' });
+    const inseridos = [];
+    for (const c of lista) {
+      if (!c.nome_colaborador && !c.nome) continue;
+      const r = await req.db.prepare(`
+        INSERT INTO bol_boletim_colaboradores
+          (boletim_id, posto_id, nome_colaborador, cpf, funcao, data_inicio, data_fim, observacao, ordem)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        boletim_id, c.posto_id || null,
+        c.nome_colaborador || c.nome,
+        c.cpf || null, c.funcao || null,
+        c.data_inicio || null, c.data_fim || null,
+        c.observacao || null, c.ordem || 0
+      );
+      inseridos.push(r.lastInsertRowid);
+    }
+    res.json({ ok: true, inseridos: inseridos.length, ids: inseridos });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/boletins/colaboradores/:id  body: { nome_colaborador, cpf, funcao, ... }
+router.put('/colaboradores/:id', async (req, res) => {
+  try {
+    const c = req.body || {};
+    await req.db.prepare(`
+      UPDATE bol_boletim_colaboradores SET
+        nome_colaborador = COALESCE(?, nome_colaborador),
+        cpf              = COALESCE(?, cpf),
+        funcao           = COALESCE(?, funcao),
+        data_inicio      = COALESCE(?, data_inicio),
+        data_fim         = COALESCE(?, data_fim),
+        observacao       = COALESCE(?, observacao),
+        ordem            = COALESCE(?, ordem),
+        updated_at       = NOW()
+      WHERE id = ?
+    `).run(
+      c.nome_colaborador || c.nome || null,
+      c.cpf || null, c.funcao || null,
+      c.data_inicio || null, c.data_fim || null,
+      c.observacao || null, c.ordem || null,
+      req.params.id
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/boletins/colaboradores/:id
+router.delete('/colaboradores/:id', async (req, res) => {
+  try {
+    await req.db.prepare('DELETE FROM bol_boletim_colaboradores WHERE id = ?').run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/boletins/:boletim_id/colaboradores/copiar-mes-anterior
+// Copia a lista de colaboradores do boletim do mesmo contrato/competência anterior
+router.post('/:boletim_id/colaboradores/copiar-mes-anterior', async (req, res) => {
+  try {
+    const boletim_id = parseInt(req.params.boletim_id);
+    const bol = await req.db.prepare('SELECT contrato_id, competencia FROM bol_boletins WHERE id = ?').get(boletim_id);
+    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+
+    // Acha boletim anterior do mesmo contrato (qualquer competencia anterior, mais recente primeiro)
+    const anterior = await req.db.prepare(`
+      SELECT id FROM bol_boletins
+      WHERE contrato_id = ? AND id < ?
+      ORDER BY id DESC LIMIT 1
+    `).get(bol.contrato_id, boletim_id);
+    if (!anterior) return res.status(404).json({ error: 'Nenhum boletim anterior encontrado para este contrato' });
+
+    const colabsRaw = await req.db.prepare(`
+      SELECT posto_id, nome_colaborador, cpf, funcao, ordem
+      FROM bol_boletim_colaboradores WHERE boletim_id = ?
+    `).all(anterior.id);
+    const colabs = Array.isArray(colabsRaw) ? colabsRaw : [];
+    if (!colabs.length) return res.json({ ok: true, copiados: 0, fonte_boletim_id: anterior.id });
+
+    // Limpa colaboradores atuais (substitui ao copiar)
+    await req.db.prepare('DELETE FROM bol_boletim_colaboradores WHERE boletim_id = ?').run(boletim_id);
+
+    let copiados = 0;
+    for (const c of colabs) {
+      await req.db.prepare(`
+        INSERT INTO bol_boletim_colaboradores
+          (boletim_id, posto_id, nome_colaborador, cpf, funcao, ordem)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(boletim_id, c.posto_id, c.nome_colaborador, c.cpf, c.funcao, c.ordem);
+      copiados++;
+    }
+    res.json({ ok: true, copiados, fonte_boletim_id: anterior.id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  GLOSAS DETALHADAS POR BOLETIM
+//  (recalcula bol_boletins.glosas e valor_total ao mudar a lista)
+// ════════════════════════════════════════════════════════════════════
+
+async function recalcularGlosaTotal(db, boletim_id) {
+  const sumRow = await db.prepare(`
+    SELECT COALESCE(SUM(valor), 0) as total
+    FROM bol_boletim_glosas WHERE boletim_id = ?
+  `).get(boletim_id);
+  const totalGlosa = sumRow ? Number(sumRow.total || 0) : 0;
+  const bol = await db.prepare('SELECT valor_base, acrescimos FROM bol_boletins WHERE id = ?').get(boletim_id);
+  if (!bol) return { totalGlosa, valor_total: 0 };
+  const valor_total = +Number((bol.valor_base || 0) + (bol.acrescimos || 0) - totalGlosa).toFixed(2);
+  await db.prepare(`
+    UPDATE bol_boletins SET glosas = ?, valor_total = ?, updated_at = NOW()
+    WHERE id = ?
+  `).run(totalGlosa, valor_total, boletim_id);
+  return { totalGlosa, valor_total };
+}
+
+// GET /api/boletins/:boletim_id/glosas
+router.get('/:boletim_id/glosas', async (req, res) => {
+  try {
+    const rowsRaw = await req.db.prepare(`
+      SELECT bbg.*, bp.descricao_posto
+      FROM bol_boletim_glosas bbg
+      LEFT JOIN bol_postos bp ON bp.id = bbg.posto_id
+      WHERE bbg.boletim_id = ?
+      ORDER BY bbg.created_at ASC
+    `).all(req.params.boletim_id);
+    const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+    const total = rows.reduce((s, r) => s + Number(r.valor || 0), 0);
+    res.json({ ok: true, glosas: rows, total: +total.toFixed(2) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/boletins/:boletim_id/glosas  body: { posto_id?, motivo, valor, data_referencia? }
+router.post('/:boletim_id/glosas', async (req, res) => {
+  try {
+    const boletim_id = parseInt(req.params.boletim_id);
+    const { posto_id, motivo, valor, data_referencia } = req.body || {};
+    if (!motivo) return res.status(400).json({ error: 'motivo obrigatório' });
+    const v = Math.max(0, parseFloat(valor) || 0);
+    if (v <= 0) return res.status(400).json({ error: 'valor deve ser > 0' });
+    const r = await req.db.prepare(`
+      INSERT INTO bol_boletim_glosas (boletim_id, posto_id, motivo, valor, data_referencia)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(boletim_id, posto_id || null, motivo, v, data_referencia || null);
+    const recalc = await recalcularGlosaTotal(req.db, boletim_id);
+    res.json({ ok: true, id: r.lastInsertRowid, ...recalc });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/boletins/glosas/:id  body: { motivo, valor, data_referencia, posto_id }
+router.put('/glosas/:id', async (req, res) => {
+  try {
+    const g = req.body || {};
+    const cur = await req.db.prepare('SELECT boletim_id FROM bol_boletim_glosas WHERE id = ?').get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Glosa não encontrada' });
+    await req.db.prepare(`
+      UPDATE bol_boletim_glosas SET
+        motivo          = COALESCE(?, motivo),
+        valor           = COALESCE(?, valor),
+        data_referencia = COALESCE(?, data_referencia),
+        posto_id        = COALESCE(?, posto_id)
+      WHERE id = ?
+    `).run(
+      g.motivo || null,
+      g.valor != null ? Math.max(0, parseFloat(g.valor) || 0) : null,
+      g.data_referencia || null,
+      g.posto_id || null,
+      req.params.id
+    );
+    const recalc = await recalcularGlosaTotal(req.db, cur.boletim_id);
+    res.json({ ok: true, ...recalc });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/boletins/glosas/:id
+router.delete('/glosas/:id', async (req, res) => {
+  try {
+    const cur = await req.db.prepare('SELECT boletim_id FROM bol_boletim_glosas WHERE id = ?').get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Glosa não encontrada' });
+    await req.db.prepare('DELETE FROM bol_boletim_glosas WHERE id = ?').run(req.params.id);
+    const recalc = await recalcularGlosaTotal(req.db, cur.boletim_id);
+    res.json({ ok: true, ...recalc });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//   P2 (2026-04-30) — FLUXO PRÉVIA → APROVAÇÃO → EMISSÃO → BOLETIM FINAL
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ─── TEMPLATE: preview de discriminação ───────────────────────────
+// GET /boletins/contratos/:id/template-preview?competencia=YYYY-MM&posto_id=N
+// Renderiza o template_discriminacao do contrato com contexto montado.
+router.get('/contratos/:id/template-preview', async (req, res) => {
+  try {
+    const contrato = await req.db.prepare('SELECT * FROM bol_contratos WHERE id = ?').get(req.params.id);
+    if (!contrato) return res.status(404).json({ error: 'Contrato não encontrado' });
+
+    const { competencia, posto_id, valor_total } = req.query;
+    if (!competencia) return res.status(400).json({ error: 'competencia (YYYY-MM) obrigatória' });
+
+    let posto = null;
+    if (posto_id) {
+      posto = await req.db.prepare('SELECT * FROM bol_postos WHERE id = ? AND contrato_id = ?')
+        .get(Number(posto_id), Number(req.params.id));
+    }
+
+    const template = contrato.template_discriminacao || tplEngine.sugerirTemplateDefault(contrato);
+    const ctx = tplEngine.buildContext({
+      contrato, posto, competencia,
+      valor_total: Number(valor_total || 0),
+    });
+    const renderizado = tplEngine.render(template, ctx);
+    const inspect = tplEngine.inspect(template);
+
+    res.json({
+      ok: true,
+      template,
+      template_default_sugerido: contrato.template_discriminacao ? null : tplEngine.sugerirTemplateDefault(contrato),
+      renderizado,
+      contexto: ctx,
+      variaveis_usadas: inspect.vars,
+      variaveis_desconhecidas: inspect.desconhecidas,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /boletins/templates/variaveis — lista todas variáveis disponíveis (helper UI)
+router.get('/templates/variaveis', async (req, res) => {
+  res.json({
+    variaveis: [
+      { var: '{COMPETENCIA}',       desc: 'YYYY-MM', exemplo: '2026-04' },
+      { var: '{MES_NOME}',          desc: 'Nome do mês em maiúsculo', exemplo: 'ABRIL' },
+      { var: '{ANO}',               desc: 'Ano com 4 dígitos', exemplo: '2026' },
+      { var: '{PERIODO_INICIO}',    desc: 'Primeiro dia do mês (ISO)', exemplo: '2026-04-01' },
+      { var: '{PERIODO_FIM}',       desc: 'Último dia do mês (ISO)', exemplo: '2026-04-30' },
+      { var: '{PERIODO_INICIO_BR}', desc: 'Primeiro dia (DD/MM/YYYY)', exemplo: '01/04/2026' },
+      { var: '{PERIODO_FIM_BR}',    desc: 'Último dia (DD/MM/YYYY)',    exemplo: '30/04/2026' },
+      { var: '{POSTO_NOME}',        desc: 'Nome do campus/posto',       exemplo: 'CAMPUS PALMAS' },
+      { var: '{POSTO_MUNICIPIO}',   desc: 'Município do posto',         exemplo: 'PALMAS/TO' },
+      { var: '{POSTO_DESCRICAO}',   desc: 'Descrição do serviço no posto', exemplo: 'Vigilância 12x36' },
+      { var: '{CONTRATO_NUMERO}',   desc: 'Número do contrato',         exemplo: '02/2024' },
+      { var: '{CONTRATO_NOME}',     desc: 'Nome do contrato no sistema', exemplo: 'DETRAN-TO Limpeza' },
+      { var: '{CONTRATANTE}',       desc: 'Razão social do tomador',    exemplo: 'DEPARTAMENTO ESTADUAL DE TRANSITO' },
+      { var: '{PROCESSO}',          desc: 'Número do processo',         exemplo: '23101.004080/2022-53' },
+      { var: '{PREGAO}',            desc: 'Número do pregão',           exemplo: '10/2022' },
+      { var: '{VALOR_TOTAL}',       desc: 'Valor total (formato 1234.56)', exemplo: '5039.00' },
+      { var: '{VALOR_TOTAL_BR}',    desc: 'Valor formatado BR (1.234,56)', exemplo: '5.039,00' },
+      { var: '{EMPRESA_RAZAO}',     desc: 'Razão social da emissora',   exemplo: 'MONTANA SEGURANÇA PRIVADA LTDA' },
+      { var: '{EMPRESA_CNPJ}',      desc: 'CNPJ da emissora',           exemplo: '19.200.109/0001-09' },
+    ],
+    sintaxe_fallback: '{VAR|fallback}',
+    sintaxe_fallback_exemplo: '{POSTO_DESCRICAO|VIGILÂNCIA}'
+  });
+});
+
+// ─── ADITIVOS — CRUD ──────────────────────────────────────────────
+
+// GET /boletins/aditivos?contrato_id=N
+router.get('/aditivos', async (req, res) => {
+  try {
+    const where = req.query.contrato_id ? 'WHERE contrato_id = ?' : '';
+    const params = req.query.contrato_id ? [Number(req.query.contrato_id)] : [];
+    const rows = await req.db.prepare(`
+      SELECT a.*, c.nome AS contrato_nome, c.numero_contrato
+      FROM bol_aditivos a
+      JOIN bol_contratos c ON c.id = a.contrato_id
+      ${where}
+      ORDER BY a.contrato_id, a.vigencia_de DESC
+    `).all(...params);
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /boletins/aditivos/:id
+router.get('/aditivos/:id', async (req, res) => {
+  try {
+    const r = await req.db.prepare('SELECT * FROM bol_aditivos WHERE id = ?').get(req.params.id);
+    if (!r) return res.status(404).json({ error: 'Aditivo não encontrado' });
+    res.json(r);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /boletins/aditivos
+// Body: { contrato_id, tipo, data_assinatura, vigencia_de, vigencia_ate, fator, base_legal, observacao }
+router.post('/aditivos', async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.contrato_id) return res.status(400).json({ error: 'contrato_id obrigatório' });
+    if (!b.tipo)         return res.status(400).json({ error: 'tipo obrigatório (reajuste|prorrogacao|apostilamento|reequilibrio)' });
+    if (!b.vigencia_de)  return res.status(400).json({ error: 'vigencia_de obrigatória' });
+
+    const tipos = ['reajuste','prorrogacao','apostilamento','reequilibrio'];
+    if (!tipos.includes(b.tipo)) {
+      return res.status(400).json({ error: `tipo inválido. Use: ${tipos.join(', ')}` });
+    }
+
+    const fator = Number(b.fator || 1.0);
+    if (b.tipo === 'reajuste' && (fator <= 0 || fator > 5)) {
+      return res.status(400).json({ error: 'fator de reajuste suspeito (precisa estar entre 0 e 5, ex: 1.0825 para +8.25%)' });
+    }
+
+    const r = await req.db.prepare(`
+      INSERT INTO bol_aditivos
+        (contrato_id, tipo, data_assinatura, vigencia_de, vigencia_ate,
+         fator, base_legal, observacao, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'rascunho')
+    `).run(
+      Number(b.contrato_id), b.tipo,
+      b.data_assinatura || null,
+      b.vigencia_de, b.vigencia_ate || null,
+      fator,
+      b.base_legal || '', b.observacao || ''
+    );
+    res.json({ ok: true, id: r.lastInsertRowid, status: 'rascunho' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PATCH /boletins/aditivos/:id
+router.patch('/aditivos/:id', async (req, res) => {
+  try {
+    const cur = await req.db.prepare('SELECT * FROM bol_aditivos WHERE id = ?').get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Aditivo não encontrado' });
+    if (cur.status === 'aplicado') {
+      return res.status(409).json({ error: 'Aditivo já aplicado — não pode editar. Cadastre um aditivo de reequilíbrio para corrigir.' });
+    }
+
+    const b = req.body || {};
+    await req.db.prepare(`
+      UPDATE bol_aditivos SET
+        tipo            = COALESCE(?, tipo),
+        data_assinatura = COALESCE(?, data_assinatura),
+        vigencia_de     = COALESCE(?, vigencia_de),
+        vigencia_ate    = COALESCE(?, vigencia_ate),
+        fator           = COALESCE(?, fator),
+        base_legal      = COALESCE(?, base_legal),
+        observacao      = COALESCE(?, observacao),
+        updated_at      = NOW()
+      WHERE id = ?
+    `).run(
+      b.tipo || null, b.data_assinatura || null, b.vigencia_de || null,
+      b.vigencia_ate || null, b.fator !== undefined ? Number(b.fator) : null,
+      b.base_legal || null, b.observacao || null,
+      req.params.id
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PATCH /boletins/aditivos/:id/validar — humano confere e valida (Q3 semi-automático)
+router.patch('/aditivos/:id/validar', async (req, res) => {
+  try {
+    const cur = await req.db.prepare('SELECT * FROM bol_aditivos WHERE id = ?').get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Aditivo não encontrado' });
+    if (cur.status !== 'rascunho') {
+      return res.status(409).json({ error: `aditivo já está ${cur.status}` });
+    }
+
+    const usuario = req.user?.usuario || 'sistema';
+    await req.db.prepare(`
+      UPDATE bol_aditivos
+      SET status = 'validado', validado_por = ?, validado_em = NOW(), updated_at = NOW()
+      WHERE id = ?
+    `).run(usuario, req.params.id);
+
+    res.json({ ok: true, status: 'validado' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PATCH /boletins/aditivos/:id/cancelar
+// Body: { motivo: 'descrição do motivo' } — P0-7 fix: obrigatório pra audit
+router.patch('/aditivos/:id/cancelar', async (req, res) => {
+  try {
+    const motivo = (req.body?.motivo || '').trim();
+    if (!motivo || motivo.length < 5) {
+      return res.status(400).json({ error: 'Motivo obrigatório (mínimo 5 caracteres) para audit.' });
+    }
+    const cur = await req.db.prepare('SELECT * FROM bol_aditivos WHERE id = ?').get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Aditivo não encontrado' });
+    const usuario = req.user?.usuario || 'sistema';
+    const carimbo = `[${new Date().toISOString().slice(0,16)} ${usuario}] CANCELADO: ${motivo}`;
+    await req.db.prepare(`
+      UPDATE bol_aditivos SET
+        status = 'cancelado',
+        observacao = CASE WHEN observacao IS NULL OR observacao = '' THEN ? ELSE observacao || E'\\n' || ? END,
+        updated_at = NOW()
+      WHERE id = ?
+    `).run(carimbo, carimbo, req.params.id);
+    res.json({ ok: true, status: 'cancelado', motivo_registrado: motivo });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /boletins/aditivos/:id (apenas rascunho)
+router.delete('/aditivos/:id', async (req, res) => {
+  try {
+    const cur = await req.db.prepare('SELECT status FROM bol_aditivos WHERE id = ?').get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Aditivo não encontrado' });
+    if (cur.status !== 'rascunho') {
+      return res.status(409).json({ error: 'Só é permitido excluir aditivos em rascunho. Use cancelar para os outros estados.' });
+    }
+    await req.db.prepare('DELETE FROM bol_aditivos WHERE id = ?').run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /boletins/aditivos/:id/preview-impacto?competencia=YYYY-MM
+// Mostra qual seria o impacto do aditivo na próxima prévia
+router.get('/aditivos/:id/preview-impacto', async (req, res) => {
+  try {
+    const adit = await req.db.prepare(`
+      SELECT a.*, c.nome AS contrato_nome, c.numero_contrato
+      FROM bol_aditivos a
+      JOIN bol_contratos c ON c.id = a.contrato_id
+      WHERE a.id = ?
+    `).get(req.params.id);
+    if (!adit) return res.status(404).json({ error: 'Aditivo não encontrado' });
+
+    const comp = req.query.competencia || new Date().toISOString().slice(0,7);
+
+    // Pega último boletim do contrato pra projetar valor
+    const refBoletim = await req.db.prepare(`
+      SELECT competencia, total_geral FROM bol_boletins
+      WHERE contrato_id = ? ORDER BY competencia DESC LIMIT 1
+    `).get(adit.contrato_id);
+
+    const fator = Number(adit.fator || 1.0);
+    const valorBase = Number(refBoletim?.total_geral || 0);
+    const valorAjustado = adit.tipo === 'reajuste' ? valorBase * fator : valorBase;
+
+    res.json({
+      ok: true,
+      aditivo: adit,
+      preview: {
+        competencia: comp,
+        valor_base_referencia: valorBase,
+        ref_boletim_competencia: refBoletim?.competencia,
+        fator_aplicado: fator,
+        valor_apos_aditivo: valorAjustado,
+        diferenca: valorAjustado - valorBase,
+        diferenca_pct: valorBase > 0 ? +((valorAjustado - valorBase) / valorBase * 100).toFixed(2) : 0,
+      },
+      observacao: adit.tipo === 'reajuste'
+        ? `Reajuste de ${((fator - 1) * 100).toFixed(2)}% será aplicado à próxima prévia em ${comp}`
+        : `Aditivo do tipo ${adit.tipo} não altera valor diretamente (verifique itens)`
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── PRÉVIA — gera/atualiza boletim em estado 'previa' ─────────────
+// POST /boletins/previa
+// Body: { competencia: 'YYYY-MM', empresa?: 'seguranca' (opcional, usa req.companyKey),
+//         contrato_id?: N (filtra um contrato), apply: false (default dry-run) }
+//
+// Lógica:
+//   1. Para cada bol_contrato ATIVO (ou só o filtrado):
+//      a. Para cada bol_posto do contrato (ou linha única se sem posto):
+//         - Calcula valor base via SUM(bol_itens) ou fallback SUM(NFs)
+//         - Aplica aditivos validados/aplicados (fator multiplicativo)
+//         - Renderiza template_discriminacao (ou default sugerido)
+//      b. UPSERT em bol_boletins (contrato_id, posto_id, competencia)
+//         status='previa', expira_em=+7 d.u.
+//      c. Cria/atualiza linhas em bol_boletins_nfs_planejadas
+//
+// Retorna: { previas: [...], total_geral, total_nfs_planejadas }
+router.post('/previa', async (req, res) => {
+  try {
+    const { competencia, contrato_id, apply = false } = req.body || {};
+    if (!competencia || !/^\d{4}-\d{2}$/.test(competencia)) {
+      return res.status(400).json({ error: 'competencia (YYYY-MM) obrigatória' });
+    }
+
+    const db = req.db;
+    const usuario = req.user?.usuario || 'sistema';
+
+    // Calcular expiração: hoje + 7 dias úteis (pula sáb/dom)
+    function add7Du() {
+      const d = new Date();
+      let added = 0;
+      while (added < 7) {
+        d.setDate(d.getDate() + 1);
+        const dow = d.getDay();
+        if (dow !== 0 && dow !== 6) added++;
+      }
+      return d.toISOString().slice(0, 10);
+    }
+    const expiraEm = add7Du();
+
+    // Período ISO
+    const { inicio: periodoInicio, fim: periodoFim } = tplEngine.periodoDoMes(competencia);
+
+    // Buscar contratos ativos
+    let contratos;
+    if (contrato_id) {
+      contratos = await db.prepare('SELECT * FROM bol_contratos WHERE id = ? AND ativo = 1').all(Number(contrato_id));
+    } else {
+      contratos = await db.prepare('SELECT * FROM bol_contratos WHERE ativo = 1 ORDER BY id').all();
+    }
+
+    const previas = [];
+    let totalNfsPlanejadas = 0;
+
+    for (const c of contratos) {
+      // Pega postos do contrato
+      const postos = await db.prepare('SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem, id').all(c.id);
+      // Se não tem posto cadastrado, gera 1 boletim consolidado (posto_id=NULL)
+      const linhas = postos.length > 0 ? postos : [null];
+
+      for (const posto of linhas) {
+        // Calcular valor base
+        let valorBase = 0;
+        let origemValor = 'sem_ref';
+        let qtdNfs = 0;
+
+        if (posto) {
+          // Soma dos itens do posto (quando há cadastro estruturado)
+          const sumItens = await db.prepare(`
+            SELECT COALESCE(SUM(quantidade * valor_unitario), 0) AS total, COUNT(*) AS qtd
+            FROM bol_itens WHERE posto_id = ?
+          `).get(posto.id);
+          if (sumItens && Number(sumItens.total) > 0) {
+            valorBase = Number(sumItens.total);
+            origemValor = `sum_itens(${sumItens.qtd})`;
+          }
+        }
+
+        // Fallback: SUM das NFs do mês alvo via numero_contrato
+        if (!valorBase && c.numero_contrato && c.numero_contrato !== 'undefined') {
+          const sumNfs = await db.prepare(`
+            SELECT COALESCE(SUM(valor_bruto), 0) AS total, COUNT(*) AS qtd
+            FROM notas_fiscais
+            WHERE contrato_ref ILIKE @pat AND data_emissao LIKE @ym
+              AND COALESCE(status_conciliacao, '') NOT IN ('CANCELADA')
+          `).get({ pat: `%${c.numero_contrato}%`, ym: `${competencia}-%` });
+          if (sumNfs && Number(sumNfs.total) > 0) {
+            valorBase = Number(sumNfs.total);
+            origemValor = `sum_nfs(${sumNfs.qtd})`;
+            qtdNfs = sumNfs.qtd;
+          }
+        }
+
+        // Aplica aditivos
+        const aditResult = await aplicarAditivos(db, c.id, competencia, valorBase);
+        const valorFinal = aditResult.valor_final;
+
+        // Renderiza template
+        const template = c.template_discriminacao || tplEngine.sugerirTemplateDefault(c);
+        const ctx = tplEngine.buildContext({
+          contrato: c, posto, competencia, valor_total: valorFinal,
+        });
+        const discriminacaoRender = tplEngine.render(template, ctx);
+
+        previas.push({
+          contrato_id: c.id,
+          contrato_numero: c.numero_contrato,
+          contrato_nome: c.nome,
+          posto_id: posto?.id || null,
+          posto_nome: posto?.campus_nome || null,
+          posto_municipio: posto?.municipio || null,
+          competencia,
+          periodo_inicio: periodoInicio,
+          periodo_fim: periodoFim,
+          valor_base: valorBase,
+          origem_valor: origemValor,
+          qtd_nfs_referencia: qtdNfs,
+          aditivos_aplicados: aditResult.aditivos_aplicados,
+          valor_final: valorFinal,
+          template_renderizado: discriminacaoRender,
+          template_origem: c.template_discriminacao ? 'cadastrado' : 'default_sugerido',
+          expira_em: expiraEm,
+        });
+      }
+    }
+
+    if (!apply) {
+      return res.json({
+        ok: true,
+        modo: 'dry-run',
+        competencia,
+        total_previas: previas.length,
+        previas,
+      });
+    }
+
+    // APPLY: UPSERT em bol_boletins + NFs planejadas
+    let criados = 0, atualizados = 0;
+    const trans = db.transaction(async (tx) => {
+      const upsertBoletim = tx.prepare(`
+        INSERT INTO bol_boletins
+          (contrato_id, posto_id, competencia, data_emissao, periodo_inicio, periodo_fim,
+           status, total_geral, valor_base, glosas, acrescimos, nfse_status,
+           expira_em, template_renderizado)
+        VALUES
+          (@cid, @pid, @comp, @demit, @ini, @fim, 'previa', @tot, 0, 0, 0, 'PENDENTE',
+           @exp, @tpl)
+        ON CONFLICT (contrato_id, COALESCE(posto_id, 0), competencia) DO UPDATE SET
+          total_geral          = EXCLUDED.total_geral,
+          template_renderizado = EXCLUDED.template_renderizado,
+          expira_em            = EXCLUDED.expira_em,
+          status               = CASE WHEN bol_boletins.status IN ('previa', 'gerado', 'sem_nf') THEN 'previa' ELSE bol_boletins.status END,
+          updated_at           = NOW()
+        RETURNING id, (xmax = 0) AS inserted
+      `);
+      const insertNfPlanejada = tx.prepare(`
+        INSERT INTO bol_boletins_nfs_planejadas
+          (boletim_id, ordem, posto_id, descricao_template, valor, status)
+        VALUES (?, 1, ?, ?, ?, 'pendente')
+        ON CONFLICT DO NOTHING
+      `);
+      for (const p of previas) {
+        const r = await upsertBoletim.run({
+          cid: p.contrato_id, pid: p.posto_id, comp: p.competencia,
+          demit: p.periodo_fim, ini: p.periodo_inicio, fim: p.periodo_fim,
+          tot: p.valor_final, exp: p.expira_em, tpl: p.template_renderizado,
+        });
+        const boletimId = r.lastInsertRowid;
+        if (boletimId) {
+          // Garante 1 NF planejada por boletim (modelo 1:1 boletim:NF para DETRAN/UFT)
+          // Se já existia e tem nfse_numero, não toca (preserva)
+          const existing = await tx.prepare(`
+            SELECT id, nfse_numero FROM bol_boletins_nfs_planejadas
+            WHERE boletim_id = ? ORDER BY ordem LIMIT 1
+          `).get(boletimId);
+          if (!existing) {
+            await insertNfPlanejada.run(boletimId, p.posto_id, p.template_renderizado, p.valor_final);
+            totalNfsPlanejadas++;
+          } else if (!existing.nfse_numero) {
+            // Atualiza valor + descrição se ainda não emitiu
+            await tx.prepare(`
+              UPDATE bol_boletins_nfs_planejadas
+              SET valor = ?, descricao_template = ?, updated_at = NOW()
+              WHERE id = ?
+            `).run(p.valor_final, p.template_renderizado, existing.id);
+          }
+          if (r.changes > 0) criados++; else atualizados++;
+        }
+      }
+    });
+    await trans();
+
+    res.json({
+      ok: true,
+      modo: 'apply',
+      competencia,
+      criados,
+      atualizados,
+      total_previas: previas.length,
+      total_nfs_planejadas: totalNfsPlanejadas,
+      expira_em: expiraEm,
+    });
+  } catch (e) {
+    console.error('[POST /boletins/previa] erro:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── PRÉVIAS — listar / aprovar / cancelar ─────────────────────────
+
+// GET /boletins/previas?competencia=YYYY-MM&status=previa,aprovado
+// Lista boletins com NFs planejadas, filtrável por status (suporta CSV)
+router.get('/previas', async (req, res) => {
+  try {
+    const { competencia, status, contrato_id } = req.query;
+    const where = ['1=1'];
+    const params = [];
+    if (competencia) { where.push('bb.competencia = ?'); params.push(competencia); }
+    if (status) {
+      const list = String(status).split(',').map(s => s.trim()).filter(Boolean);
+      where.push(`bb.status IN (${list.map(() => '?').join(',')})`);
+      params.push(...list);
+    }
+    if (contrato_id) { where.push('bb.contrato_id = ?'); params.push(Number(contrato_id)); }
+
+    const rows = await req.db.prepare(`
+      SELECT bb.*, bc.nome AS contrato_nome, bc.numero_contrato,
+             bp.campus_nome AS posto_nome, bp.municipio AS posto_municipio
+      FROM bol_boletins bb
+      JOIN bol_contratos bc ON bc.id = bb.contrato_id
+      LEFT JOIN bol_postos bp ON bp.id = bb.posto_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY bb.competencia DESC, bc.nome, bp.ordem NULLS FIRST
+    `).all(...params);
+
+    // Anexa NFs planejadas
+    for (const r of rows) {
+      r.nfs_planejadas = await req.db.prepare(`
+        SELECT * FROM bol_boletins_nfs_planejadas WHERE boletim_id = ? ORDER BY ordem, id
+      `).all(r.id);
+    }
+
+    res.json({ ok: true, total: rows.length, data: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PATCH /boletins/:id/aprovar — financeiro aprova prévia para emissão
+// Body opcional: { observacao }
+router.patch('/:id([0-9]+)/aprovar', async (req, res) => {
+  try {
+    const cur = await req.db.prepare(`
+      SELECT bb.*, bc.nome AS contrato_nome FROM bol_boletins bb
+      JOIN bol_contratos bc ON bc.id = bb.contrato_id
+      WHERE bb.id = ?
+    `).get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Boletim não encontrado' });
+
+    if (cur.status !== 'previa') {
+      return res.status(409).json({
+        error: `Boletim está com status '${cur.status}'. Só prévias podem ser aprovadas.`
+      });
+    }
+    if (cur.expira_em && new Date(cur.expira_em) < new Date()) {
+      return res.status(409).json({
+        error: `Prévia expirada em ${cur.expira_em}. Gere uma nova prévia.`
+      });
+    }
+    if (Number(cur.total_geral || 0) <= 0) {
+      return res.status(409).json({
+        error: 'Não é possível aprovar prévia com valor zero. Verifique itens, NFs ou aditivos.'
+      });
+    }
+
+    // Permissão: role 'financeiro' ou 'admin'
+    const role = req.user?.role;
+    if (role && !['financeiro', 'admin'].includes(role)) {
+      return res.status(403).json({ error: 'Apenas usuários financeiro ou admin podem aprovar prévias.' });
+    }
+    const usuario = req.user?.usuario || 'sistema';
+
+    await req.db.prepare(`
+      UPDATE bol_boletins
+      SET status = 'aprovado_para_emissao',
+          aprovado_por = ?,
+          aprovado_em = NOW(),
+          updated_at = NOW()
+      WHERE id = ?
+    `).run(usuario, req.params.id);
+
+    // Marca aditivos do contrato como 'aplicado' (Q3 fluxo semi-automático)
+    await req.db.prepare(`
+      UPDATE bol_aditivos SET status = 'aplicado', updated_at = NOW()
+      WHERE contrato_id = ? AND status = 'validado'
+        AND vigencia_de <= ? AND (vigencia_ate IS NULL OR vigencia_ate >= ?)
+    `).run(Number(cur.contrato_id), cur.periodo_inicio, cur.periodo_inicio);
+
+    res.json({
+      ok: true,
+      id: Number(req.params.id),
+      novo_status: 'aprovado_para_emissao',
+      aprovado_por: usuario,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /boletins/aprovar-em-lote
+// Body: { ids: [1,2,3...], motivo?: '' }
+// Aprova múltiplos boletins em prévia em uma única transação.
+// P0-1 fix UX: bulk action — antes era 1 clique por boletim (134 cliques pra 67 boletins).
+router.post('/aprovar-em-lote', async (req, res) => {
+  try {
+    const { ids, motivo } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids (array) obrigatório' });
+    }
+    const role = req.user?.role;
+    if (role && !['financeiro', 'admin'].includes(role)) {
+      return res.status(403).json({ error: 'Apenas financeiro ou admin podem aprovar prévias.' });
+    }
+    const usuario = req.user?.usuario || 'sistema';
+
+    const resultados = { aprovados: 0, ignorados: 0, erros: [] };
+    const trans = req.db.transaction(async (tx) => {
+      for (const id of ids) {
+        const cur = await tx.prepare('SELECT * FROM bol_boletins WHERE id = ?').get(Number(id));
+        if (!cur) {
+          resultados.erros.push({ id, motivo: 'não encontrado' });
+          continue;
+        }
+        if (cur.status !== 'previa') {
+          resultados.ignorados++;
+          continue;
+        }
+        if (cur.expira_em && new Date(cur.expira_em) < new Date()) {
+          resultados.erros.push({ id, motivo: `expirada em ${cur.expira_em}` });
+          continue;
+        }
+        if (Number(cur.total_geral || 0) <= 0) {
+          resultados.erros.push({ id, motivo: 'valor zero' });
+          continue;
+        }
+        await tx.prepare(`
+          UPDATE bol_boletins
+          SET status = 'aprovado_para_emissao',
+              aprovado_por = ?, aprovado_em = NOW(),
+              obs = COALESCE(NULLIF(?, ''), obs),
+              updated_at = NOW()
+          WHERE id = ?
+        `).run(usuario, motivo || '', Number(id));
+        // Marca aditivos validados como aplicados
+        await tx.prepare(`
+          UPDATE bol_aditivos SET status = 'aplicado', updated_at = NOW()
+          WHERE contrato_id = ? AND status = 'validado'
+            AND vigencia_de <= ? AND (vigencia_ate IS NULL OR vigencia_ate >= ?)
+        `).run(Number(cur.contrato_id), cur.periodo_inicio, cur.periodo_inicio);
+        resultados.aprovados++;
+      }
+    });
+    await trans();
+
+    res.json({ ok: true, ...resultados, total_processados: ids.length });
+  } catch (e) {
+    console.error('[POST /boletins/aprovar-em-lote] erro:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /boletins/emitir-lote
+// Body: { ids: [1,2,3...] }
+// Dispara emissão de múltiplos boletins em sequência (não paralelo, pra
+// não sobrecarregar WebISS). Cada job individual é registrado em _emissaoJobs.
+// Retorna { jobs: [{id, total_nfs}], sse_url_geral: '...' }
+router.post('/emitir-lote', async (req, res) => {
+  try {
+    const { ids } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids (array) obrigatório' });
+    }
+    const role = req.user?.role;
+    if (role && !['financeiro', 'admin'].includes(role)) {
+      return res.status(403).json({ error: 'Apenas financeiro ou admin podem emitir.' });
+    }
+    const usuario = req.user?.usuario || 'sistema';
+
+    // Valida cada um
+    const aceitos = [];
+    const recusados = [];
+    for (const id of ids) {
+      const cur = await req.db.prepare('SELECT id, status FROM bol_boletins WHERE id = ?').get(Number(id));
+      if (!cur) { recusados.push({ id, motivo: 'não encontrado' }); continue; }
+      if (cur.status !== 'aprovado_para_emissao') { recusados.push({ id, motivo: `status ${cur.status}` }); continue; }
+      if (_emissaoJobs.has(Number(id))) { recusados.push({ id, motivo: 'emissão já em andamento' }); continue; }
+      aceitos.push(Number(id));
+    }
+
+    if (aceitos.length === 0) {
+      return res.status(409).json({ error: 'Nenhum boletim apto pra emissão', recusados });
+    }
+
+    // Pra cada aceito, dispara processarEmissao em sequência (sem paralelismo,
+    // pra não sobrecarregar WebISS). O usuário acompanha por boletim individual.
+    const dbRef = req.db;
+    const companyKey = req.companyKey;
+
+    // Marca todos como 'emitindo' e enfileira
+    for (const id of aceitos) {
+      const nfs = await dbRef.prepare(`
+        SELECT * FROM bol_boletins_nfs_planejadas
+        WHERE boletim_id = ? AND status = 'pendente'
+        ORDER BY ordem, id
+      `).all(id);
+      if (nfs.length === 0) continue;
+      _emissaoJobs.set(id, {
+        listeners: new Set(), started_at: new Date(), by: usuario,
+        total: nfs.length, processed: 0, sucesso: 0, erros: 0,
+      });
+      await dbRef.prepare(`UPDATE bol_boletins SET status = 'emitindo', updated_at = NOW() WHERE id = ?`).run(id);
+
+      // Dispara em background (cada boletim independente — o WebISS não suporta paralelismo
+      // efetivo por causa de mTLS + fila interna deles)
+      setImmediate(() => processarEmissao(dbRef, companyKey, id, nfs, usuario)
+        .catch(err => {
+          console.error(`[boletins/emitir-lote job=${id}] erro fatal:`, err.message);
+          _emissaoEmit(id, { type: 'fatal', erro: err.message });
+        }));
+    }
+
+    res.json({
+      ok: true,
+      total_aceitos: aceitos.length,
+      total_recusados: recusados.length,
+      aceitos,
+      recusados,
+      sse_urls: aceitos.map(id => `/api/boletins/${id}/emissao-status`),
+    });
+  } catch (e) {
+    console.error('[POST /boletins/emitir-lote] erro:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PATCH /boletins/:id/cancelar-previa — desfaz prévia (volta a 'cancelado')
+// Body: { motivo: 'descrição do motivo' } — P0-7 fix: obrigatório pra audit fiscal
+router.patch('/:id([0-9]+)/cancelar-previa', async (req, res) => {
+  try {
+    const motivo = (req.body?.motivo || '').trim();
+    if (!motivo || motivo.length < 5) {
+      return res.status(400).json({ error: 'Motivo obrigatório (mínimo 5 caracteres) para audit fiscal.' });
+    }
+
+    const cur = await req.db.prepare('SELECT * FROM bol_boletins WHERE id = ?').get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Boletim não encontrado' });
+    if (!['previa', 'aprovado_para_emissao'].includes(cur.status)) {
+      return res.status(409).json({ error: `Não pode cancelar prévia em status '${cur.status}'` });
+    }
+    // Se já tem NF emitida em algum item planejado, bloqueia
+    const temEmitida = await req.db.prepare(`
+      SELECT COUNT(*) AS n FROM bol_boletins_nfs_planejadas
+      WHERE boletim_id = ? AND status = 'emitida'
+    `).get(req.params.id);
+    if (temEmitida.n > 0) {
+      return res.status(409).json({
+        error: `Boletim tem ${temEmitida.n} NF(s) já emitidas. Cancele as NFs no WebISS antes.`
+      });
+    }
+
+    const usuario = req.user?.usuario || 'sistema';
+    const carimbo = `[${new Date().toISOString().slice(0,16)} ${usuario}] ${motivo}`;
+
+    await req.db.prepare(`
+      UPDATE bol_boletins SET
+        status = 'cancelado',
+        obs = CASE WHEN obs IS NULL OR obs = '' THEN ? ELSE obs || E'\\n' || ? END,
+        updated_at = NOW()
+      WHERE id = ?
+    `).run(carimbo, carimbo, req.params.id);
+    res.json({ ok: true, novo_status: 'cancelado', motivo_registrado: motivo });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PATCH /boletins/nfs-planejadas/:id — edita override Q7 antes da emissão
+// Body: { descricao_override?, valor? }
+router.patch('/nfs-planejadas/:id([0-9]+)', async (req, res) => {
+  try {
+    const cur = await req.db.prepare(`
+      SELECT np.*, bb.status AS boletim_status FROM bol_boletins_nfs_planejadas np
+      JOIN bol_boletins bb ON bb.id = np.boletim_id
+      WHERE np.id = ?
+    `).get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'NF planejada não encontrada' });
+
+    if (cur.status === 'emitida') {
+      return res.status(409).json({ error: 'NF já emitida, não pode mais ser editada' });
+    }
+    if (!['previa', 'aprovado_para_emissao'].includes(cur.boletim_status)) {
+      return res.status(409).json({ error: `Boletim está '${cur.boletim_status}', não permite edição` });
+    }
+
+    const b = req.body || {};
+    await req.db.prepare(`
+      UPDATE bol_boletins_nfs_planejadas SET
+        descricao_override = COALESCE(?, descricao_override),
+        valor              = COALESCE(?, valor),
+        updated_at         = NOW()
+      WHERE id = ?
+    `).run(
+      b.descricao_override !== undefined ? b.descricao_override : null,
+      b.valor !== undefined ? Number(b.valor) : null,
+      req.params.id
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /boletins/nfs-planejadas/:id — exclui uma NF da prévia (antes de aprovar)
+router.delete('/nfs-planejadas/:id([0-9]+)', async (req, res) => {
+  try {
+    const cur = await req.db.prepare(`
+      SELECT np.status, bb.status AS boletim_status
+      FROM bol_boletins_nfs_planejadas np
+      JOIN bol_boletins bb ON bb.id = np.boletim_id
+      WHERE np.id = ?
+    `).get(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'NF planejada não encontrada' });
+    if (cur.status === 'emitida') return res.status(409).json({ error: 'NF já emitida, não pode ser removida' });
+    if (cur.boletim_status === 'aprovado_para_emissao') {
+      return res.status(409).json({ error: 'Boletim já aprovado, não permite remover NFs. Cancele a prévia primeiro.' });
+    }
+    await req.db.prepare('DELETE FROM bol_boletins_nfs_planejadas WHERE id = ?').run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── EMISSÃO ASSÍNCRONA NFS-e (Fase 5) ─────────────────────────────
+// Modelo: cliente faz POST → resposta imediata com job_id, depois
+//         conecta em GET /:id/emissao-status (SSE) para acompanhar.
+
+// Estado in-memory dos jobs de emissão (vive por execução do node).
+// Se pm2 reiniciar, jobs ativos perdem state — clientes reconectam e
+// veem status final lido do banco (bol_boletins_nfs_planejadas.status).
+const _emissaoJobs = new Map(); // boletim_id → { listeners: Set<res>, started_at, by }
+
+function _emissaoEmit(boletimId, evt) {
+  const job = _emissaoJobs.get(boletimId);
+  if (!job) return;
+  const payload = `event: ${evt.type}\ndata: ${JSON.stringify(evt)}\n\n`;
+  for (const res of job.listeners) {
+    try { res.write(payload); } catch (_) {}
+  }
+}
+
+// POST /boletins/:id/emitir-nfs — dispara emissão em background
+// Body opcional: { force_retry: false } (re-tenta NFs com status 'erro')
+router.post('/:id([0-9]+)/emitir-nfs', async (req, res) => {
+  try {
+    const boletimId = Number(req.params.id);
+    const cur = await req.db.prepare(`
+      SELECT bb.*, bc.nome AS contrato_nome, bc.numero_contrato
+      FROM bol_boletins bb
+      JOIN bol_contratos bc ON bc.id = bb.contrato_id
+      WHERE bb.id = ?
+    `).get(boletimId);
+    if (!cur) return res.status(404).json({ error: 'Boletim não encontrado' });
+
+    if (cur.status !== 'aprovado_para_emissao') {
+      return res.status(409).json({
+        error: `Boletim está '${cur.status}'. Apenas 'aprovado_para_emissao' pode emitir.`
+      });
+    }
+
+    if (_emissaoJobs.has(boletimId)) {
+      return res.status(409).json({ error: 'Emissão já em andamento para este boletim. Use o endpoint de status.' });
+    }
+
+    const forceRetry = !!(req.body && req.body.force_retry);
+    const where = forceRetry ? `status IN ('pendente', 'erro')` : `status = 'pendente'`;
+    const nfsParaEmitir = await req.db.prepare(`
+      SELECT * FROM bol_boletins_nfs_planejadas
+      WHERE boletim_id = ? AND ${where}
+      ORDER BY ordem, id
+    `).all(boletimId);
+
+    if (nfsParaEmitir.length === 0) {
+      return res.status(409).json({ error: 'Nenhuma NF pendente para emitir neste boletim.' });
+    }
+
+    const usuario = req.user?.usuario || 'sistema';
+    _emissaoJobs.set(boletimId, {
+      listeners: new Set(),
+      started_at: new Date(),
+      by: usuario,
+      total: nfsParaEmitir.length,
+      processed: 0,
+      sucesso: 0,
+      erros: 0,
+    });
+
+    // Marca status do boletim
+    await req.db.prepare(`UPDATE bol_boletins SET status = 'emitindo', updated_at = NOW() WHERE id = ?`).run(boletimId);
+
+    // Resposta imediata
+    res.json({
+      ok: true,
+      job_id: boletimId,
+      total_nfs: nfsParaEmitir.length,
+      sse_url: `/api/boletins/${boletimId}/emissao-status`,
+    });
+
+    // Processa em background (não bloqueia resposta)
+    setImmediate(() => processarEmissao(req.db, req.companyKey, boletimId, nfsParaEmitir, usuario)
+      .catch(err => {
+        console.error(`[boletins/emitir-nfs job=${boletimId}] erro fatal:`, err.message);
+        _emissaoEmit(boletimId, { type: 'fatal', erro: err.message });
+      }));
+  } catch (e) {
+    console.error('[POST /boletins/:id/emitir-nfs] erro:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Processa emissão NF-a-NF, emitindo eventos SSE
+async function processarEmissao(db, companyKey, boletimId, nfsParaEmitir, usuario) {
+  // Carrega WebISS dinamicamente (evita ciclo de dependência)
+  // Em produção, /webiss/emitir está em src/routes/webiss.js — chamamos via HTTP local.
+  // Aqui usamos a rota interna via fetch local pra reaproveitar a lógica de assinatura A1.
+  const http = require('http');
+  const PORT = process.env.PORT || 3002;
+
+  for (const nfp of nfsParaEmitir) {
+    _emissaoEmit(boletimId, { type: 'progress', status: 'emitindo', nf_planejada_id: nfp.id, ordem: nfp.ordem });
+
+    await db.prepare(`
+      UPDATE bol_boletins_nfs_planejadas
+      SET status = 'emitindo', tentativas = tentativas + 1, updated_at = NOW()
+      WHERE id = ?
+    `).run(nfp.id);
+
+    try {
+      // Carrega contexto: contrato + posto + tomador
+      const boletim = await db.prepare(`
+        SELECT bb.*, bc.nome AS contrato_nome, bc.numero_contrato, bc.contratante,
+               bc.empresa_razao, bc.empresa_cnpj, bc.processo, bc.pregao, bc.orgao
+        FROM bol_boletins bb JOIN bol_contratos bc ON bc.id = bb.contrato_id
+        WHERE bb.id = ?
+      `).get(boletimId);
+
+      // RPS sequencial — usa nfp.id para ter idempotência se WebISS retornar timeout
+      const rpsNumero = nfp.rps_numero || `${boletimId}-${nfp.id}`;
+      const descricao = nfp.descricao_override || nfp.descricao_template || '';
+      const valor = Number(nfp.valor || 0);
+
+      // Body para /webiss/emitir
+      const body = {
+        rps: {
+          numero: rpsNumero,
+          serie: nfp.rps_serie || 'NFSE',
+          tipo: 1,
+          dataEmissao: new Date().toISOString().slice(0, 10),
+          competencia: boletim.competencia + '-01',
+          servico: {
+            valorServicos: valor,
+            valorDeducoes: 0,
+            issRetido: true,                 // padrão Montana: ISS retido pelo tomador
+            valorIss: +(valor * 0.05).toFixed(2),
+            aliquota: 5.0,
+            itemLista: '07.10',              // Limpeza/Vigilância — códigos ABRASF
+            codTributacao: '07.10',
+            discriminacao: descricao,
+            exigibilidadeIss: 1,
+          },
+          tomador: {
+            cnpj: boletim.orgao || '',
+            razaoSocial: boletim.contratante || '',
+          },
+        },
+      };
+
+      // Chama /webiss/emitir via HTTP local
+      const resp = await new Promise((resolve, reject) => {
+        const data = JSON.stringify(body);
+        const reqLocal = http.request({
+          hostname: '127.0.0.1', port: PORT, path: '/api/webiss/emitir',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(data),
+            'X-Empresa': companyKey,
+            'X-Internal-Bypass-Auth': 'montana-internal-' + (process.env.JWT_SECRET || 'montana'),
+          },
+        }, r => {
+          let buf = '';
+          r.on('data', c => buf += c);
+          r.on('end', () => {
+            try { resolve({ status: r.statusCode, json: JSON.parse(buf) }); }
+            catch { resolve({ status: r.statusCode, json: { erro: buf } }); }
+          });
+        });
+        reqLocal.on('error', reject);
+        reqLocal.write(data);
+        reqLocal.end();
+      });
+
+      if (resp.status >= 200 && resp.status < 300 && resp.json?.ok && resp.json?.nfse?.numero) {
+        const nfse = resp.json.nfse;
+        await db.prepare(`
+          UPDATE bol_boletins_nfs_planejadas SET
+            status = 'emitida',
+            nfse_numero = ?,
+            nfse_data_emissao = NOW(),
+            rps_numero = ?,
+            emitida_em = NOW(),
+            emitida_por = ?,
+            erro_mensagem = NULL,
+            updated_at = NOW()
+          WHERE id = ?
+        `).run(nfse.numero, rpsNumero, usuario, nfp.id);
+
+        const job = _emissaoJobs.get(boletimId);
+        if (job) job.sucesso++;
+        _emissaoEmit(boletimId, {
+          type: 'progress', status: 'emitida',
+          nf_planejada_id: nfp.id, nfse_numero: nfse.numero, valor,
+        });
+      } else {
+        const erroMsg = resp.json?.error || resp.json?.erro || JSON.stringify(resp.json?.erros || resp.json).slice(0, 500);
+        await db.prepare(`
+          UPDATE bol_boletins_nfs_planejadas SET
+            status = 'erro', erro_mensagem = ?, updated_at = NOW()
+          WHERE id = ?
+        `).run(erroMsg, nfp.id);
+        const job = _emissaoJobs.get(boletimId);
+        if (job) job.erros++;
+        _emissaoEmit(boletimId, { type: 'progress', status: 'erro', nf_planejada_id: nfp.id, erro: erroMsg });
+      }
+    } catch (e) {
+      await db.prepare(`
+        UPDATE bol_boletins_nfs_planejadas SET status = 'erro', erro_mensagem = ?, updated_at = NOW()
+        WHERE id = ?
+      `).run(e.message, nfp.id);
+      const job = _emissaoJobs.get(boletimId);
+      if (job) job.erros++;
+      _emissaoEmit(boletimId, { type: 'progress', status: 'erro', nf_planejada_id: nfp.id, erro: e.message });
+    }
+
+    const job = _emissaoJobs.get(boletimId);
+    if (job) job.processed++;
+  }
+
+  // Conclusão: atualiza status do boletim
+  const stats = await db.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      COUNT(*) FILTER (WHERE status = 'emitida')   AS emitidas,
+      COUNT(*) FILTER (WHERE status = 'erro')      AS erros,
+      COUNT(*) FILTER (WHERE status = 'pendente')  AS pendentes
+    FROM bol_boletins_nfs_planejadas WHERE boletim_id = ?
+  `).get(boletimId);
+
+  let novoStatus = 'emitido';
+  if (stats.erros > 0 && stats.emitidas === 0) novoStatus = 'erro_emissao';
+  else if (stats.erros > 0) novoStatus = 'emitido';   // parcial = considera emitido (com erros)
+  else if (stats.pendentes > 0) novoStatus = 'aprovado_para_emissao'; // ainda tem pendente
+
+  await db.prepare(`UPDATE bol_boletins SET status = ?, updated_at = NOW() WHERE id = ?`).run(novoStatus, boletimId);
+
+  _emissaoEmit(boletimId, { type: 'done', status_boletim: novoStatus, ...stats });
+
+  // Cleanup do job (mantém por 60s pra clientes lentos terem tempo de receber)
+  setTimeout(() => {
+    const job = _emissaoJobs.get(boletimId);
+    if (job) {
+      for (const r of job.listeners) try { r.end(); } catch (_) {}
+      _emissaoJobs.delete(boletimId);
+    }
+  }, 60000);
+}
+
+// GET /boletins/:id/emissao-status — SSE stream do progresso
+router.get('/:id([0-9]+)/emissao-status', async (req, res) => {
+  const boletimId = Number(req.params.id);
+
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',  // Nginx: desabilita buffer
+  });
+  res.flushHeaders?.();
+
+  // Estado inicial
+  const boletim = await req.db.prepare('SELECT status FROM bol_boletins WHERE id = ?').get(boletimId);
+  const stats = await req.db.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      COUNT(*) FILTER (WHERE status = 'emitida')  AS emitidas,
+      COUNT(*) FILTER (WHERE status = 'erro')     AS erros,
+      COUNT(*) FILTER (WHERE status = 'pendente') AS pendentes,
+      COUNT(*) FILTER (WHERE status = 'emitindo') AS emitindo
+    FROM bol_boletins_nfs_planejadas WHERE boletim_id = ?
+  `).get(boletimId);
+  res.write(`event: snapshot\ndata: ${JSON.stringify({ status_boletim: boletim?.status, ...stats })}\n\n`);
+
+  // Se já tá tudo concluído, encerra
+  if (!_emissaoJobs.has(boletimId)) {
+    res.write(`event: done\ndata: ${JSON.stringify({ reason: 'no-active-job', ...stats })}\n\n`);
+    return res.end();
+  }
+
+  // Adiciona listener
+  const job = _emissaoJobs.get(boletimId);
+  job.listeners.add(res);
+
+  // Cleanup ao desconectar
+  req.on('close', () => {
+    job.listeners.delete(res);
+  });
+});
+
+// ─── HELPER: aplica aditivos sobre um valor base ──────────────────
+// Exportado pra usar em /boletins/previa (Fase 3)
+async function aplicarAditivos(db, contratoId, competencia, valorBase) {
+  // Pega aditivos VALIDADOS ou APLICADOS cuja vigência cobre a competência
+  const compInicio = `${competencia}-01`;
+  const aditivos = await db.prepare(`
+    SELECT * FROM bol_aditivos
+    WHERE contrato_id = ?
+      AND status IN ('validado', 'aplicado')
+      AND vigencia_de <= ?
+      AND (vigencia_ate IS NULL OR vigencia_ate >= ?)
+    ORDER BY vigencia_de
+  `).all(Number(contratoId), compInicio, compInicio);
+
+  let valor = Number(valorBase || 0);
+  const aplicados = [];
+  for (const a of aditivos) {
+    if (a.tipo === 'reajuste') {
+      const novo = valor * Number(a.fator || 1.0);
+      aplicados.push({
+        aditivo_id: a.id, tipo: a.tipo, fator: Number(a.fator),
+        antes: valor, depois: novo, base_legal: a.base_legal,
+      });
+      valor = novo;
+    } else {
+      aplicados.push({
+        aditivo_id: a.id, tipo: a.tipo, fator: 1.0,
+        antes: valor, depois: valor, base_legal: a.base_legal,
+        observacao: 'Tipo não-multiplicativo, valor preservado',
+      });
+    }
+  }
+  return { valor_final: valor, aditivos_aplicados: aplicados };
+}
+
+// Expor pro módulo (Fase 3 vai usar)
+router.aplicarAditivos = aplicarAditivos;
 
 module.exports = router;

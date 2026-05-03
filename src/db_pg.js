@@ -10,8 +10,18 @@
  */
 'use strict';
 
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
 const COMPANIES = require('./companies');
+
+// ─── Type parsers ──────────────────────────────────────────────
+// PG retorna NUMERIC/DECIMAL como STRING por default (preserva precisão).
+// O codebase legado (vindo de SQLite) trata esses campos como Number e usa
+// .toFixed(2) em vários lugares. Para compatibilidade, parseamos NUMERIC e
+// BIGINT como float/int. Precisão extrema (>15 dígitos) é improvável aqui —
+// valores monetários em centavos cabem folgadamente em IEEE 754 double.
+//   NUMERIC = OID 1700, BIGINT = OID 20, INT8 = 20
+types.setTypeParser(1700, v => v === null ? null : parseFloat(v));
+types.setTypeParser(20,   v => v === null ? null : parseInt(v, 10));
 
 // ── Pool por empresa ────────────────────────────────────────────
 const _pools = new Map();
@@ -28,22 +38,40 @@ const PG_CONF = {
 };
 
 // ── Conversão SQL: SQLite → PostgreSQL ──────────────────────────
+// IMPORTANTE: INSERT OR REPLACE NÃO é mais convertido automaticamente.
+// A semântica anterior (→ ON CONFLICT DO NOTHING) era oposta à esperada
+// e causava perda silenciosa de updates. Cada caso deve ser convertido
+// manualmente para `ON CONFLICT (col) DO UPDATE SET ...`.
 function convertSql(sql) {
+  // P0: detecta INSERT OR REPLACE residual e dispara erro claro
+  if (/INSERT\s+OR\s+REPLACE/i.test(sql)) {
+    const trecho = sql.replace(/\s+/g, ' ').slice(0, 200);
+    throw new Error(
+      `[db_pg] INSERT OR REPLACE não é suportado no PostgreSQL. ` +
+      `Converta manualmente para "ON CONFLICT (coluna) DO UPDATE SET ...". ` +
+      `Trecho: ${trecho}`
+    );
+  }
   return sql
     // datetime('now') e datetime("now") → NOW()
     .replace(/datetime\(['"']now['"']\)/gi, 'NOW()')
+    // date('now', '-365 days') → (CURRENT_DATE + INTERVAL '-365 days')
+    // Também aceita 'months'/'years'/'day'/'month'/'year'.
+    .replace(
+      /date\s*\(\s*['"]now['"]\s*,\s*['"]\s*([+-]?\d+)\s+(day|days|month|months|year|years)\s*['"]\s*\)/gi,
+      "(CURRENT_DATE + INTERVAL '$1 $2')"
+    )
+    // date('now') sozinho → CURRENT_DATE
+    .replace(/date\s*\(\s*['"]now['"]\s*\)/gi, 'CURRENT_DATE')
     // strftime('%Y-%m', campo) → to_char(campo, 'YYYY-MM')
     .replace(/strftime\s*\(\s*'%Y-%m'\s*,\s*/gi, "to_char(")
     .replace(/strftime\s*\(\s*'%Y'\s*,\s*/gi,    "to_char(")
     .replace(/strftime\s*\(\s*'%m'\s*,\s*/gi,    "to_char(")
     .replace(/strftime\s*\(\s*'%d'\s*,\s*/gi,    "to_char(")
-    // Corrige o segundo argumento do to_char (não tem o formato ainda)
-    // INSERT OR IGNORE INTO → INSERT INTO ... ON CONFLICT DO NOTHING
+    // INSERT OR IGNORE INTO → INSERT INTO (+ ON CONFLICT DO NOTHING via finalizeInsert)
     .replace(/INSERT\s+OR\s+IGNORE\s+INTO/gi, 'INSERT INTO')
-    .replace(/INSERT\s+OR\s+REPLACE\s+INTO/gi, 'INSERT INTO')
     // AUTOINCREMENT → (PG usa SERIAL/BIGSERIAL no schema, ignorar em queries)
     .replace(/AUTOINCREMENT/gi, '')
-    // Tipo INTEGER PRIMARY KEY → já tratado no schema
     // PRAGMA → ignorar (não deve aparecer em queries runtime)
     .replace(/PRAGMA\s+\w+\s*=\s*\w+;?/gi, '')
     // Trim extra spaces
@@ -107,10 +135,12 @@ function buildQuery(rawSql, params) {
 }
 
 // ── Adiciona ON CONFLICT DO NOTHING se foi INSERT OR IGNORE ─────
+// NOTA: INSERT OR REPLACE foi removido daqui — a semântica DO NOTHING
+// era oposta à do SQLite e causava perda de updates. Os calls residuais
+// passam a falhar em convertSql() com mensagem explicativa.
 function finalizeInsert(sql, rawSql) {
   const wasIgnore = /INSERT\s+OR\s+IGNORE/i.test(rawSql);
-  const wasReplace = /INSERT\s+OR\s+REPLACE/i.test(rawSql);
-  if ((wasIgnore || wasReplace) && !/ON CONFLICT/i.test(sql)) {
+  if (wasIgnore && !/ON CONFLICT/i.test(sql)) {
     return sql + ' ON CONFLICT DO NOTHING';
   }
   return sql;
@@ -141,6 +171,27 @@ class PgDb {
       return args; // varargs → trata como array posicional
     };
 
+    // Compat case-sensitivity PostgreSQL: PG normaliza identificadores não-quoted
+    // para lowercase, então `SELECT numContrato` retorna chave `numcontrato`. Como
+    // o codebase legado (vindo de SQLite) usa camelCase em vários lugares
+    // (numContrato, dataEmissao, contratoRef), adicionamos os aliases camelCase
+    // automaticamente em qualquer linha de resultado. É idempotente — só cria a
+    // chave se ela não existir.
+    const PG_LOWERCASE_ALIASES = {
+      numcontrato:  'numContrato',
+      // Adicionar aqui outras colunas camelCase do schema legado se aparecerem.
+    };
+    const augmentRow = (row) => {
+      if (!row || typeof row !== 'object') return row;
+      for (const lower in PG_LOWERCASE_ALIASES) {
+        if (row[lower] !== undefined && row[PG_LOWERCASE_ALIASES[lower]] === undefined) {
+          row[PG_LOWERCASE_ALIASES[lower]] = row[lower];
+        }
+      }
+      return row;
+    };
+    const augmentRows = (rows) => Array.isArray(rows) ? rows.map(augmentRow) : rows;
+
     return {
       /** SELECT que retorna 1 linha (ou null) */
       async get(...args) {
@@ -148,7 +199,7 @@ class PgDb {
         const { sql, values } = buildQuery(rawSql, params);
         try {
           const res = await exec.query(sql, values);
-          return res.rows[0] || null;
+          return augmentRow(res.rows[0]) || null;
         } catch (e) {
           _logQueryError(e, sql, values);
           throw e;
@@ -161,7 +212,7 @@ class PgDb {
         const { sql, values } = buildQuery(rawSql, params);
         try {
           const res = await exec.query(sql, values);
-          return res.rows;
+          return augmentRows(res.rows);
         } catch (e) {
           _logQueryError(e, sql, values);
           throw e;
@@ -258,6 +309,32 @@ function _logQueryError(e, sql, values) {
 }
 
 // ── Factory: retorna PgDb por empresa ───────────────────────────
+// FIX 2026-04: safe_date agora aceita formatos brasileiros DD/MM/YYYY
+// (cadastro legado tem datas como "04/01/2026", "15/03/2027" etc.).
+// Tenta na ordem: ISO (YYYY-MM-DD) → DD/MM/YYYY → DD-MM-YYYY → ano só (YYYY).
+// Se nada bater, retorna NULL.
+const SAFE_DATE_DDL = `CREATE OR REPLACE FUNCTION safe_date(txt TEXT) RETURNS DATE AS $$
+BEGIN
+  IF txt IS NULL OR txt = '' THEN RETURN NULL; END IF;
+  -- Formato ISO YYYY-MM-DD ou YYYY/MM/DD
+  IF txt ~ '^\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}' THEN
+    BEGIN RETURN to_date(substring(txt FROM 1 FOR 10), 'YYYY-MM-DD'); EXCEPTION WHEN OTHERS THEN NULL; END;
+    BEGIN RETURN to_date(substring(txt FROM 1 FOR 10), 'YYYY/MM/DD'); EXCEPTION WHEN OTHERS THEN NULL; END;
+  END IF;
+  -- Formato BR DD/MM/YYYY ou DD-MM-YYYY
+  IF txt ~ '^\\d{1,2}[/-]\\d{1,2}[/-]\\d{4}' THEN
+    BEGIN RETURN to_date(substring(txt FROM 1 FOR 10), 'DD/MM/YYYY'); EXCEPTION WHEN OTHERS THEN NULL; END;
+    BEGIN RETURN to_date(substring(txt FROM 1 FOR 10), 'DD-MM-YYYY'); EXCEPTION WHEN OTHERS THEN NULL; END;
+  END IF;
+  -- Só ano (YYYY) — assume 31/12 do ano para vigências
+  IF txt ~ '^\\d{4}$' THEN
+    BEGIN RETURN to_date(txt || '-12-31', 'YYYY-MM-DD'); EXCEPTION WHEN OTHERS THEN NULL; END;
+  END IF;
+  -- Fallback: tenta cast direto (compat com versão anterior)
+  BEGIN RETURN txt::DATE; EXCEPTION WHEN OTHERS THEN RETURN NULL; END;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE`;
+
 function getDb(companyKey) {
   if (!COMPANIES[companyKey]) throw new Error('Empresa desconhecida: ' + companyKey);
   if (_pools.has(companyKey)) return _pools.get(companyKey);
@@ -274,6 +351,12 @@ function getDb(companyKey) {
 
   pool.on('connect', () => {
     // já configurado via options no connect string
+  });
+
+  // Cria a função safe_date() no schema da empresa (idempotente).
+  // Substitui a builtin do SQLite usada em 10+ queries (segura contra strings inválidas).
+  pool.query(SAFE_DATE_DDL).catch(e => {
+    console.error(`[db_pg][${companyKey}] safe_date init falhou:`, e.message);
   });
 
   const db = new PgDb(companyKey, pool);

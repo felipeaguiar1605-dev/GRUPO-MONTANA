@@ -21,7 +21,7 @@ router.get('/projecao', async (req, res) => {
       periodicidade: req.query.periodicidade || 'mensal',
       incluir_itens: req.query.incluir_itens === '1' || req.query.incluir_itens === 'true',
     };
-    const r = fc.projecaoFluxoCaixa(req.db, req.company, opts);
+    const r = await fc.projecaoFluxoCaixa(req.db, req.company, opts);
     res.json({ ok: true, ...r });
   } catch (e) {
     console.error('[fluxo-caixa-projetado]', e);
@@ -32,7 +32,7 @@ router.get('/projecao', async (req, res) => {
 router.get('/projecao/entradas', async (req, res) => {
   try {
     const dias = req.query.dias ? Number(req.query.dias) : 90;
-    const itens = fc.projectarEntradas(req.db, dias);
+    const itens = await fc.projectarEntradas(req.db, dias);
     res.json({ ok: true, total: itens.length, itens });
   } catch (e) { res.status(500).json({ ok: false, erro: e.message }); }
 });
@@ -40,14 +40,14 @@ router.get('/projecao/entradas', async (req, res) => {
 router.get('/projecao/saidas', async (req, res) => {
   try {
     const dias = req.query.dias ? Number(req.query.dias) : 90;
-    const itens = fc.projectarSaidas(req.db, dias);
+    const itens = await fc.projectarSaidas(req.db, dias);
     res.json({ ok: true, total: itens.length, itens });
   } catch (e) { res.status(500).json({ ok: false, erro: e.message }); }
 });
 
 router.get('/projecao/slas', async (req, res) => {
   try {
-    const slas = fc.calcularSLAs(req.db);
+    const slas = await fc.calcularSLAs(req.db);
     res.json({ ok: true, slas: Object.fromEntries(slas) });
   } catch (e) { res.status(500).json({ ok: false, erro: e.message }); }
 });

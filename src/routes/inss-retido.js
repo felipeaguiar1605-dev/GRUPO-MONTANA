@@ -185,6 +185,7 @@ router.post('/dctfweb', async (req, res) => {
     await db.prepare(`
       INSERT INTO configuracoes (chave, valor, updated_at)
       VALUES (?, ?, NOW())
+      ON CONFLICT (chave) DO UPDATE SET valor=EXCLUDED.valor, updated_at=NOW()
     `).run(`inss_dctfweb_${p.novo}`, String(v));
 
     res.json({ ok: true, competencia: p.novo, valor: v });

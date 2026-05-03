@@ -2272,9 +2272,15 @@ async function loadRHFuncionarios() {
   _rhFuncionarios = data;
 
   // KPIs
-  const ativos   = data.filter(f => f.status === 'ATIVO').length;
-  const demitidos = data.filter(f => f.status === 'DEMITIDO').length;
-  const totalSalarios = data.filter(f => f.status === 'ATIVO').reduce((s, f) => s + (f.salario_base || 0), 0);
+  const ativos        = data.filter(f => f.status === 'ATIVO').length;
+  const demitidos     = data.filter(f => f.status === 'DEMITIDO').length;
+  const ativosComSal  = data.filter(f => f.status === 'ATIVO' && (f.salario_base || 0) > 0);
+  const totalSalarios = ativosComSal.reduce((s, f) => s + (f.salario_base || 0), 0);
+  // Aviso se a maioria está sem salário cadastrado (>10%)
+  const semSalarioPct = ativos > 0 ? Math.round((1 - ativosComSal.length / ativos) * 100) : 0;
+  const semSalarioWarn = semSalarioPct > 10
+    ? `<div style="font-size:8px;color:#dc2626;font-weight:700;margin-top:2px">⚠ ${ativos - ativosComSal.length} sem salário cadastrado (${semSalarioPct}%)</div>`
+    : '';
   document.getElementById('rh-kpis').innerHTML = `
     <div class="kpi-card" style="border-left:4px solid #22c55e">
       <div class="kpi-v">${ativos}</div>
@@ -2291,6 +2297,8 @@ async function loadRHFuncionarios() {
     <div class="kpi-card" style="border-left:4px solid #f59e0b">
       <div class="kpi-v">${brl(totalSalarios)}</div>
       <div class="kpi-l">Folha Bruta Estimada</div>
+      <div style="font-size:9px;color:#64748b;margin-top:2px">${ativosComSal.length} de ${ativos} com salário</div>
+      ${semSalarioWarn}
     </div>
   `;
 
@@ -2725,190 +2733,6 @@ document.addEventListener('click', e => {
   const inp  = document.getElementById('busca-global-input');
   if (wrap && !wrap.contains(e.target) && e.target !== inp) wrap.style.display = 'none';
 });
-
-// ═══════════════════════════════════════════════════════════════
-// Portal Transparência Palmas — integração e conciliação
-// ═══════════════════════════════════════════════════════════════
-
-let transpDados = [];
-
-function initTranspDatas() {
-  const ini = document.getElementById('transp-dt-ini');
-  const fim = document.getElementById('transp-dt-fim');
-  if (ini && !ini.value) {
-    const d = new Date(); d.setFullYear(d.getFullYear() - 1);
-    ini.value = d.toISOString().split('T')[0];
-  }
-  if (fim && !fim.value) fim.value = new Date().toISOString().split('T')[0];
-}
-
-async function transpDescobrir() {
-  const badge = document.getElementById('transp-status-badge');
-  const msg   = document.getElementById('transp-msg');
-  badge.textContent = 'Detectando...';
-  badge.style.background = '#fef3c7'; badge.style.color = '#92400e';
-  msg.textContent = 'Testando endpoints do portal...';
-  try {
-    const r = await apiPost('/api/transparencia/descobrir', {});
-    if (r.ok) {
-      badge.textContent = 'Conectado';
-      badge.style.background = '#dcfce7'; badge.style.color = '#15803d';
-      msg.textContent = 'Endpoint encontrado: ' + r.endpointEncontrado.url;
-      document.getElementById('transp-aviso-config').style.display = 'none';
-    } else {
-      badge.textContent = 'Manual';
-      badge.style.background = '#fef3c7'; badge.style.color = '#92400e';
-      msg.textContent = 'API nao detectada automaticamente.';
-      document.getElementById('transp-aviso-config').style.display = 'block';
-    }
-  } catch(e) {
-    badge.textContent = 'Erro';
-    badge.style.background = '#fee2e2'; badge.style.color = '#dc2626';
-    msg.textContent = 'Erro: ' + e.message;
-  }
-}
-
-async function transpConfigurarManual() {
-  const url = document.getElementById('transp-url-manual').value.trim();
-  if (!url) { alert('Cole a URL capturada do DevTools'); return; }
-  try {
-    const r = await apiPost('/api/transparencia/configurar', { url, method: 'POST' });
-    if (r.ok) {
-      const badge = document.getElementById('transp-status-badge');
-      badge.textContent = 'Manual OK'; badge.style.background = '#dcfce7'; badge.style.color = '#15803d';
-      document.getElementById('transp-aviso-config').style.display = 'none';
-      document.getElementById('transp-msg').textContent = 'Endpoint configurado: ' + url;
-    }
-  } catch(e) { alert('Erro: ' + e.message); }
-}
-
-async function transpConsultar() {
-  initTranspDatas();
-  const msg  = document.getElementById('transp-msg');
-  const wrap = document.getElementById('transp-table-wrap');
-  msg.textContent = 'Consultando portal...';
-  wrap.style.display = 'none';
-  const ini  = document.getElementById('transp-dt-ini').value;
-  const fim  = document.getElementById('transp-dt-fim').value;
-  const cnpj = window.currentCompany === 'seguranca' ? '19200109000109' :
-               window.currentCompany === 'assessoria' ? '14092519000151' : '';
-  try {
-    const params = new URLSearchParams({ dataInicial: ini, dataFinal: fim, cnpj });
-    const r = await apiGet('/api/transparencia/consultar?' + params);
-    if (!r.ok) {
-      msg.textContent = (r.erro || 'Endpoint nao configurado. Use Auto-Detectar primeiro.');
-      document.getElementById('transp-aviso-config').style.display = 'block';
-      return;
-    }
-    transpDados = r.pagamentos || [];
-    renderTranspTabela(transpDados);
-    carregarTranspResumo();
-    msg.textContent = r.total + ' pagamento(s) encontrado(s) no portal.';
-  } catch(e) {
-    msg.textContent = 'Erro: ' + e.message;
-    document.getElementById('transp-aviso-config').style.display = 'block';
-  }
-}
-
-async function transpImportar() {
-  const ini = document.getElementById('transp-dt-ini').value;
-  const fim = document.getElementById('transp-dt-fim').value;
-  const msg = document.getElementById('transp-msg');
-  msg.textContent = 'Importando...';
-  const cnpj = window.currentCompany === 'seguranca' ? '19200109000109' :
-               window.currentCompany === 'assessoria' ? '14092519000151' : '';
-  const fmtData = v => v ? v.split('-').reverse().join('/') : '';
-  try {
-    const r = await apiPost('/api/transparencia/importar', {
-      cnpj,
-      dataInicial: fmtData(ini) || '01/01/2023',
-      dataFinal:   fmtData(fim) || new Date().toLocaleDateString('pt-BR'),
-    });
-    if (r.ok) {
-      msg.textContent = 'Importados: ' + r.importados + ' | Duplicados: ' + r.duplicados;
-      carregarTranspResumo();
-    } else {
-      msg.textContent = (r.erro || 'Erro ao importar');
-    }
-  } catch(e) { msg.textContent = 'Erro: ' + e.message; }
-}
-
-async function transpConciliar() {
-  const msg = document.getElementById('transp-msg');
-  msg.textContent = 'Conciliando pagamentos com extratos...';
-  try {
-    const r = await apiGet('/api/transparencia/conciliar');
-    if (r.ok) {
-      msg.textContent = 'Conciliados: ' + r.conciliados + ' | Pendentes: ' + r.pendentes;
-      carregarTranspResumo();
-    } else {
-      msg.textContent = (r.erro || 'Erro ao conciliar');
-    }
-  } catch(e) { msg.textContent = 'Erro: ' + e.message; }
-}
-
-async function carregarTranspResumo() {
-  try {
-    const r = await apiGet('/api/transparencia/resumo');
-    if (!r.ok) return;
-    const kpis    = document.getElementById('transp-kpis');
-    const total   = r.porStatus.reduce((s,x) => s + Number(x.total||0), 0);
-    const concil  = r.porStatus.find(x => x.status_conciliacao === 'CONCILIADO');
-    const pend    = r.porStatus.find(x => x.status_conciliacao === 'PENDENTE');
-    const pct     = total > 0 ? Math.round((Number(concil?.total||0)/total)*100) : 0;
-    kpis.innerHTML =
-      kpiBox('Total no Portal', brl(total), r.porStatus.reduce((s,x)=>s+x.qtd,0) + ' pagamentos', '#1e293b', '#fff') +
-      kpiBox('Conciliados', brl(concil?.total||0), (concil?.qtd||0) + ' (' + pct + '%)', '#dcfce7', '#15803d') +
-      kpiBox('Pendentes', brl(pend?.total||0), (pend?.qtd||0) + ' pagamentos', '#fffbeb', '#d97706') +
-      kpiBox('API', r.endpointAtivo ? 'Ativa' : 'Nao config.', r.endpointAtivo ? r.endpointAtivo.url.split('/').pop() : 'Use Auto-Detectar', r.endpointAtivo ? '#f0fdf4' : '#fef3c7', r.endpointAtivo ? '#15803d' : '#d97706');
-  } catch(_) {}
-}
-
-function kpiBox(label, valor, sub, bg, cor) {
-  return '<div style="flex:1;min-width:140px;border:1px solid #e2e8f0;border-radius:8px;padding:12px;text-align:center;background:' + bg + '">' +
-    '<div style="font-size:10px;color:#64748b">' + label + '</div>' +
-    '<div style="font-size:15px;font-weight:800;color:' + cor + ';margin:4px 0">' + valor + '</div>' +
-    '<div style="font-size:10px;color:#94a3b8">' + sub + '</div></div>';
-}
-
-function renderTranspTabela(dados) {
-  const wrap = document.getElementById('transp-table-wrap');
-  const head = document.getElementById('transp-head');
-  const body = document.getElementById('transp-body');
-  if (!dados || !dados.length) { wrap.style.display = 'none'; return; }
-  wrap.style.display = 'block';
-  head.innerHTML = '<tr style="background:#1e40af;color:#fff">' +
-    '<th style="padding:6px 10px;text-align:left;font-size:10px">Data Pgto</th>' +
-    '<th style="padding:6px 10px;text-align:left;font-size:10px">Empenho</th>' +
-    '<th style="padding:6px 10px;text-align:left;font-size:10px">Fornecedor</th>' +
-    '<th style="padding:6px 10px;text-align:left;font-size:10px">Elemento</th>' +
-    '<th style="padding:6px 10px;text-align:right;font-size:10px">Valor Pago</th>' +
-    '<th style="padding:6px 10px;text-align:center;font-size:10px">Status</th></tr>';
-  body.innerHTML = dados.map(function(p) {
-    var cor   = p.status_conciliacao === 'CONCILIADO' ? '#f0fdf4' : '#fffbeb';
-    var badge = p.status_conciliacao === 'CONCILIADO'
-      ? '<span style="background:#dcfce7;color:#15803d;padding:2px 7px;border-radius:10px;font-size:9px;font-weight:700">Conciliado</span>'
-      : '<span style="background:#fef3c7;color:#d97706;padding:2px 7px;border-radius:10px;font-size:9px;font-weight:700">Pendente</span>';
-    return '<tr style="background:' + cor + ';border-bottom:1px solid #f1f5f9">' +
-      '<td style="padding:5px 10px;font-size:10px">' + (p.data_pagamento||'—') + '</td>' +
-      '<td style="padding:5px 10px;font-size:10px">' + (p.numero_empenho||'—') + '</td>' +
-      '<td style="padding:5px 10px;font-size:10px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (p.fornecedor||'—') + '</td>' +
-      '<td style="padding:5px 10px;font-size:10px">' + (p.elemento_despesa||'—') + '</td>' +
-      '<td style="padding:5px 10px;font-size:10px;text-align:right;font-weight:700">' + brl(p.valor_pago) + '</td>' +
-      '<td style="padding:5px 10px;text-align:center">' + badge + '</td></tr>';
-  }).join('');
-}
-
-// Sobrescreve showPrefSub para inicializar a aba Transparência
-const _origShowPrefSub = window.showPrefSub;
-window.showPrefSub = function(stab, el) {
-  document.querySelectorAll('.pref-sub').forEach(function(d) { d.style.display='none'; d.classList.remove('active'); });
-  document.querySelectorAll('.pref-stab').forEach(function(d) { d.classList.remove('active'); d.style.borderBottomColor='transparent'; d.style.color='#64748b'; });
-  var sec = document.getElementById('pref-sub-' + stab);
-  if (sec) { sec.style.display='block'; sec.classList.add('active'); }
-  if (el)  { el.classList.add('active'); el.style.borderBottomColor='#1e293b'; el.style.color='#1e293b'; }
-  if (stab === 'transp') { initTranspDatas(); carregarTranspResumo(); }
-};
 
 // ─── Gestão de Usuários (Config) ─────────────────────────────────
 async function criarUsuariosFuncionarios() {
@@ -3382,74 +3206,74 @@ function initPisCofinsSeg() {
   }
 }
 
+// Helpers de null-safety (evita "Cannot set properties of null" em DOM ausente)
+function _pcSetText(id, txt)  { const el = document.getElementById(id); if (el) el.textContent = txt; }
+function _pcSetHTML(id, html) { const el = document.getElementById(id); if (el) el.innerHTML   = html; }
+function _pcShow(id, display = 'block') { const el = document.getElementById(id); if (el) el.style.display = display; }
+function _pcHide(id) { _pcShow(id, 'none'); }
+
 async function loadPisCofinsSeg() {
   const anoMes = document.getElementById('pc-mes')?.value;
   if (!anoMes) return;
 
-  document.getElementById('pc-loading').textContent = 'Calculando…';
-  document.getElementById('pc-loading').style.display = 'block';
-  document.getElementById('pc-cards').style.display = 'none';
-  document.getElementById('pc-aviso-nao-aplicavel').style.display = 'none';
+  _pcSetText('pc-loading', 'Calculando…');
+  _pcShow('pc-loading');
+  _pcHide('pc-cards');
+  _pcHide('pc-aviso-nao-aplicavel');
 
   try {
     const data = await api(`/piscofins-seguranca/${anoMes}`);
     if (!data.ok) throw new Error(data.error || 'Erro');
-    _pcDados = data.dados;
+    _pcDados = data.dados || {};
+    const resumo = _pcDados.resumo || {};
 
     // Título + subtítulo dinâmicos por empresa
-    const tituloEl = document.getElementById('pc-titulo');
-    const subEl    = document.getElementById('pc-subtitulo');
-    if (tituloEl) tituloEl.textContent = `💰 Apuração PIS/COFINS — ${_pcDados.empresa_nome_curto || ''}`.trim();
-    if (subEl && _pcDados.aplicavel) {
-      const pct = (v) => (v*100).toLocaleString('pt-BR',{minimumFractionDigits:2});
-      subEl.textContent =
-        `Regime: ${_pcDados.regime} (PIS ${pct(_pcDados.aliq_pis)}% + COFINS ${pct(_pcDados.aliq_cofins)}%) · Base de caixa a partir de jan/2026`;
+    _pcSetText('pc-titulo', `💰 Apuração PIS/COFINS — ${_pcDados.empresa_nome_curto || ''}`.trim());
+    if (_pcDados.aplicavel) {
+      const pct = (v) => (Number(v)*100).toLocaleString('pt-BR',{minimumFractionDigits:2});
+      _pcSetText('pc-subtitulo',
+        `Regime: ${_pcDados.regime} (PIS ${pct(_pcDados.aliq_pis)}% + COFINS ${pct(_pcDados.aliq_cofins)}%) · Base de caixa a partir de jan/2026`);
     }
 
     // Empresas Simples: mostra aviso e não renderiza cards
     if (!_pcDados.aplicavel) {
-      document.getElementById('pc-loading').style.display = 'none';
-      const av = document.getElementById('pc-aviso-nao-aplicavel');
-      av.style.display = 'block';
-      av.textContent = _pcDados.aviso || `${_pcDados.empresa_nome_curto} — ${_pcDados.regime}. PIS/COFINS recolhidos via DAS unificado; apuração separada não se aplica.`;
-      if (subEl) subEl.textContent = `Regime: ${_pcDados.regime}`;
-      document.getElementById('pc-btn-excel').style.display = 'none';
+      _pcHide('pc-loading');
+      _pcShow('pc-aviso-nao-aplicavel');
+      _pcSetText('pc-aviso-nao-aplicavel',
+        _pcDados.aviso || `${_pcDados.empresa_nome_curto || ''} — ${_pcDados.regime || ''}. PIS/COFINS recolhidos via DAS unificado; apuração separada não se aplica.`);
+      _pcSetText('pc-subtitulo', `Regime: ${_pcDados.regime || ''}`);
+      _pcHide('pc-btn-excel');
       return;
     }
 
-    document.getElementById('pc-loading').style.display = 'none';
-    document.getElementById('pc-cards').style.display = 'block';
-    document.getElementById('pc-btn-excel').style.display = '';
+    _pcHide('pc-loading');
+    _pcShow('pc-cards');
+    _pcShow('pc-btn-excel', '');
 
     renderPcKpis(_pcDados);
-    renderPcTabela('tributaveis', _pcDados.tributaveis);
-    renderPcTabela('excluidos',   _pcDados.excluidos);
-    renderPcTabela('nao_tributa', _pcDados.nao_tributa);
-    renderPcTabela('pendentes',   _pcDados.pendentes);
+    renderPcTabela('tributaveis', _pcDados.tributaveis || []);
+    renderPcTabela('excluidos',   _pcDados.excluidos   || []);
+    renderPcTabela('nao_tributa', _pcDados.nao_tributa || []);
+    renderPcTabela('pendentes',   _pcDados.pendentes   || []);
 
     // Atualiza labels dos botões com contagens
-    document.getElementById('pc-tab-tributaveis').textContent =
-      `✅ Tributáveis (${_pcDados.resumo.qtd_tributaveis})`;
-    document.getElementById('pc-tab-excluidos').textContent =
-      `🚫 Excluídos (${_pcDados.resumo.qtd_excluidos})`;
-    document.getElementById('pc-tab-nao_tributa').textContent =
-      `⛔ Não Tributa (${_pcDados.resumo.qtd_nao_tributa})`;
-    document.getElementById('pc-tab-pendentes').textContent =
-      `⚠ Pendentes (${_pcDados.resumo.qtd_pendentes})`;
+    _pcSetText('pc-tab-tributaveis', `✅ Tributáveis (${resumo.qtd_tributaveis || 0})`);
+    _pcSetText('pc-tab-excluidos',   `🚫 Excluídos (${resumo.qtd_excluidos || 0})`);
+    _pcSetText('pc-tab-nao_tributa', `⛔ Não Tributa (${resumo.qtd_nao_tributa || 0})`);
+    _pcSetText('pc-tab-pendentes',   `⚠ Pendentes (${resumo.qtd_pendentes || 0})`);
 
     // Alerta pendentes
-    const alertEl = document.getElementById('pc-alerta-pendentes');
-    if (_pcDados.resumo.tem_pendentes) {
-      alertEl.style.display = 'block';
-      alertEl.textContent =
-        `⚠ ${_pcDados.resumo.qtd_pendentes} crédito(s) sem NF vinculada — verifique no Portal da Transparência e vincule no ERP antes de emitir o DARF.`;
+    if (resumo.tem_pendentes) {
+      _pcShow('pc-alerta-pendentes');
+      _pcSetText('pc-alerta-pendentes',
+        `⚠ ${resumo.qtd_pendentes} crédito(s) sem NF vinculada — verifique no Portal da Transparência e vincule no ERP antes de emitir o DARF.`);
     } else {
-      alertEl.style.display = 'none';
+      _pcHide('pc-alerta-pendentes');
     }
 
     pcShowTab('tributaveis');
   } catch (e) {
-    document.getElementById('pc-loading').textContent = 'Erro: ' + e.message;
+    _pcSetText('pc-loading', 'Erro: ' + (e?.message || e));
   }
 }
 
@@ -3462,12 +3286,12 @@ function renderPcKpis(d) {
     { label: 'Total a Recolher',      val: brl(d.total_darf),      bg: '#d1fae5', bold: true },
     { label: 'Vencimento DARF',       val: d.vencimento,           bg: '#fef3c7' },
   ];
-  document.getElementById('pc-kpis').innerHTML = cards.map(c => `
+  _pcSetHTML('pc-kpis', cards.map(c => `
     <div style="background:${c.bg};border-radius:10px;padding:12px 14px;border:1px solid #e2e8f0">
       <div style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px">${c.label}</div>
       <div style="font-size:${c.bold?'17px':'15px'};font-weight:${c.bold?800:600};color:#0f172a">${c.val}</div>
     </div>
-  `).join('');
+  `).join(''));
 }
 
 const PC_COLS = [

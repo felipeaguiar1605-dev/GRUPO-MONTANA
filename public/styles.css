@@ -86,6 +86,25 @@ tr:hover{background:#f8fafc}
 .qbtn{padding:5px 12px;font-size:10px;border-radius:6px;cursor:pointer;font-weight:600;border-width:1px;border-style:solid;transition:.15s}
 .qbtn:hover{opacity:.85;transform:translateY(-1px)}
 
+/* Botões padrão (.btn / .btn-sm / .btn-xs / .btn-primary / .btn-danger)
+   Adicionado em 2026-04-30 — antes essas classes existiam no JS (app-boletins.js,
+   app-ponto.js etc.) mas não estavam no CSS, fazendo botões "+ Item", "✏️", "🗑️"
+   ficarem invisíveis (estilo browser default). */
+.btn{padding:6px 14px;font-size:12px;border-radius:7px;cursor:pointer;font-weight:600;border:1px solid #e2e8f0;background:#fff;color:#334155;transition:.15s;display:inline-flex;align-items:center;gap:4px;line-height:1.2}
+.btn:hover{background:#f1f5f9;border-color:#cbd5e1;transform:translateY(-1px)}
+.btn:active{transform:translateY(0)}
+.btn:disabled{opacity:.55;cursor:not-allowed;transform:none}
+.btn-sm{padding:5px 11px;font-size:11px;border-radius:6px}
+.btn-xs{padding:3px 8px;font-size:10px;border-radius:5px;font-weight:700}
+.btn-primary{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
+.btn-primary:hover{background:#1e40af;border-color:#1e40af}
+.btn-danger{background:#fee2e2;color:#dc2626;border-color:#fca5a5}
+.btn-danger:hover{background:#fecaca;border-color:#dc2626}
+.btn-success{background:#059669;color:#fff;border-color:#059669}
+.btn-success:hover{background:#047857;border-color:#047857}
+.btn-warning{background:#fef3c7;color:#92400e;border-color:#fcd34d}
+.btn-warning:hover{background:#fde68a;border-color:#d97706}
+
 /* Badges */
 .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:9px;font-weight:600;white-space:nowrap}
 .badge-green{background:#dcfce7;color:#15803d;border:1px solid #86efac}

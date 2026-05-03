@@ -31,7 +31,7 @@
 
     let data;
     try {
-      data = await api(`/api/ciclo?competencia=${encodeURIComponent(competencia)}`);
+      data = await api(`/ciclo?competencia=${encodeURIComponent(competencia)}`);
     } catch (e) {
       body.innerHTML = `<div style="padding:20px;color:#b91c1c;background:#fee2e2;border-radius:8px">Erro ao carregar ciclo: ${e.message}</div>`;
       return;

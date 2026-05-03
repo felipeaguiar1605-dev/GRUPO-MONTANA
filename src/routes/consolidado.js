@@ -68,7 +68,7 @@ router.get('/consolidado', async (req, res) => {
           SELECT COUNT(*) cnt, COALESCE(SUM(valor_bruto),0) bruto
             FROM notas_fiscais
            WHERE (data_emissao >= ? AND data_emissao <= ?)
-              OR (data_emissao IS NULL AND created_at >= ? AND created_at <= ?)
+              OR (data_emissao IS NULL AND created_at::date >= ?::date AND created_at::date <= ?::date)
         `).get(from, to, from, to)) || {};
         const desp = (await db.prepare(`
           SELECT COALESCE(SUM(valor_bruto),0) total
@@ -139,7 +139,7 @@ router.get('/consolidado/resumo', async (req, res) => {
             FROM notas_fiscais
            WHERE 1=1 ${deletedFilter}
              AND ((data_emissao >= ? AND data_emissao <= ?)
-               OR (data_emissao IS NULL AND created_at >= ? AND created_at <= ?))
+               OR (data_emissao IS NULL AND created_at::date >= ?::date AND created_at::date <= ?::date))
         `).get(from, to, from, to)) || {};
 
         // valor_liquido às vezes não é preenchido → derivar de bruto - retenções

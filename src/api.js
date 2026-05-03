@@ -7,6 +7,8 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { getDb, COMPANIES } = require('./db_pg');
+const NF_NAO_CANCELADA_FILTER = `AND (status_conciliacao IS NULL OR status_conciliacao != 'CANCELADA')`;
+
 
 // ─── ANTI-DUPLICAÇÃO ─────────────────────────────────────────────
 // Hash determinístico para deduplicação de despesas
@@ -390,7 +392,7 @@ router.post('/retencoes/preencher', async (req, res) => {
       const esp = calcularRetencoesEsperadas(nf.valor_bruto, nf.tomador, nf.cidade, nf.retencao);
       // Ajustar proporcionalmente à retenção real (para fechar o valor)
       const fator = nf.retencao / esp.totalEsperado;
-      update.run({
+      await update.run({
         id: nf.id,
         inss: +(esp.inss * fator).toFixed(2),
         ir: +(esp.irrf * fator).toFixed(2),
@@ -433,11 +435,11 @@ router.get('/dashboard', async (req, res) => {
 
   // Contas vinculadas (IN SEGES/MP 05/2017) — não são fluxo operacional.
   // Assessoria: conta BRB 031.015.240-2 (UFT). Ajustar conforme outras forem descobertas.
-  const CONTAS_VINCULADAS = ["'031.015.240-2'"]; // extensível
+  const CONTAS_VINCULADAS = ["'__NENHUMA_VINCULADA__'"]; // BRB 031.015.240-2 removida 2026-05-01: conta normal Assessoria
   const CONTA_VINC_FILTER = ` AND (conta IS NULL OR conta NOT IN (${CONTAS_VINCULADAS.join(',')}))`;
 
   // Status que NUNCA entram no fluxo operacional (mesmo que o valor tenha entrado na conta)
-  const STATUS_NAO_OPERACIONAL = `'INTERNO','INVESTIMENTO','TRANSFERENCIA','DEVOLVIDO','CONTA_VINCULADA'`;
+  const STATUS_NAO_OPERACIONAL = `'INTERNO','INVESTIMENTO','TRANSFERENCIA','DEVOLVIDO','CONTA_VINCULADA','SALDO','DUPLICATA','FINANCEIRA','RETIRADA_SOCIO'`;
 
   // Palavras no histórico que indicam movimentação não-operacional mesmo quando status ainda não classificado
   const HIST_NAO_OPERACIONAL = `(
@@ -527,15 +529,23 @@ router.get('/dashboard', async (req, res) => {
     FROM extratos e WHERE 1=1 ${dateFilter}
   `).get(params);
 
-  // 2. Contratos com resumo financeiro
-  const contratos = await req.db.prepare(`SELECT COUNT(*) as total, COALESCE(SUM(total_pago),0) as total_pago, COALESCE(SUM(total_aberto),0) as total_aberto FROM contratos`).get();
+  // 2. Contratos com resumo financeiro — só ATIVOS (status NÃO contém 'encerrad'/'rescindid')
+  // FIX 2026-04: antes contava 26 (todos), divergia da página Contratos que mostra 11.
+  const contratos = await req.db.prepare(`
+    SELECT COUNT(*) as total,
+           COALESCE(SUM(total_pago),0) as total_pago,
+           COALESCE(SUM(total_aberto),0) as total_aberto
+    FROM contratos
+    WHERE LOWER(COALESCE(status,'')) NOT LIKE '%encerrad%'
+      AND LOWER(COALESCE(status,'')) NOT LIKE '%rescindid%'
+  `).get();
 
   // 3. NFs — filtradas pelo mesmo período quando fornecido
   let nfsDateFilter = '';
   const nfsParams = {};
   if (from) { nfsDateFilter += ' AND data_emissao >= @from'; nfsParams.from = from; }
   if (to)   { nfsDateFilter += ' AND data_emissao <= @to';   nfsParams.to = to; }
-  const nfs = await req.db.prepare(`SELECT COUNT(*) as total, COALESCE(SUM(valor_bruto),0) as total_bruto, COALESCE(SUM(valor_liquido),0) as total_liquido FROM notas_fiscais WHERE 1=1 ${nfsDateFilter}`).get(nfsParams);
+  const nfs = await req.db.prepare(`SELECT COUNT(*) as total, COALESCE(SUM(valor_bruto),0) as total_bruto, COALESCE(SUM(valor_liquido),0) as total_liquido FROM notas_fiscais WHERE (status_conciliacao IS NULL OR status_conciliacao != \'CANCELADA\') AND 1=1 ${nfsDateFilter}`).get(nfsParams);
 
   // 4. Pagamentos filtrados por data
   let pgDateFilter = '';
@@ -560,7 +570,7 @@ router.get('/dashboard', async (req, res) => {
      AND NOT ${HIST_NAO_OPERACIONAL}
      ${CONTA_VINC_FILTER}`;
   const fluxoFilter = (from ? ' AND data_iso >= @from' : '') + (to ? ' AND data_iso <= @to' : '');
-  const fluxoMensal = from || to
+  const _fluxoMensalRaw = from || to
     ? await req.db.prepare(`
         SELECT
           substr(data_iso, 1, 7) as mes,
@@ -581,7 +591,9 @@ router.get('/dashboard', async (req, res) => {
         GROUP BY substr(data_iso, 1, 7)
         ORDER BY mes DESC
         LIMIT 6
-      `).all().reverse();
+      `).all();
+  const fluxoMensal = (Array.isArray(_fluxoMensalRaw) ? _fluxoMensalRaw : []).slice();
+  if (!from && !to) fluxoMensal.reverse();
 
   // 8. Top 5 contratos por valor
   const topContratos = await req.db.prepare(`
@@ -624,6 +636,12 @@ router.get('/dashboard', async (req, res) => {
     a_identificar: totais.a_identificar || 0
   };
 
+  // Modo Holding: trata transferências intragrupo recebidas como receita
+  // (útil pra empresas holding-pagadoras — receita real circula via TED interno
+  // por ausência de NF intercompany)
+  totais.receita_holding = (parseFloat(totais.receita_operacional) || 0) + (parseFloat(totais.cr_interno) || 0) + (parseFloat(totais.cr_transferencia) || 0);
+  totais.margem_holding = (totais.receita_holding) - (parseFloat(totais.despesa_operacional) || 0);
+
   const result = {
     extratos: totais,
     contratos: { total: contratos.total, totalPago: contratos.total_pago, totalAberto: contratos.total_aberto },
@@ -653,7 +671,7 @@ router.get('/dashboard/apuracao-caixa', async (req, res) => {
     if (!from || !to) return res.status(400).json({ error: 'from e to obrigatórios (YYYY-MM-DD)' });
 
     // Usa COALESCE: prefere data_pagamento; cai em data_iso do extrato vinculado se faltar
-    const rows = await req.db.prepare(`
+    const rowsRaw = await req.db.prepare(`
       SELECT
         COALESCE(NULLIF(nf.contrato_ref,''), '(sem contrato)') as contrato_ref,
         COALESCE(NULLIF(nf.tomador,''),      '—')              as tomador,
@@ -669,7 +687,7 @@ router.get('/dashboard/apuracao-caixa', async (req, res) => {
         COALESCE(SUM(nf.cofins), 0)                             as total_cofins_ret
       FROM notas_fiscais nf
       LEFT JOIN extratos e ON e.id = nf.extrato_id
-      WHERE nf.status_conciliacao = 'CONCILIADO'
+      WHERE (status_conciliacao IS NULL OR status_conciliacao != \'CANCELADA\') AND nf.status_conciliacao = 'CONCILIADO'
         AND (
           (NULLIF(nf.data_pagamento,'') IS NOT NULL AND nf.data_pagamento BETWEEN @from AND @to)
           OR
@@ -678,6 +696,7 @@ router.get('/dashboard/apuracao-caixa', async (req, res) => {
       GROUP BY contrato_ref, tomador
       ORDER BY total_bruto DESC
     `).all({ from, to });
+    const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
 
     // Totais e apuração tributária (aplicável apenas à Assessoria — Lucro Real)
     const totalBruto    = rows.reduce((s, r) => s + (r.total_bruto || 0), 0);
@@ -736,7 +755,7 @@ router.get('/dashboard/apuracao-caixa', async (req, res) => {
 // ─── EXPOSIÇÃO INTRAGRUPO ────────────────────────────────────────
 // Consolida NFs emitidas por empresas do grupo (Nevada, Montreal, Porto do Vau, Mustang,
 // Montana) que ainda estão em aberto (sem extrato vinculado). Cruza as 4 bases.
-router.get('/dashboard/exposicao-intragrupo', (_req, res) => {
+router.get('/dashboard/exposicao-intragrupo', async (_req, res) => {
   try {
     const GRUPO = [
       { pat: 'NEVADA',       nome: 'Nevada Embalagens/Limpeza' },
@@ -753,14 +772,14 @@ router.get('/dashboard/exposicao-intragrupo', (_req, res) => {
       let dbEmp;
       try { dbEmp = getDb(empKey); } catch { continue; }
       // Verifica se tabela despesas existe e tem linhas
-      const hasTab = dbEmp.prepare(`SELECT table_name as name FROM information_schema.tables WHERE table_schema=current_schema() AND name='despesas'`).get();
+      const hasTab = await dbEmp.prepare(`SELECT table_name FROM information_schema.tables WHERE table_schema=current_schema() AND table_name='despesas'`).get();
       if (!hasTab) continue;
 
       const selfName = (empMeta.nomeAbrev || '').toUpperCase();
       for (const grp of GRUPO) {
         // Pula self-match (ex: padrão "MONTANA ASS" no DB Assessoria, "MONTANA S" no DB Segurança)
         if (selfName.includes(grp.pat)) continue;
-        const row = dbEmp.prepare(`
+        const row = await dbEmp.prepare(`
           SELECT
             COUNT(*) q_total,
             COALESCE(SUM(valor_liquido),0) v_total,
@@ -845,7 +864,9 @@ router.get('/extratos/meses', async (req, res) => {
 
 router.get('/extratos', async (req, res) => {
   try {
-  const { from, to, status, mes, posto, page = 1, limit = 100, somente_creditos } = req.query;
+  const { from, to, mes, posto, page = 1, limit = 100, somente_creditos } = req.query;
+  // Retrocompatível: aceita `?status=` (nome novo) e `?status_conciliacao=` (legado)
+  const status = req.query.status || req.query.status_conciliacao;
   let where = '1=1';
   const params = {};
   if (from) { where += ' AND data_iso >= @from'; params.from = from; }
@@ -875,13 +896,40 @@ router.get('/extratos', async (req, res) => {
 // ─── CONTRATOS ───────────────────────────────────────────────────
 router.get('/contratos', async (req, res) => {
   try {
-    const rows = await req.db.prepare(`
+    // P1-4: + ultima_competencia_faturada (max(competencia) de NFs vinculadas)
+    //       + meses_sem_faturar (gap até hoje)
+    const rowsRaw = await req.db.prepare(`
       SELECT c.*,
+        c.numContrato AS "numContrato",
         COALESCE((SELECT SUM(v.valor) FROM vinculacoes v WHERE v.contrato_num = c.numContrato), 0) as total_vinculado,
         COALESCE((SELECT COUNT(*) FROM vinculacoes v WHERE v.contrato_num = c.numContrato), 0) as qtd_vinculacoes,
-        COALESCE((SELECT COUNT(*) FROM parcelas p WHERE p.contrato_num = c.numContrato), 0) as qtd_parcelas
+        COALESCE((SELECT COUNT(*) FROM parcelas p WHERE p.contrato_num = c.numContrato), 0) as qtd_parcelas,
+        (SELECT MAX(COALESCE(NULLIF(competencia, ''), to_char(safe_date(data_emissao), 'YYYY-MM')))
+           FROM notas_fiscais nf
+           WHERE nf.contrato_ref = c.numContrato
+             AND COALESCE(status_conciliacao, '') NOT IN ('CANCELADA')
+        ) as ultima_competencia_faturada
       FROM contratos c ORDER BY c.contrato
     `).all();
+    // PG normaliza nomes não-quoted para lowercase no result. O alias acima
+    // adiciona "numContrato" preservando o case; ainda assim, fallback defensivo:
+    const hojeYM = new Date().toISOString().slice(0, 7);
+    const rows = (Array.isArray(rowsRaw) ? rowsRaw : []).map(r => {
+      const ult = r.ultima_competencia_faturada || r.ultima_competencia_faturada || '';
+      let mesesSemFaturar = null;
+      if (ult && /^\d{4}-\d{2}$/.test(ult)) {
+        const [y1, m1] = ult.split('-').map(Number);
+        const [y2, m2] = hojeYM.split('-').map(Number);
+        mesesSemFaturar = (y2 - y1) * 12 + (m2 - m1);
+      }
+      return {
+        ...r,
+        numContrato: r.numContrato || r.numcontrato || '',
+        status: r.status || '',
+        ultima_competencia_faturada: ult,
+        meses_sem_faturar: mesesSemFaturar,
+      };
+    });
 
     const summary = await req.db.prepare(`
       SELECT
@@ -889,7 +937,7 @@ router.get('/contratos', async (req, res) => {
         COALESCE(SUM(total_aberto), 0) as soma_aberto,
         COUNT(*) as total_contratos
       FROM contratos
-    `).get();
+    `).get() || { soma_pago: 0, soma_aberto: 0, total_contratos: 0 };
 
     res.json({ data: rows, summary });
   } catch(e) { errRes(res, e); }
@@ -930,9 +978,21 @@ router.get('/contratos/saude', async (req, res) => {
         nfWhere: `tomador LIKE ?`,
         nfParams: ['%SECRETARIA DO MEIO AMBIENTE E RECURSOS HIDRICOS%'],
       },
-      'PREVI PALMAS — em vigor': {
+      'PREVIPALMAS 02/2024 + 2°TA': {
         nfWhere: `(tomador LIKE ? OR tomador LIKE ?)`,
         nfParams: ['%PREVIPALMAS%','%PREVIDENCIA SOCIAL DO MUNICIPIO DE PALMAS%'],
+      },
+      'SEPLAD 002/2024 — encerrado': {
+        nfWhere: `tomador LIKE ?`,
+        nfParams: ['%SECRETARIA MUNICIPAL DE PLANEJAMENTO%'],
+      },
+      'TCE 26/2025': {
+        nfWhere: `tomador LIKE ? AND data_emissao >= '2025-01-01'`,
+        nfParams: ['%TRIBUNAL DE CONTAS DO ESTADO DO TOCANTINS%'],
+      },
+      'UFT 52/2025': {
+        nfWhere: `tomador LIKE ? AND data_emissao >= '2025-09-01'`,
+        nfParams: ['%FUNDACAO UNIVERSIDADE FEDERAL DO TOCANTINS%'],
       },
       'SEDUC 016/2023': {
         nfWhere: `tomador LIKE ?`,
@@ -983,7 +1043,7 @@ router.get('/contratos/saude', async (req, res) => {
       FROM contratos ORDER BY status, contrato
     `).all();
 
-    const resultado = contratos.map(c => {
+    const resultado = await Promise.all(contratos.map(async c => {
       const num = c.numContrato;
       const mapa = MAPA_SAUDE[num];
 
@@ -992,7 +1052,7 @@ router.get('/contratos/saude', async (req, res) => {
 
       if (mapa) {
         // Todas NFs do período relevante para o contrato — 1 query (era 2 N+1)
-        const nfRow = req.db.prepare(`
+        const nfRow = await req.db.prepare(`
           SELECT COUNT(*) as qtd,
                  COALESCE(SUM(valor_bruto),0) as total,
                  MAX(data_emissao) as ultima,
@@ -1000,10 +1060,10 @@ router.get('/contratos/saude', async (req, res) => {
                  COALESCE(SUM(CASE WHEN status_conciliacao='CONCILIADO' THEN valor_bruto END),0) as total_conc,
                  MAX(CASE WHEN status_conciliacao='CONCILIADO' THEN data_emissao END) as ultima_conciliada
           FROM notas_fiscais
-          WHERE data_emissao >= '${NF_DATE_FROM}'
+          WHERE (status_conciliacao IS NULL OR status_conciliacao != \'CANCELADA\') AND data_emissao >= '${NF_DATE_FROM}'
             AND data_emissao <= '${NF_DATE_TO}'
             AND (${mapa.nfWhere})
-        `).get(...mapa.nfParams);
+        `).get(...mapa.nfParams) || { qtd: 0, total: 0, ultima: null, conc: 0, total_conc: 0, ultima_conciliada: null };
         qtdNFs = nfRow.qtd; totalNFs = nfRow.total;
         ultimaNfData = nfRow.ultima; nfsConciliadas = nfRow.conc;
         totalRecebido = nfRow.total_conc;
@@ -1049,7 +1109,7 @@ router.get('/contratos/saude', async (req, res) => {
         meses_ativos: mesesAtivos,
         receita_mensal_media: mesesAtivos > 0 ? +(totalRecebido/mesesAtivos).toFixed(2) : 0,
       };
-    });
+    }));
 
     const ativos = resultado.filter(r => r.statusSaude !== 'ENCERRADO');
     const resumo = {
@@ -1201,7 +1261,7 @@ router.get('/reajustes', async (req, res) => {
              data_ultimo_reajuste, indice_reajuste, pct_reajuste_ultimo,
              data_proximo_reajuste, obs_reajuste, valor_mensal_bruto
       FROM contratos
-      WHERE status NOT LIKE '%ENCERRADO%' AND status NOT LIKE '%RESCINDIDO%'
+      WHERE COALESCE(status,'') NOT ILIKE '%ENCERRADO%' AND COALESCE(status,'') NOT ILIKE '%RESCINDIDO%'
       ORDER BY data_proximo_reajuste ASC, vigencia_fim ASC
     `).all();
 
@@ -1286,7 +1346,7 @@ router.patch('/parcelas/:id', async (req, res) => {
     FROM parcelas WHERE contrato_num = ?
   `).get(parcela.contrato_num);
 
-  req.db.prepare('UPDATE contratos SET total_pago = ?, total_aberto = ?, updated_at = datetime(\'now\') WHERE numContrato = ?')
+  await req.db.prepare("UPDATE contratos SET total_pago = ?, total_aberto = ?, updated_at = NOW() WHERE numContrato = ?")
     .run(totals.total_pago, totals.total_aberto, parcela.contrato_num);
 
   res.json({ ok: true, totals });
@@ -1294,26 +1354,46 @@ router.patch('/parcelas/:id', async (req, res) => {
 
 // ─── NOTAS FISCAIS ───────────────────────────────────────────────
 router.get('/nfs', async (req, res) => {
-  const { cidade, tomador, from, to, aberto, page = 1, limit = 100 } = req.query;
-  let where = '1=1';
-  const params = {};
-  if (cidade) { where += ' AND cidade = @cidade'; params.cidade = cidade; }
-  if (tomador) { where += ' AND tomador = @tomador'; params.tomador = tomador; }
-  if (from) { where += ' AND data_emissao >= @from'; params.from = from; }
-  if (to)   { where += ' AND data_emissao <= @to';   params.to = to; }
-  // aberto=1 → só NFs em aberto (não conciliadas e valor_liquido > 0)
-  if (aberto === '1' || aberto === 'true') {
-    where += ` AND (status_conciliacao IS NULL OR status_conciliacao NOT IN ('CONCILIADO','CONCILIADA','ASSESSORIA'))
-               AND COALESCE(valor_liquido,0) > 0`;
-  }
-  const offset = (parseInt(page) - 1) * parseInt(limit);
-  params.limit = parseInt(limit); params.offset = offset;
+  try {
+    const { cidade, tomador, from, to, aberto, q, page = 1, limit = 100 } = req.query;
+    let where = '1=1';
+    const params = {};
+    if (cidade)  { where += ' AND cidade = @cidade'; params.cidade = cidade; }
+    if (tomador) { where += ' AND tomador = @tomador'; params.tomador = tomador; }
+    if (from)    { where += ' AND data_emissao >= @from'; params.from = from; }
+    if (to)      { where += ' AND data_emissao <= @to';   params.to = to; }
+    // q = busca livre — número da NF, tomador, cidade, contrato
+    if (q && String(q).trim()) {
+      const term = String(q).trim();
+      where += ` AND (
+        CAST(numero AS TEXT) ILIKE @q
+        OR UPPER(COALESCE(tomador,'')) LIKE UPPER(@q)
+        OR UPPER(COALESCE(cidade,'')) LIKE UPPER(@q)
+        OR UPPER(COALESCE(contrato_ref,'')) LIKE UPPER(@q)
+      )`;
+      params.q = '%' + term + '%';
+    }
+    // aberto=1 → só NFs em aberto (não conciliadas e valor_liquido > 0)
+    if (aberto === '1' || aberto === 'true') {
+      where += ` AND (status_conciliacao IS NULL OR status_conciliacao NOT IN ('CONCILIADO','CONCILIADA','ASSESSORIA'))
+                 AND COALESCE(valor_liquido,0) > 0`;
+    }
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    params.limit = parseInt(limit); params.offset = offset;
 
-  const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM notas_fiscais WHERE ${where}`).get(params).cnt;
-  const rows = await req.db.prepare(`SELECT * FROM notas_fiscais WHERE ${where} ORDER BY data_emissao DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
-  // Soma total (útil p/ KPI independente do paginado)
-  const soma = await req.db.prepare(`SELECT COALESCE(SUM(valor_liquido),0) as soma_liq, COALESCE(SUM(valor_bruto),0) as soma_bruto FROM notas_fiscais WHERE ${where}`).get(params);
-  res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows, soma_liquido: soma.soma_liq, soma_bruto: soma.soma_bruto });
+    const totalRow = await req.db.prepare(`SELECT COUNT(*) as cnt FROM notas_fiscais WHERE (status_conciliacao IS NULL OR status_conciliacao != \'CANCELADA\') AND ${where}`).get(params);
+    const total = (totalRow && totalRow.cnt) || 0;
+    const rowsRaw = await req.db.prepare(`SELECT * FROM notas_fiscais WHERE ${where} ORDER BY data_emissao DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
+    const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+    // Soma total (útil p/ KPI independente do paginado)
+    const soma = await req.db.prepare(`SELECT COALESCE(SUM(valor_liquido),0) as soma_liq, COALESCE(SUM(valor_bruto),0) as soma_bruto FROM notas_fiscais WHERE (status_conciliacao IS NULL OR status_conciliacao != \'CANCELADA\') AND ${where}`).get(params) || { soma_liq: 0, soma_bruto: 0 };
+    res.json({
+      total, page: parseInt(page),
+      pages: Math.max(1, Math.ceil(total / parseInt(limit))),
+      data: rows,
+      soma_liquido: soma.soma_liq, soma_bruto: soma.soma_bruto,
+    });
+  } catch (e) { errRes(res, e); }
 });
 
 router.delete('/nfs/:id', async (req, res) => {
@@ -1381,30 +1461,31 @@ router.post('/nfs/corrigir-lote', async (req, res) => {
     const { itens } = req.body; // [{id, data_emissao, competencia, contrato_ref}]
     if (!Array.isArray(itens) || !itens.length) return res.status(400).json({ error: 'Nenhum item enviado' });
 
-    const upd = req.db.prepare(`
-      UPDATE notas_fiscais SET
-        data_emissao = COALESCE(@data_emissao, data_emissao),
-        competencia  = COALESCE(@competencia, competencia),
-        contrato_ref = COALESCE(@contrato_ref, contrato_ref)
-      WHERE id = @id
-    `);
-
-    const tx = req.db.transaction((lista) => {
-      let ok = 0;
-      lista.forEach(item => {
-        if (!item.id) return;
-        upd.run({
+    // P0 fix (2026-04-30): db.transaction com fn sync + .run() async em PG
+    // não esperava completar (BEGIN/COMMIT antes dos UPDATEs).
+    // Reescrito: fn async + tx.prepare dentro + await em cada run.
+    let total = 0;
+    const tx = req.db.transaction(async (txDb) => {
+      const upd = txDb.prepare(`
+        UPDATE notas_fiscais SET
+          data_emissao = COALESCE(@data_emissao, data_emissao),
+          competencia  = COALESCE(@competencia, competencia),
+          contrato_ref = COALESCE(@contrato_ref, contrato_ref)
+        WHERE id = @id
+      `);
+      for (const item of itens) {
+        if (!item.id) continue;
+        await upd.run({
           id: item.id,
           data_emissao: item.data_emissao || null,
           competencia:  item.competencia  || null,
           contrato_ref: item.contrato_ref || null,
         });
-        ok++;
-      });
-      return ok;
+        total++;
+      }
     });
+    await tx();
 
-    const total = tx(itens);
     audit(req, 'UPDATE_LOTE', 'notas_fiscais', '', `Correção em lote: ${total} NFs`);
     dashCacheInvalidate(req.companyKey);
     res.json({ ok: true, atualizadas: total });
@@ -1450,12 +1531,13 @@ router.post('/nfs/auto-vincular', async (req, res) => {
     let totalVinculadas = 0;
     const resumo = [];
 
-    const upd = req.db.prepare(`
-      UPDATE notas_fiscais SET contrato_ref = @contrato
-      WHERE id = @id
-    `);
-
-    req.db.transaction(async () => {
+    // P0 fix (2026-04-30): upd.run em forEach (Promise descartada) e fora
+    // da tx (cliente PG diferente). Movido pra dentro com tx.prepare + await.
+    const trans = req.db.transaction(async (tx) => {
+      const upd = tx.prepare(`
+        UPDATE notas_fiscais SET contrato_ref = @contrato
+        WHERE id = @id
+      `);
       for (const regra of REGRAS) {
         let where = `tomador LIKE @like`;
         const params = { like: regra.like };
@@ -1467,14 +1549,17 @@ router.post('/nfs/auto-vincular', async (req, res) => {
         if (regra.discriminacao_not) where += ` AND (discriminacao IS NULL OR (${regra.discriminacao_not}))`;
         if (regra.discriminacao_req) where += ` AND ${regra.discriminacao_req}`;
 
-        const nfs = await req.db.prepare(`SELECT id FROM notas_fiscais WHERE ${where}`).all(params);
+        const nfs = await tx.prepare(`SELECT id FROM notas_fiscais WHERE ${where}`).all(params);
         if (nfs.length > 0) {
-          nfs.forEach(n => upd.run({ id: n.id, contrato: regra.contrato }));
+          for (const n of nfs) {
+            await upd.run({ id: n.id, contrato: regra.contrato });
+          }
           totalVinculadas += nfs.length;
           resumo.push({ contrato: regra.contrato, vinculadas: nfs.length });
         }
       }
-    })();
+    });
+    await trans();
 
     audit(req, 'AUTO_VINCULAR', 'notas_fiscais', '', `Auto-vinculação: ${totalVinculadas} NFs`);
     dashCacheInvalidate(req.companyKey);
@@ -1557,17 +1642,17 @@ router.post('/vinculacoes/batch', async (req, res) => {
   const insertVinc = req.db.prepare(`INSERT INTO vinculacoes (extrato_id, contrato_num, tipo, valor) VALUES (@extrato_id, @contrato_num, @tipo, @valor)`);
   const updateExt = req.db.prepare(`UPDATE extratos SET contrato_vinculado = @contrato_num, status_conciliacao = 'CONCILIADO', updated_at=NOW() WHERE id = @id`);
 
-  const batch = req.db.transaction((items) => {
+  const batch = req.db.transaction(async (items) => {
     let count = 0;
     for (const v of items) {
-      insertVinc.run({ extrato_id: v.extrato_id, contrato_num: v.contrato_num, tipo: v.tipo || '', valor: v.valor || 0 });
-      updateExt.run({ contrato_num: v.contrato_num, id: v.extrato_id });
+      await insertVinc.run({ extrato_id: v.extrato_id, contrato_num: v.contrato_num, tipo: v.tipo || '', valor: v.valor || 0 });
+      await updateExt.run({ contrato_num: v.contrato_num, id: v.extrato_id });
       count++;
     }
     return count;
   });
 
-  const count = batch(vinculacoes);
+  const count = await batch(vinculacoes);
   dashCacheInvalidate(req.companyKey);
   res.json({ ok: true, message: `${count} vinculações salvas` });
 });
@@ -1611,7 +1696,7 @@ router.post('/import/extratos', (req, res, next) => getUpload(req).single("file"
         const row = {};
         header.forEach((h, idx) => { row[h.toLowerCase()] = cols[idx] || ''; });
 
-        const r = insert.run({
+        const r = await insert.run({
           id: parseInt(row.id || row.ID || i),
           mes: row.mes || row.MES || '',
           data: row.data || row.DATA || '',
@@ -1676,7 +1761,7 @@ router.post('/import/pagamentos', (req, res, next) => getUpload(req).single("fil
         const row = {};
         header.forEach((h, idx) => { row[h.toLowerCase().trim()] = cols[idx] || ''; });
 
-        insert.run({
+        await insert.run({
           ob: row['documento de pagamento'] || row.ob || '',
           gestao: row['unidade gestora'] || row.gestao || '',
           fonte: row['fonte de recurso'] || row.fonte || '',
@@ -1731,7 +1816,7 @@ router.post('/import/liquidacoes', (req, res, next) => getUpload(req).single("fi
         const row = {};
         header.forEach((h, idx) => { row[h.toLowerCase().trim()] = cols[idx] || ''; });
 
-        insert.run({
+        await insert.run({
           empenho: row.empenho || '',
           gestao: row['unidade gestora'] || row.gestao || '',
           favorecido: row.favorecido || '',
@@ -1824,7 +1909,7 @@ router.get('/relatorios/lucro-por-contrato', async (req, res) => {
            COALESCE(SUM(n.valor_bruto),0) as receita_bruta,
            COALESCE(SUM(n.valor_liquido),0) as receita_liquida,
            COALESCE(SUM(n.retencao),0) as total_retencao
-    FROM notas_fiscais n WHERE ${nfFilter} AND n.contrato_ref != ''
+    FROM notas_fiscais n WHERE (status_conciliacao IS NULL OR status_conciliacao != \'CANCELADA\') AND ${nfFilter} AND n.contrato_ref != ''
     GROUP BY n.contrato_ref
   `).all(params);
   const nfMap = {};
@@ -1841,7 +1926,7 @@ router.get('/relatorios/lucro-por-contrato', async (req, res) => {
   recBanc.forEach(r => { recBancMap[r.contrato_num] = r; });
 
   // Despesas alocadas ao contrato no período
-  const despesas = req.db.prepare(`
+  const _despesasRaw = await req.db.prepare(`
     SELECT d.contrato_ref,
            COALESCE(SUM(d.valor_bruto),0) as total_despesas,
            COALESCE(SUM(CASE WHEN UPPER(d.categoria) LIKE 'FOLHA%' THEN d.valor_bruto ELSE 0 END),0) as desp_folha,
@@ -1851,6 +1936,7 @@ router.get('/relatorios/lucro-por-contrato', async (req, res) => {
     FROM despesas d WHERE ${despFilter} AND d.contrato_ref != ''
     GROUP BY d.contrato_ref
   `).all(params);
+  const despesas = Array.isArray(_despesasRaw) ? _despesasRaw : [];
   const despMap = {};
   despesas.forEach(d => { despMap[d.contrato_ref] = d; });
 
@@ -1859,14 +1945,14 @@ router.get('/relatorios/lucro-por-contrato', async (req, res) => {
     SELECT n.contrato_ref, substr(n.data_emissao,1,7) as mes,
            COALESCE(SUM(n.valor_bruto),0) as receita,
            0 as despesa
-    FROM notas_fiscais n WHERE n.data_emissao >= CURRENT_DATE + INTERVAL '-6 months' AND n.contrato_ref != ''
+    FROM notas_fiscais n WHERE (status_conciliacao IS NULL OR status_conciliacao != \'CANCELADA\') AND n.data_emissao >= to_char(CURRENT_DATE - INTERVAL '6 months', 'YYYY-MM-DD') AND n.contrato_ref != ''
     GROUP BY n.contrato_ref, substr(n.data_emissao,1,7)
     ORDER BY mes
   `).all();
   const despMensal = await req.db.prepare(`
     SELECT d.contrato_ref, substr(d.data_iso,1,7) as mes,
            COALESCE(SUM(d.valor_bruto),0) as despesa
-    FROM despesas d WHERE d.data_iso >= CURRENT_DATE + INTERVAL '-6 months' AND d.contrato_ref != ''
+    FROM despesas d WHERE d.data_iso >= to_char(CURRENT_DATE - INTERVAL '6 months', 'YYYY-MM-DD') AND d.contrato_ref != ''
     GROUP BY d.contrato_ref, substr(d.data_iso,1,7)
   `).all();
 
@@ -1949,7 +2035,7 @@ router.get('/relatorios/a-receber-por-contrato', async (req, res) => {
         THEN p.valor_liquido ELSE 0 END), 0) as em_atraso,
       COALESCE(SUM(CASE WHEN p.status LIKE '%EMITIR NF%'
         THEN p.valor_liquido ELSE 0 END), 0) as emitir_nf,
-      GROUP_CONCAT(DISTINCT p.status) as status_parcelas,
+      STRING_AGG(DISTINCT p.status::text, ',') as status_parcelas,
       COUNT(DISTINCT CASE WHEN (p.valor_pago IS NULL OR p.valor_pago = 0)
         AND p.status NOT IN ('✅ PAGO','🧾 PARCIAL','🧾 RETENÇÃO','⏳ FUTURO')
         THEN p.id END) as qtd_pendentes,
@@ -2213,17 +2299,17 @@ router.get('/relatorios/excel', async (req, res) => {
 
       const apReceita = await req.db.prepare(`
         SELECT COALESCE(SUM(valor_bruto),0) as total, COALESCE(SUM(valor_liquido),0) as liquido
-        FROM notas_fiscais WHERE ${apNFFilter}
+        FROM notas_fiscais WHERE (status_conciliacao IS NULL OR status_conciliacao != \'CANCELADA\') AND ${apNFFilter}
       `).get(apParams);
 
       const apRetNFs = await req.db.prepare(`
         SELECT COALESCE(SUM(pis),0) as pis, COALESCE(SUM(cofins),0) as cofins,
                COALESCE(SUM(inss),0) as inss, COALESCE(SUM(ir),0) as irrf,
                COALESCE(SUM(retencao),0) as total_ret
-        FROM notas_fiscais WHERE ${apNFFilter}
+        FROM notas_fiscais WHERE (status_conciliacao IS NULL OR status_conciliacao != \'CANCELADA\') AND ${apNFFilter}
       `).get(apParams);
 
-      const apPorMes = req.db.prepare(`
+      const _apPorMesRaw = await req.db.prepare(`
         SELECT substr(data_emissao,1,7) as mes_iso,
                CASE substr(data_emissao,6,2)
                  WHEN '01' THEN 'JAN' WHEN '02' THEN 'FEV' WHEN '03' THEN 'MAR'
@@ -2236,10 +2322,11 @@ router.get('/relatorios/excel', async (req, res) => {
                COUNT(*) as qtd,
                COALESCE(SUM(pis),0) as pis_ret,
                COALESCE(SUM(cofins),0) as cofins_ret
-        FROM notas_fiscais WHERE ${apNFFilter} AND data_emissao != ''
+        FROM notas_fiscais WHERE (status_conciliacao IS NULL OR status_conciliacao != \'CANCELADA\') AND ${apNFFilter} AND data_emissao != ''
         GROUP BY substr(data_emissao,1,7)
         ORDER BY substr(data_emissao,1,7)
       `).all(apParams);
+      const apPorMes = Array.isArray(_apPorMesRaw) ? _apPorMesRaw : [];
 
       const totalRec = apPorMes.reduce((s,m) => s + m.recebido, 0);
 
@@ -2311,7 +2398,7 @@ router.get('/relatorios/excel', async (req, res) => {
 
     if (tipo === 'a-receber' || tipo === 'completo') {
       const wsAR = wb.addWorksheet('A Receber');
-      const contratosAR = req.db.prepare(`
+      const _contratosARRaw = await req.db.prepare(`
         SELECT
           c.numContrato, c.contrato, c.status as status_contrato, c.valor_mensal_liquido,
           COALESCE(SUM(CASE WHEN p.valor_pago > 0 THEN p.valor_pago ELSE 0 END), 0) as total_pago,
@@ -2326,6 +2413,7 @@ router.get('/relatorios/excel', async (req, res) => {
         FROM contratos c LEFT JOIN parcelas p ON p.contrato_num = c.numContrato
         GROUP BY c.numContrato ORDER BY a_receber DESC
       `).all();
+      const contratosAR = Array.isArray(_contratosARRaw) ? _contratosARRaw : [];
 
       wsAR.columns = [
         { header: 'Contrato', key: 'numContrato', width: 30 },
@@ -2388,6 +2476,7 @@ function calcRetencoes(categoria, valor_bruto) {
 }
 
 router.get('/despesas', async (req, res) => {
+  await ensureDespesasVinculoCols(req.db);
   const { categoria, fornecedor, status, from, to, contrato_ref, centro_custo, page = 1, limit = 100 } = req.query;
   let where = '1=1';
   const params = {};
@@ -2417,7 +2506,7 @@ router.get('/despesas/resumo', async (req, res) => {
   if (from) { dateFilter += ' AND data_iso >= @from'; params.from = from; }
   if (to) { dateFilter += ' AND data_iso <= @to'; params.to = to; }
 
-  const totais = req.db.prepare(`
+  const totais = await req.db.prepare(`
     SELECT
       COUNT(*) as total,
       COALESCE(SUM(valor_bruto), 0) as total_bruto,
@@ -2431,7 +2520,7 @@ router.get('/despesas/resumo', async (req, res) => {
       COUNT(CASE WHEN status = 'PAGO' THEN 1 END) as pagos,
       COUNT(CASE WHEN status = 'PENDENTE' THEN 1 END) as pendentes
     FROM despesas WHERE 1=1 ${dateFilter}
-  `).get(params);
+  `).get(params) || { total: 0, total_bruto: 0, total_liquido: 0, total_retencoes: 0, total_irrf: 0, total_csll: 0, total_pis: 0, total_cofins: 0, total_inss: 0, pagos: 0, pendentes: 0 };
 
   const porCategoria = await req.db.prepare(`
     SELECT categoria, COUNT(*) as qtd, COALESCE(SUM(valor_bruto), 0) as total
@@ -2456,6 +2545,24 @@ router.get('/despesas/resumo', async (req, res) => {
     .reduce((s, r) => s + r.total, 0);
 
   res.json({ totais, porCategoria, overhead, totalOverhead });
+});
+
+// ─── CATEGORIAS DISTINTAS ───────────────────────────────────────────────────
+// Retorna lista de categorias canônicas (UPPER+TRIM) presentes em despesas.
+// Usado pelo frontend para popular o <select> de filtro/cadastro de despesa.
+router.get('/despesas/categorias', async (req, res) => {
+  try {
+    const rows = await req.db.prepare(`
+      SELECT DISTINCT UPPER(TRIM(categoria)) AS categoria
+      FROM despesas
+      WHERE categoria IS NOT NULL AND TRIM(categoria) <> ''
+      ORDER BY 1
+    `).all();
+    res.json(rows.map(r => r.categoria));
+  } catch (e) {
+    console.error('[GET /despesas/categorias] erro:', e.message);
+    res.status(500).json({ erro: e.message });
+  }
 });
 
 // ─── RATEIO DE OVERHEAD POR CONTRATO ─────────────────────────────────────────
@@ -2494,15 +2601,15 @@ router.get('/despesas/rateio', async (req, res) => {
     ORDER BY valor_mensal_bruto DESC
   `).all();
 
-  const somaBase = contratos.reduce((s, c) => s + (Number(c.valor_mensal_bruto) || 0), 0);
+  const somaBase = contratos.reduce((s, c) => s + c.valor_mensal_bruto, 0);
 
   const rateio = contratos.map(c => {
-    const proporcao = somaBase > 0 ? (Number(c.valor_mensal_bruto) || 0) / somaBase : 0;
+    const proporcao = somaBase > 0 ? c.valor_mensal_bruto / somaBase : 0;
     return {
       numContrato:       c.numContrato,
       contrato:          c.contrato,
       orgao:             c.orgao,
-      valor_mensal:      +(Number(c.valor_mensal_bruto) || 0).toFixed(2),
+      valor_mensal:      +c.valor_mensal_bruto.toFixed(2),
       proporcao_pct:     +(proporcao * 100).toFixed(2),
       overhead_rateado:  +(proporcao * totalOverhead).toFixed(2),
     };
@@ -2534,7 +2641,7 @@ router.get('/despesas/compensacao', async (req, res) => {
     SELECT COALESCE(SUM(valor_bruto), 0) as receita_bruta,
            COALESCE(SUM(pis), 0) as pis_retido_clientes,
            COALESCE(SUM(cofins), 0) as cofins_retido_clientes
-    FROM notas_fiscais WHERE 1=1 ${nfFilter}
+    FROM notas_fiscais WHERE (status_conciliacao IS NULL OR status_conciliacao != \'CANCELADA\') AND 1=1 ${nfFilter}
   `).get(nfParams);
 
   const pis_devido = +(receita.receita_bruta * 0.0165).toFixed(2);
@@ -2619,7 +2726,7 @@ router.get('/apuracao-caixa', async (req, res) => {
            COALESCE(SUM(cofins), 0) as cofins_retido,
            COALESCE(SUM(retencao), 0) as total_retencao
     FROM notas_fiscais
-    WHERE competencia LIKE '%/26%' OR competencia LIKE '%jan/26%' OR competencia LIKE '%fev/26%' OR competencia LIKE '%mar/26%'
+    WHERE (status_conciliacao IS NULL OR status_conciliacao != \'CANCELADA\') AND competencia LIKE '%/26%' OR competencia LIKE '%jan/26%' OR competencia LIKE '%fev/26%' OR competencia LIKE '%mar/26%'
   `).get();
 
   // 3. Apuração PIS/COFINS pelo regime de caixa — Lucro Real não-cumulativo
@@ -2694,9 +2801,27 @@ router.get('/apuracao-caixa', async (req, res) => {
   });
 });
 
+// Garante colunas de vínculo Despesas ↔ Estoque/Patrimônio (idempotente).
+// Disparado em cada POST/GET pra ser auto-curativo se algum schema antigo
+// não tiver as colunas. ALTER TABLE ADD COLUMN IF NOT EXISTS é ignorado se a
+// coluna já existe (PostgreSQL 9.6+).
+async function ensureDespesasVinculoCols(db) {
+  try { await db.prepare(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS vinculo_tipo TEXT`).run(); } catch (_) {}
+  try { await db.prepare(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS vinculo_id INTEGER`).run(); } catch (_) {}
+}
+
 router.post('/despesas', async (req, res) => {
+  await ensureDespesasVinculoCols(req.db);
   const { categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa,
-          competencia, valor_bruto, obs, contrato_ref, centro_custo } = req.body;
+          competencia, valor_bruto, obs, contrato_ref, centro_custo,
+          // ── Opção B: tipo de lançamento + dados pra criar Estoque ou Patrimônio
+          tipo_lancamento,
+          // Estoque
+          estoque_item_id, estoque_item_novo_nome, estoque_item_categoria,
+          estoque_quantidade, estoque_unidade,
+          // Patrimônio
+          patrimonio_categoria, patrimonio_vida_util, patrimonio_residual, patrimonio_serie,
+        } = req.body;
   if (!valor_bruto) return res.status(400).json({ error: 'valor_bruto obrigatório' });
 
   const auto = calcRetencoes(categoria || 'FORNECEDOR', valor_bruto);
@@ -2714,7 +2839,7 @@ router.post('/despesas', async (req, res) => {
   const data_iso_val = parseDateBR(data_despesa || '');
   const dedup_hash_val = dedupHash(req.companyKey, data_iso_val, valor_bruto, fornecedor || '', descricao || '');
 
-  const r = req.db.prepare(`
+  const r = await req.db.prepare(`
     INSERT INTO despesas (categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, data_iso, competencia,
       valor_bruto, irrf, csll, pis_retido, cofins_retido, inss_retido, iss_retido, total_retencao, valor_liquido,
       status, obs, contrato_ref, centro_custo, dedup_hash)
@@ -2737,7 +2862,160 @@ router.post('/despesas', async (req, res) => {
     return res.status(409).json({ ok: false, error: 'Despesa duplicada detectada (mesma data, valor, fornecedor e descrição)' });
   }
 
-  res.json({ ok: true, id: r.lastInsertRowid, retencoes: ret });
+  const despesaId = r.lastInsertRowid;
+  let vinculo = null;
+
+  // ── Opção B: cria registro vinculado em Estoque ou Patrimônio ──
+  try {
+    if (tipo_lancamento === 'estoque' && estoque_quantidade > 0) {
+      let itemId = estoque_item_id ? parseInt(estoque_item_id, 10) : null;
+      // Cria item novo se solicitado
+      if (!itemId && estoque_item_novo_nome) {
+        const novoItem = await req.db.prepare(`
+          INSERT INTO estoque_itens (nome, categoria, descricao, unidade, estoque_minimo, valor_unitario, estoque_atual, contrato_ref)
+          VALUES (?, ?, ?, ?, 0, ?, 0, ?)
+        `).run(
+          estoque_item_novo_nome,
+          estoque_item_categoria || 'OUTROS',
+          descricao || '',
+          estoque_unidade || 'UN',
+          +(valor_bruto / Math.max(1, estoque_quantidade)).toFixed(2),
+          contrato_ref || null
+        );
+        itemId = novoItem.lastInsertRowid;
+      }
+      if (itemId) {
+        const qtd = parseFloat(estoque_quantidade);
+        const vunit = +(valor_bruto / Math.max(1, qtd)).toFixed(2);
+        // Movimento ENTRADA + atualiza saldo
+        await req.db.prepare(`
+          INSERT INTO estoque_movimentos
+            (item_id, tipo, quantidade, valor_unitario, total, data_movimento, motivo, fornecedor, nota_fiscal, contrato_ref)
+          VALUES (?, 'ENTRADA', ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(itemId, qtd, vunit, valor_bruto, data_iso_val,
+               'Lançado via Despesa #' + despesaId,
+               fornecedor || '', nf_numero || '', contrato_ref || null);
+        await req.db.prepare(`UPDATE estoque_itens SET estoque_atual = estoque_atual + ?, updated_at = NOW() WHERE id = ?`).run(qtd, itemId);
+        await req.db.prepare(`UPDATE despesas SET vinculo_tipo = 'estoque', vinculo_id = ? WHERE id = ?`).run(itemId, despesaId);
+        vinculo = { tipo: 'estoque', id: itemId, quantidade: qtd, valor_unitario: vunit };
+      }
+    } else if (tipo_lancamento === 'patrimonio') {
+      const pr = await req.db.prepare(`
+        INSERT INTO patrimonio
+          (empresa, descricao, categoria, numero_serie, contrato_ref,
+           valor_aquisicao, data_aquisicao, vida_util_meses, valor_residual, observacoes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        req.companyKey,
+        descricao || (`Aquisição via despesa #${despesaId}`),
+        patrimonio_categoria || 'Outro',
+        patrimonio_serie || null,
+        contrato_ref || null,
+        valor_bruto,
+        data_iso_val || new Date().toISOString().slice(0, 10),
+        parseInt(patrimonio_vida_util, 10) || 60,
+        +(parseFloat(patrimonio_residual) || 0),
+        `Lançado via Despesa #${despesaId}` + (fornecedor ? ` · Fornecedor: ${fornecedor}` : '')
+      );
+      const patId = pr.lastInsertRowid;
+      await req.db.prepare(`UPDATE despesas SET vinculo_tipo = 'patrimonio', vinculo_id = ? WHERE id = ?`).run(patId, despesaId);
+      vinculo = { tipo: 'patrimonio', id: patId };
+    }
+  } catch (vincErr) {
+    // Vínculo é best-effort — falha aqui não derruba a despesa, só loga.
+    console.error('[despesas/vinculo]', vincErr.message);
+    return res.json({ ok: true, id: despesaId, retencoes: ret, vinculo_erro: vincErr.message });
+  }
+
+  res.json({ ok: true, id: despesaId, retencoes: ret, vinculo });
+});
+
+// ─── PROMOVER despesa existente para Estoque ─────────────────────
+// Permite "promover" uma despesa que já foi salva como simples para
+// virar uma entrada de estoque, criando o vínculo retroativamente.
+router.post('/despesas/:id/promover-estoque', async (req, res) => {
+  try {
+    await ensureDespesasVinculoCols(req.db);
+    const id = parseInt(req.params.id, 10);
+    const desp = await req.db.prepare('SELECT * FROM despesas WHERE id = ?').get(id);
+    if (!desp) return res.status(404).json({ error: 'Despesa não encontrada' });
+    if (desp.vinculo_tipo) return res.status(400).json({ error: `Despesa já vinculada a ${desp.vinculo_tipo} #${desp.vinculo_id}` });
+
+    const { item_id, novo_nome, categoria, unidade, quantidade } = req.body;
+    const qtd = parseFloat(quantidade);
+    if (!qtd || qtd <= 0) return res.status(400).json({ error: 'Quantidade obrigatória' });
+
+    let itemId = item_id ? parseInt(item_id, 10) : null;
+    if (!itemId && novo_nome) {
+      const novo = await req.db.prepare(`
+        INSERT INTO estoque_itens (nome, categoria, descricao, unidade, estoque_minimo, valor_unitario, estoque_atual, contrato_ref)
+        VALUES (?, ?, ?, ?, 0, ?, 0, ?)
+      `).run(
+        novo_nome, categoria || 'OUTROS', desp.descricao || '', unidade || 'UN',
+        +(desp.valor_bruto / qtd).toFixed(2), desp.contrato_ref || null
+      );
+      itemId = novo.lastInsertRowid;
+    }
+    if (!itemId) return res.status(400).json({ error: 'Informe item_id existente ou novo_nome' });
+
+    const vunit = +(desp.valor_bruto / qtd).toFixed(2);
+    await req.db.prepare(`
+      INSERT INTO estoque_movimentos
+        (item_id, tipo, quantidade, valor_unitario, total, data_movimento, motivo, fornecedor, nota_fiscal, contrato_ref)
+      VALUES (?, 'ENTRADA', ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(itemId, qtd, vunit, desp.valor_bruto, desp.data_iso || new Date().toISOString().slice(0,10),
+           `Promoção retroativa de Despesa #${id}`, desp.fornecedor || '', desp.nf_numero || '',
+           desp.contrato_ref || null);
+    await req.db.prepare(`UPDATE estoque_itens SET estoque_atual = estoque_atual + ?, updated_at = NOW() WHERE id = ?`).run(qtd, itemId);
+    await req.db.prepare(`UPDATE despesas SET vinculo_tipo = 'estoque', vinculo_id = ? WHERE id = ?`).run(itemId, id);
+
+    res.json({ ok: true, vinculo: { tipo: 'estoque', id: itemId, quantidade: qtd, valor_unitario: vunit } });
+  } catch (e) { errRes(res, e); }
+});
+
+// ─── PROMOVER despesa existente para Patrimônio ──────────────────
+router.post('/despesas/:id/promover-patrimonio', async (req, res) => {
+  try {
+    await ensureDespesasVinculoCols(req.db);
+    const id = parseInt(req.params.id, 10);
+    const desp = await req.db.prepare('SELECT * FROM despesas WHERE id = ?').get(id);
+    if (!desp) return res.status(404).json({ error: 'Despesa não encontrada' });
+    if (desp.vinculo_tipo) return res.status(400).json({ error: `Despesa já vinculada a ${desp.vinculo_tipo} #${desp.vinculo_id}` });
+
+    const { categoria, vida_util_meses, valor_residual, numero_serie } = req.body;
+
+    const pr = await req.db.prepare(`
+      INSERT INTO patrimonio
+        (empresa, descricao, categoria, numero_serie, contrato_ref,
+         valor_aquisicao, data_aquisicao, vida_util_meses, valor_residual, observacoes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      req.companyKey,
+      desp.descricao || `Aquisição via despesa #${id}`,
+      categoria || 'Outro',
+      numero_serie || null,
+      desp.contrato_ref || null,
+      desp.valor_bruto,
+      desp.data_iso || new Date().toISOString().slice(0,10),
+      parseInt(vida_util_meses, 10) || 60,
+      +(parseFloat(valor_residual) || 0),
+      `Promoção retroativa de Despesa #${id}` + (desp.fornecedor ? ` · Fornecedor: ${desp.fornecedor}` : '')
+    );
+    const patId = pr.lastInsertRowid;
+    await req.db.prepare(`UPDATE despesas SET vinculo_tipo = 'patrimonio', vinculo_id = ? WHERE id = ?`).run(patId, id);
+
+    res.json({ ok: true, vinculo: { tipo: 'patrimonio', id: patId } });
+  } catch (e) { errRes(res, e); }
+});
+
+// ─── DESVINCULAR despesa (remove vínculo, mantém despesa+item) ───
+router.post('/despesas/:id/desvincular', async (req, res) => {
+  try {
+    await ensureDespesasVinculoCols(req.db);
+    const id = parseInt(req.params.id, 10);
+    await req.db.prepare(`UPDATE despesas SET vinculo_tipo = NULL, vinculo_id = NULL WHERE id = ?`).run(id);
+    res.json({ ok: true });
+  } catch (e) { errRes(res, e); }
 });
 
 router.patch('/despesas/:id', async (req, res) => {
@@ -2778,6 +3056,252 @@ router.delete('/despesas/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── IMPORTAÇÃO NFe XML (Item 3 — versão completa) ───────────────
+// Aceita .xml único ou .zip com múltiplos. Faz parse, classifica cada
+// item por CFOP/heurística e retorna preview (sem gravar). Usuário
+// revisa/edita e chama /confirmar pra criar despesas + estoque/patrimônio.
+
+const _xmldom = require('@xmldom/xmldom');
+
+// CFOPs que indicam aquisição de imobilizado (vão pra patrimônio).
+// Fonte: Tabela do SINIEF — entrada de mercadoria/serviço por CFOP de início 1, 2 ou 3.
+const CFOP_IMOBILIZADO = new Set([
+  '1551', '2551', '3551',  // Compra de bem para o ativo imobilizado
+  '1552', '2552',          // Transferência de bem do ativo imobilizado
+  '1553', '2553', '3553',  // Devolução de bem do ativo imobilizado
+  '1556', '2556',          // Compra de material para uso ou consumo
+]);
+
+// Helper: pega text content de um elemento ou null
+function _xmlText(parent, tagName) {
+  if (!parent) return null;
+  const el = parent.getElementsByTagName(tagName)[0];
+  return el ? (el.textContent || '').trim() : null;
+}
+
+// Heurística complementar quando CFOP não identifica claramente
+function _classificarItemPorXProd(xProd) {
+  const desc = String(xProd || '').toLowerCase();
+  // Patrimônio (bens duráveis)
+  const patrim = [
+    'computador','notebook','desktop','servidor','impressora','monitor',
+    'mesa','cadeira','armário','armario','rack','bancada',
+    'veículo','veiculo','carro','moto','caminhão','caminhao',
+    'câmera','camera','cftv','dvr','nvr','catraca','torniquete',
+    'ar condicionado','split','frigobar','geladeira','fogão','fogao',
+    'roteador','switch','firewall','no-break','nobreak',
+  ];
+  if (patrim.some(k => desc.includes(k))) return 'patrimonio';
+  // Default: estoque (consumível ou material)
+  return 'estoque';
+}
+
+// Parse de uma NFe (XML buffer) → estrutura padronizada
+function parseNFeXml(xmlBuffer) {
+  const xmlString = Buffer.isBuffer(xmlBuffer) ? xmlBuffer.toString('utf8') : String(xmlBuffer);
+  const doc = new _xmldom.DOMParser({ errorHandler: { warning: () => {}, error: () => {}, fatalError: () => {} } })
+    .parseFromString(xmlString, 'text/xml');
+
+  const infNFe = doc.getElementsByTagName('infNFe')[0];
+  if (!infNFe) throw new Error('XML não contém <infNFe>; arquivo não parece ser uma NFe válida');
+
+  const ide   = infNFe.getElementsByTagName('ide')[0];
+  const emit  = infNFe.getElementsByTagName('emit')[0];
+  const dest  = infNFe.getElementsByTagName('dest')[0];
+  const total = infNFe.getElementsByTagName('total')[0];
+  const ICMSTot = total ? total.getElementsByTagName('ICMSTot')[0] : null;
+
+  const dets = infNFe.getElementsByTagName('det');
+  const items = [];
+  for (let i = 0; i < dets.length; i++) {
+    const det = dets[i];
+    const prod = det.getElementsByTagName('prod')[0];
+    if (!prod) continue;
+    const cfop = _xmlText(prod, 'CFOP');
+    const xProd = _xmlText(prod, 'xProd');
+    let tipo_sugerido = 'estoque';
+    let motivo = '';
+    if (cfop && CFOP_IMOBILIZADO.has(cfop)) {
+      tipo_sugerido = 'patrimonio';
+      motivo = `CFOP ${cfop} = aquisição de imobilizado`;
+    } else {
+      tipo_sugerido = _classificarItemPorXProd(xProd);
+      motivo = tipo_sugerido === 'patrimonio'
+        ? 'descrição contém termo de bem durável'
+        : `CFOP ${cfop || '—'} → consumível/revenda`;
+    }
+    items.push({
+      ordem:       parseInt(det.getAttribute('nItem'), 10) || (i + 1),
+      codigo:      _xmlText(prod, 'cProd'),
+      descricao:   xProd,
+      ncm:         _xmlText(prod, 'NCM'),
+      cfop:        cfop,
+      unidade:     _xmlText(prod, 'uCom') || 'UN',
+      quantidade:  parseFloat(_xmlText(prod, 'qCom')) || 0,
+      valor_unit:  parseFloat(_xmlText(prod, 'vUnCom')) || 0,
+      valor_total: parseFloat(_xmlText(prod, 'vProd')) || 0,
+      tipo_sugerido,
+      motivo_sugestao: motivo,
+    });
+  }
+
+  return {
+    chave_nfe:       _xmlText(infNFe, 'Id') || infNFe.getAttribute('Id') || null,
+    numero:          _xmlText(ide, 'nNF'),
+    serie:           _xmlText(ide, 'serie'),
+    data_emissao:    (_xmlText(ide, 'dhEmi') || _xmlText(ide, 'dEmi') || '').slice(0, 10),
+    natureza:        _xmlText(ide, 'natOp'),
+    emitente: {
+      cnpj:  _xmlText(emit, 'CNPJ') || _xmlText(emit, 'CPF'),
+      nome:  _xmlText(emit, 'xNome'),
+      fant:  _xmlText(emit, 'xFant'),
+    },
+    destinatario: {
+      cnpj:  _xmlText(dest, 'CNPJ') || _xmlText(dest, 'CPF'),
+      nome:  _xmlText(dest, 'xNome'),
+    },
+    valor_total: parseFloat(_xmlText(ICMSTot, 'vNF')) || 0,
+    items,
+  };
+}
+
+// POST /import/nfe-xml/preview — upload (.xml ou .zip), retorna estrutura
+router.post('/import/nfe-xml/preview', (req, res, next) => getUpload(req).single('file')(req, res, next), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Arquivo não enviado' });
+    const ext = (req.file.originalname || '').toLowerCase().split('.').pop();
+    const buf = fs.readFileSync(req.file.path);
+
+    let nfes = [];
+    if (ext === 'zip') {
+      const AdmZip = require('adm-zip');
+      const zip = new AdmZip(buf);
+      for (const entry of zip.getEntries()) {
+        if (!entry.entryName.toLowerCase().endsWith('.xml')) continue;
+        try {
+          const nfe = parseNFeXml(entry.getData());
+          nfe._arquivo = entry.entryName;
+          nfes.push(nfe);
+        } catch (e) {
+          nfes.push({ _arquivo: entry.entryName, _erro: e.message });
+        }
+      }
+    } else if (ext === 'xml') {
+      const nfe = parseNFeXml(buf);
+      nfe._arquivo = req.file.originalname;
+      nfes.push(nfe);
+    } else {
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+      return res.status(400).json({ error: 'Aceita apenas .xml ou .zip' });
+    }
+
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+    res.json({ ok: true, total: nfes.length, nfes });
+  } catch (e) {
+    try { if (req.file) fs.unlinkSync(req.file.path); } catch (_) {}
+    errRes(res, e);
+  }
+});
+
+// POST /import/nfe-xml/confirmar — recebe estrutura (possivelmente editada
+// pelo user no preview) e cria 1 despesa por item da NFe, com vínculo a
+// estoque OU patrimônio conforme tipo_sugerido (ou tipo_user override).
+router.post('/import/nfe-xml/confirmar', async (req, res) => {
+  try {
+    await ensureDespesasVinculoCols(req.db);
+    const { nfes } = req.body;
+    if (!Array.isArray(nfes) || nfes.length === 0) {
+      return res.status(400).json({ error: 'nfes obrigatório' });
+    }
+
+    const resultados = [];
+
+    for (const nfe of nfes) {
+      if (nfe._erro) { resultados.push({ ...nfe, _ignorado: 'erro no parse' }); continue; }
+      const itensCriados = [];
+
+      for (const item of (nfe.items || [])) {
+        const tipo = item.tipo_user || item.tipo_sugerido || 'estoque';
+        const valor = Number(item.valor_total || 0);
+        if (valor <= 0) continue;
+        const data_iso_val = nfe.data_emissao || new Date().toISOString().slice(0, 10);
+
+        // 1) Cria despesa
+        const dedup_hash_val = dedupHash(req.companyKey, data_iso_val, valor,
+          nfe.emitente?.nome || '', item.descricao || '');
+        const r = await req.db.prepare(`
+          INSERT INTO despesas (categoria, descricao, fornecedor, cnpj_fornecedor, nf_numero, data_despesa, data_iso,
+            valor_bruto, valor_liquido, total_retencao, status, dedup_hash)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'PENDENTE', ?)
+        `).run(
+          tipo === 'estoque' ? 'EPI/Ferramentas' : 'FORNECEDOR',
+          item.descricao || '(sem descrição)',
+          nfe.emitente?.nome || '',
+          nfe.emitente?.cnpj || '',
+          nfe.numero || '',
+          data_iso_val.split('-').reverse().join('/'),
+          data_iso_val,
+          valor,
+          valor,
+          dedup_hash_val
+        );
+        if (r.changes === 0) {
+          itensCriados.push({ item: item.descricao, _dup: true });
+          continue;
+        }
+        const despId = r.lastInsertRowid;
+
+        // 2) Cria registro vinculado em estoque ou patrimônio
+        if (tipo === 'estoque') {
+          // Procura item de estoque por nome (match exato case-insensitive); cria se não achar
+          let itemRow = null;
+          try {
+            itemRow = await req.db.prepare(
+              `SELECT id FROM estoque_itens WHERE LOWER(nome) = LOWER(?) LIMIT 1`
+            ).get(item.descricao || '');
+          } catch (_) {}
+          let itemId = itemRow?.id;
+          if (!itemId) {
+            const novo = await req.db.prepare(`
+              INSERT INTO estoque_itens (nome, categoria, descricao, unidade, estoque_minimo, valor_unitario, estoque_atual)
+              VALUES (?, 'OUTROS', ?, ?, 0, ?, 0)
+            `).run(item.descricao || '(sem nome)', `NCM ${item.ncm || '—'} · CFOP ${item.cfop || '—'}`,
+                   item.unidade || 'UN', item.valor_unit || 0);
+            itemId = novo.lastInsertRowid;
+          }
+          await req.db.prepare(`
+            INSERT INTO estoque_movimentos (item_id, tipo, quantidade, valor_unitario, total, data_movimento, motivo, fornecedor, nota_fiscal)
+            VALUES (?, 'ENTRADA', ?, ?, ?, ?, ?, ?, ?)
+          `).run(itemId, item.quantidade || 1, item.valor_unit || valor, valor, data_iso_val,
+                 `NFe ${nfe.numero || ''} item ${item.ordem}`, nfe.emitente?.nome || '', nfe.numero || '');
+          await req.db.prepare(`UPDATE estoque_itens SET estoque_atual = estoque_atual + ?, updated_at = NOW() WHERE id = ?`).run(item.quantidade || 1, itemId);
+          await req.db.prepare(`UPDATE despesas SET vinculo_tipo = 'estoque', vinculo_id = ? WHERE id = ?`).run(itemId, despId);
+          itensCriados.push({ item: item.descricao, despesa_id: despId, vinculo: { tipo: 'estoque', id: itemId } });
+        } else if (tipo === 'patrimonio') {
+          const pr = await req.db.prepare(`
+            INSERT INTO patrimonio (empresa, descricao, categoria, valor_aquisicao, data_aquisicao, vida_util_meses, valor_residual, observacoes)
+            VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+          `).run(req.companyKey, item.descricao || '(sem descrição)', 'Equipamento',
+                 valor, data_iso_val, 60,
+                 `NFe ${nfe.numero || ''} item ${item.ordem} · ${nfe.emitente?.nome || ''}`);
+          const patId = pr.lastInsertRowid;
+          await req.db.prepare(`UPDATE despesas SET vinculo_tipo = 'patrimonio', vinculo_id = ? WHERE id = ?`).run(patId, despId);
+          itensCriados.push({ item: item.descricao, despesa_id: despId, vinculo: { tipo: 'patrimonio', id: patId } });
+        }
+      }
+
+      resultados.push({
+        nfe: nfe.numero,
+        emitente: nfe.emitente?.nome,
+        items_criados: itensCriados.length,
+        items: itensCriados,
+      });
+    }
+
+    res.json({ ok: true, total_nfes: resultados.length, resultados });
+  } catch (e) { errRes(res, e); }
+});
+
 router.post('/import/despesas', (req, res, next) => getUpload(req).single("file")(req, res, next), async (req, res) => {
   try {
     const extErr = validarExtensao(req.file.originalname, ['csv', 'txt']);
@@ -2810,7 +3334,7 @@ router.post('/import/despesas', (req, res, next) => getUpload(req).single("file"
         const descricao_row = row.descricao || row['descrição'] || '';
         const dedup_hash_row = dedupHash(req.companyKey, data_iso_row, vbruto, fornecedor_row, descricao_row);
 
-        const r = insert.run({
+        const r = await insert.run({
           categoria: cat,
           descricao: descricao_row,
           fornecedor: fornecedor_row,
@@ -2913,7 +3437,7 @@ router.post('/import/ofx', (req, res, next) => getUpload(req).single("file")(req
       "VALUES (@id, @mes, @data, @data_iso, @tipo, @historico, @debito, @credito, 'PENDENTE')"
     );
     let imported = 0, skipped = 0;
-    req.db.transaction(async () => {
+    await req.db.transaction(async () => {
       for (const t of txs) {
         const [y, m, d] = t.data_iso.split('-').map(Number);
         const r = ins.run({
@@ -3090,7 +3614,7 @@ ${amostra}`,
       VALUES (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito, 'PENDENTE')
     `);
     let imported = 0, skipped = 0;
-    req.db.transaction(async () => {
+    await req.db.transaction(async () => {
       for (const t of txs) {
         const r = ins.run({
           mes:      t.data.mes,
@@ -3226,7 +3750,7 @@ router.get('/prefeitura/conciliacao', async (req, res) => {
 
     const pagamentos = await req.db.prepare(`
       SELECT p.*,
-        (SELECT GROUP_CONCAT(n.numero) FROM pref_nfs n WHERE n.pagamento_id = p.id) as nfs_vinculadas
+        (SELECT STRING_AGG(n.numero::text, ',') FROM pref_nfs n WHERE n.pagamento_id = p.id) as nfs_vinculadas
       FROM pref_pagamentos p
       WHERE 1=1 ${dateFilter}
       ORDER BY p.data_pagamento_iso DESC, p.valor_pago DESC
@@ -3269,25 +3793,29 @@ router.get('/fluxo-projetado', async (req, res) => {
   try {
     const meses = Math.min(Math.max(parseInt(req.query.meses) || 6, 1), 24);
 
-    const contratos = req.db.prepare(
+    // FIX 2026-04: ILIKE case-insensitive (LIKE é case-sensitive em PG, escapava
+    // status como 'Encerrado' e contava errado).
+    const _contratosRaw = await req.db.prepare(
       "SELECT valor_mensal_liquido FROM contratos " +
-      "WHERE status NOT LIKE '%ENCERRADO%' AND status NOT LIKE '%RESCINDIDO%' " +
+      "WHERE COALESCE(status,'') NOT ILIKE '%ENCERRADO%' AND COALESCE(status,'') NOT ILIKE '%RESCINDIDO%' " +
       "AND (vigencia_fim IS NULL OR vigencia_fim = '' OR safe_date(vigencia_fim) >= CURRENT_DATE)"
     ).all();
-    const receitaMensal = contratos.reduce((s, c) => s + (Number(c.valor_mensal_liquido) || 0), 0);
+    const contratos = Array.isArray(_contratosRaw) ? _contratosRaw : [];
+    const receitaMensal = contratos.reduce((s, c) => s + (c.valor_mensal_liquido || 0), 0);
     const totalContratos = contratos.length;
 
-    const despMedia = req.db.prepare(
+    const _despMediaRow = await req.db.prepare(
       "SELECT COALESCE(AVG(mensal),0) as media FROM (" +
         "SELECT to_char(safe_date(data_iso), 'YYYY-MM') as mes, SUM(valor_bruto) as mensal " +
-        "FROM despesas WHERE data_iso >= CURRENT_DATE + INTERVAL '-3 months' AND data_iso != '' " +
-        "GROUP BY to_char(safe_date(data_iso), 'YYYY-MM') ORDER BY mes DESC LIMIT 3)"
-    ).get().media || 0;
-
-    const extR = req.db.prepare(
-      "SELECT COUNT(CASE WHEN credito > 0 AND status_conciliacao IN ('PENDENTE','A_IDENTIFICAR','') THEN 1 END) as pendentes, " +
-      "COUNT(CASE WHEN credito > 0 THEN 1 END) as total FROM extratos WHERE data_iso >= CURRENT_DATE + INTERVAL '-3 months'"
+        "FROM despesas WHERE data_iso >= to_char(CURRENT_DATE - INTERVAL '3 months', 'YYYY-MM-DD') AND data_iso != '' " +
+        "GROUP BY to_char(safe_date(data_iso), 'YYYY-MM') ORDER BY mes DESC LIMIT 3) sub"
     ).get();
+    const despMedia = (_despMediaRow && _despMediaRow.media) || 0;
+
+    const extR = await req.db.prepare(
+      "SELECT COUNT(CASE WHEN credito > 0 AND status_conciliacao IN ('PENDENTE','A_IDENTIFICAR','') THEN 1 END) as pendentes, " +
+      "COUNT(CASE WHEN credito > 0 THEN 1 END) as total FROM extratos WHERE data_iso >= to_char(CURRENT_DATE - INTERVAL '3 months', 'YYYY-MM-DD')"
+    ).get() || { total: 0, pendentes: 0 };
     const pctInadimplencia = extR.total > 0 ? +((extR.pendentes / extR.total) * 100).toFixed(1) : 0;
 
     const MESES_PT = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
@@ -3347,13 +3875,16 @@ router.get('/fluxo-parcelas', async (req, res) => {
     `).all(meses[0], meses[2]);
 
     // Despesa média mensal (últimos 3 meses)
-    const despMedia = await req.db.prepare(`
-      SELECT COALESCE(AVG(mensal), 0) as media FROM (
-        SELECT SUM(valor_bruto) as mensal FROM despesas
-        WHERE data_iso >= CURRENT_DATE + INTERVAL '-3 months' AND data_iso != ''
+    // FIX 2026-04: PG exige alias na subquery em FROM (`AS sub`) e
+    //             `await ... .get()` precisa ser awaited ANTES do `.media`.
+    const _despRow = await req.db.prepare(`
+      SELECT COALESCE(AVG(mensal), 0) AS media FROM (
+        SELECT SUM(valor_bruto) AS mensal FROM despesas
+        WHERE data_iso >= to_char(CURRENT_DATE - INTERVAL '3 months', 'YYYY-MM-DD') AND data_iso != ''
         GROUP BY to_char(safe_date(data_iso), 'YYYY-MM') ORDER BY 1 DESC LIMIT 3
-      )
-    `).get().media || 0;
+      ) AS sub
+    `).get();
+    const despMedia = (_despRow && _despRow.media) || 0;
 
     // Agrupa por mês
     const MESES_PT = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
@@ -3428,10 +3959,12 @@ router.get('/conta-vinculada/estimativa', async (req, res) => {
       return res.json({ contratos: [], mensagem: 'Nenhum contrato federal com conta vinculada encontrado' });
     }
 
-    const resultado = await Promise.all(contratos.map(async contrato => {
+    const resultado = await Promise.all((Array.isArray(contratos) ? contratos : []).map(async contrato => {
       // NFs do contrato (buscar por tomador UFT/UFNT)
+      const numContratoStr = String(contrato.numContrato || '');
+      const isUFT = numContratoStr.includes('UFT');
       let nfsQuery;
-      if (contrato.numContrato.includes('UFT')) {
+      if (isUFT) {
         nfsQuery = `SELECT DISTINCT numero, competencia, cidade, valor_bruto, valor_liquido, retencao, inss, ir, iss,
                      data_emissao, tomador FROM notas_fiscais
                      WHERE (tomador LIKE '%UFT%' OR tomador LIKE '%UNIVERSIDADE FEDERAL%' OR tomador LIKE '%UFNT%')
@@ -3444,9 +3977,10 @@ router.get('/conta-vinculada/estimativa', async (req, res) => {
                      AND competencia != '' AND competencia IS NOT NULL
                      ORDER BY competencia, cidade`;
       }
-      const nfs = contrato.numContrato.includes('UFT')
+      const _nfsRaw = isUFT
         ? await db.prepare(nfsQuery).all()
-        : await db.prepare(nfsQuery).all(contrato.numContrato);
+        : await db.prepare(nfsQuery).all(numContratoStr);
+      const nfs = Array.isArray(_nfsRaw) ? _nfsRaw : [];
 
       // Valor mensal bruto do contrato
       const valorMensalBruto = contrato.valor_mensal_bruto || 0;
@@ -3778,7 +4312,7 @@ router.get('/export/margem', async (req, res) => {
 
     const contratos = await req.db.prepare(`SELECT numContrato, contrato, orgao, status, valor_mensal_bruto, vigencia_inicio, vigencia_fim, total_pago FROM contratos ORDER BY contrato`).all();
     const nfMap  = {};
-    await req.db.prepare(`SELECT n.contrato_ref, SUM(n.valor_bruto) as receita_bruta, SUM(n.valor_liquido) as receita_liquida, SUM(n.retencao) as total_retencao, COUNT(*) as qtd_nfs FROM notas_fiscais n WHERE ${nfFilter} GROUP BY n.contrato_ref`).all(params).forEach(r => { nfMap[r.contrato_ref] = r; });
+    await req.db.prepare(`SELECT n.contrato_ref, SUM(n.valor_bruto) as receita_bruta, SUM(n.valor_liquido) as receita_liquida, SUM(n.retencao) as total_retencao, COUNT(*) as qtd_nfs FROM notas_fiscais n WHERE (status_conciliacao IS NULL OR status_conciliacao != \'CANCELADA\') AND ${nfFilter} GROUP BY n.contrato_ref`).all(params).forEach(r => { nfMap[r.contrato_ref] = r; });
     const despMap = {};
     await req.db.prepare(`SELECT d.contrato_ref, SUM(d.valor_bruto) as total_despesas, SUM(CASE WHEN d.categoria='FOLHA' THEN d.valor_bruto ELSE 0 END) as desp_folha, SUM(CASE WHEN d.categoria='FORNECEDOR' THEN d.valor_bruto ELSE 0 END) as desp_fornecedor, SUM(CASE WHEN d.categoria NOT IN ('FOLHA','FORNECEDOR') THEN d.valor_bruto ELSE 0 END) as desp_outras FROM despesas d WHERE ${despFilter} GROUP BY d.contrato_ref`).all(params).forEach(r => { despMap[r.contrato_ref] = r; });
 
@@ -4008,33 +4542,37 @@ router.get('/conciliacao/tres-vias', async (req, res) => {
     if (from)     { nfWhere += ' AND data_emissao >= @from';   nfP.from     = from; }
     if (to)       { nfWhere += ' AND data_emissao <= @to';     nfP.to       = to; }
     if (contrato) { nfWhere += ' AND contrato_ref = @contrato'; nfP.contrato = contrato; }
-    const nfs = await req.db.prepare(
+    const _nfsRaw = await req.db.prepare(
       `SELECT contrato_ref, numero, data_emissao, valor_bruto, valor_liquido, retencao FROM notas_fiscais WHERE ${nfWhere} ORDER BY data_emissao DESC`
     ).all(nfP);
+    const nfs = Array.isArray(_nfsRaw) ? _nfsRaw : [];
 
     // 2. Extratos bancários (créditos vinculados) no período
     let extWhere = 'credito > 0 AND status_conciliacao = \'CONCILIADO\''; const extP = {};
     if (from)     { extWhere += ' AND data_iso >= @from';            extP.from     = from; }
     if (to)       { extWhere += ' AND data_iso <= @to';              extP.to       = to; }
     if (contrato) { extWhere += ' AND contrato_vinculado = @contrato'; extP.contrato = contrato; }
-    const extratos = await req.db.prepare(
+    const _extratosRaw = await req.db.prepare(
       `SELECT contrato_vinculado, id, data, historico, credito FROM extratos WHERE ${extWhere} ORDER BY data_iso DESC`
     ).all(extP);
+    const extratos = Array.isArray(_extratosRaw) ? _extratosRaw : [];
 
     // 3. Pagamentos do governo no período
     let pgWhere = '1=1'; const pgP = {};
     if (from) { pgWhere += ' AND data_pagamento_iso >= @from'; pgP.from = from; }
     if (to)   { pgWhere += ' AND data_pagamento_iso <= @to';   pgP.to   = to; }
-    const pagamentos = await req.db.prepare(
+    const _pagamentosRaw = await req.db.prepare(
       `SELECT ob, gestao, favorecido, data_pagamento, valor_pago FROM pagamentos WHERE ${pgWhere} ORDER BY data_pagamento_iso DESC LIMIT 500`
     ).all(pgP);
+    const pagamentos = Array.isArray(_pagamentosRaw) ? _pagamentosRaw : [];
 
     // 4. Resumo por contrato: agrupa pelas chaves usadas nas próprias NFs/extratos.
     // Normaliza labels históricos para numContrato canônico e descarta:
     //   - marcador "⚠️ CONTAMINADA" (NFs pertencentes a outra empresa)
     //   - labels técnicos não-contrato (JUROS, SALDO, TRANSFERÊNCIA, PIX REJEITADO, Montana Segurança/Assessoria)
+    const _contratosCanonRaw = await req.db.prepare('SELECT numContrato FROM contratos').all();
     const contratosCanon = new Set(
-      await req.db.prepare('SELECT numContrato FROM contratos').all().map(r => r.numContrato)
+      (Array.isArray(_contratosCanonRaw) ? _contratosCanonRaw : []).map(r => r.numContrato)
     );
     // Mapeamento de labels históricos → numContrato atual (mesma empresa).
     // Preenchido manualmente conforme contaminação identificada nos bancos.
@@ -4127,18 +4665,225 @@ router.get('/contratos/:num/detalhe', async (req, res) => {
     const baseCalculo   = totalRecebido > 0 ? totalRecebido : (c.total_pago || 0);
     const margem        = baseCalculo > 0 ? +((baseCalculo - totalDespesas) / baseCalculo * 100).toFixed(1) : 0;
 
-    const fluxoMensal = await req.db.prepare(`
+    const _fluxoMensalRaw2 = await req.db.prepare(`
       SELECT substr(data_iso,1,7) as mes, SUM(credito) as recebido, COUNT(*) as qtd
       FROM extratos
       WHERE (contrato_vinculado = ? OR contrato_vinculado LIKE ?) AND data_iso != ''
       GROUP BY substr(data_iso,1,7) ORDER BY mes DESC LIMIT 12
-    `).all(num, orgLike).reverse();
+    `).all(num, orgLike);
+    const fluxoMensal = (Array.isArray(_fluxoMensalRaw2) ? _fluxoMensalRaw2 : []).slice().reverse();
 
     res.json({ contrato: c, parcelas, nfs, extratos, despesas, fluxoMensal,
       resumo: { totalRecebido: +totalRecebido.toFixed(2), totalNFs: +totalNFs.toFixed(2),
         totalDespesas: +totalDespesas.toFixed(2), margem,
         qtdNFs: nfs.length, qtdExtratos: extratos.length, qtdDespesas: despesas.length } });
   } catch(e) { errRes(res, e); }
+});
+
+// ─── FATURAMENTO PREVISTO POR MÊS (sub-aba "Previsto" em Contratos) ──
+// Gera quadro de faturamento esperado por competência, quebrando por
+// contrato e posto. Usa bol_contratos/bol_postos/bol_itens (módulo Boletins)
+// quando disponível; cai pra contratos.valor_mensal_liquido quando não.
+router.get('/contratos/faturamento-previsto', async (req, res) => {
+  try {
+    const meses = Math.min(Math.max(parseInt(req.query.meses, 10) || 6, 1), 24);
+
+    // 1) Contratos da empresa (bol_contratos = catálogo do módulo Boletins).
+    //    Faz LEFT JOIN com `contratos` via contrato_ref para puxar vigência/status
+    //    e detectar contratos encerrados ou fora de vigência em cada mês.
+    // FIX 2026-04: COALESCE(bc.ativo, TRUE) = TRUE falhava quando ativo era INTEGER
+    // em PG (mismatch boolean/int). Cast pra text e check exclusivo é type-safe.
+    const _contratosBolRaw = await req.db.prepare(`
+      SELECT bc.id, bc.nome, bc.contratante, bc.contrato_ref, bc.numero_contrato,
+             c.vigencia_inicio, c.vigencia_fim, c.status, c.valor_mensal_liquido
+      FROM bol_contratos bc
+      LEFT JOIN contratos c ON c.numContrato = bc.contrato_ref
+      WHERE COALESCE(bc.ativo::text, 'true') NOT IN ('0','false','f')
+      ORDER BY bc.nome
+    `).all();
+    const contratosBol = Array.isArray(_contratosBolRaw) ? _contratosBolRaw : [];
+
+    // 2) Para cada contrato, busca postos + soma de itens (qtd × valor_unitario)
+    for (const contrato of contratosBol) {
+      const postos = await req.db.prepare(`
+        SELECT bp.id, bp.campus_key, bp.campus_nome, bp.municipio, bp.label_resumo,
+               COALESCE(SUM(bi.quantidade * bi.valor_unitario), 0) AS valor_mensal
+        FROM bol_postos bp
+        LEFT JOIN bol_itens bi ON bi.posto_id = bp.id
+        WHERE bp.contrato_id = ?
+        GROUP BY bp.id, bp.campus_key, bp.campus_nome, bp.municipio, bp.label_resumo, bp.ordem
+        ORDER BY bp.ordem
+      `).all(contrato.id);
+      contrato.postos = (postos || []).map(p => ({
+        ...p,
+        valor_mensal: Number(p.valor_mensal || 0),
+      }));
+      contrato.total_mensal = contrato.postos.reduce((s, p) => s + p.valor_mensal, 0);
+      // Fallback: se não há postos cadastrados mas o contrato financeiro tem
+      // valor mensal, usa esse valor sem detalhamento de postos.
+      if (contrato.total_mensal === 0 && Number(contrato.valor_mensal_liquido || 0) > 0) {
+        contrato.total_mensal = Number(contrato.valor_mensal_liquido);
+        contrato.postos = [{
+          id: null, campus_nome: '(sem postos cadastrados)',
+          municipio: '', valor_mensal: contrato.total_mensal,
+        }];
+      }
+    }
+
+    // 3) Gera array de meses partindo do mês atual e filtra contratos ativos
+    const hoje = new Date();
+    const mesesArr = [];
+    const MESES_PT = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    for (let i = 0; i < meses; i++) {
+      const d = new Date(hoje.getFullYear(), hoje.getMonth() + i, 1);
+      const ano = d.getFullYear();
+      const mes = String(d.getMonth() + 1).padStart(2, '0');
+      const mes_iso = `${ano}-${mes}`;
+      const fim_mes = new Date(ano, d.getMonth() + 1, 0).toISOString().slice(0, 10);
+      const ini_mes = `${mes_iso}-01`;
+
+      const contratosAtivos = contratosBol.filter(c => {
+        if (c.status && /ENCERRADO|RESCINDIDO/i.test(c.status)) return false;
+        if (c.vigencia_fim && c.vigencia_fim !== '' && c.vigencia_fim < ini_mes) return false;
+        if (c.vigencia_inicio && c.vigencia_inicio !== '' && c.vigencia_inicio > fim_mes) return false;
+        return c.total_mensal > 0;
+      });
+
+      mesesArr.push({
+        mes_iso,
+        mes_label: `${MESES_PT[d.getMonth()]}/${ano}`,
+        contratos: contratosAtivos.map(c => ({
+          id: c.id, nome: c.nome, contratante: c.contratante,
+          contrato_ref: c.contrato_ref, numero_contrato: c.numero_contrato,
+          postos: c.postos, total_mensal: +c.total_mensal.toFixed(2),
+        })),
+        total_geral: +contratosAtivos.reduce((s, c) => s + c.total_mensal, 0).toFixed(2),
+      });
+    }
+
+    res.json({
+      ok: true,
+      horizonte_meses: meses,
+      meses: mesesArr,
+      qtd_contratos_cadastrados: contratosBol.length,
+    });
+  } catch (e) { errRes(res, e); }
+});
+
+// ─── TIMELINE DE CONTRATO (modal acionado pelo botão "📅 Timeline") ──
+// Implementado em 2026-04 — antes o botão chamava esta rota mas ela não
+// existia, mostrando "Erro ao carregar timeline" e nada acontecia.
+router.get('/contratos/:id/timeline', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'ID inválido' });
+
+    const c = await req.db.prepare(`SELECT * FROM contratos WHERE id = ?`).get(id);
+    if (!c) return res.status(404).json({ error: 'Contrato não encontrado' });
+
+    const num     = c.numContrato || c.numcontrato || '';
+    const orgKey  = num.split(' ')[0] || '';
+    const orgLike = '%' + orgKey + '%';
+
+    // dias_para_vencer (positivo = ainda vigente; negativo = vencido)
+    let dias_para_vencer = null;
+    if (c.vigencia_fim) {
+      try {
+        const r = await req.db.prepare(`SELECT (safe_date(?) - CURRENT_DATE) AS d`).get(c.vigencia_fim);
+        if (r && r.d != null) dias_para_vencer = Number(r.d);
+      } catch (_) { /* vigencia_fim malformada → null */ }
+    }
+
+    // Total efetivamente recebido (extratos vinculados ao contrato)
+    const _totRec = await req.db.prepare(`
+      SELECT COALESCE(SUM(credito), 0) AS v
+      FROM extratos
+      WHERE contrato_vinculado = ? OR (contrato_vinculado LIKE ? AND contrato_vinculado != '')
+    `).get(num, orgLike);
+    const total_pago = Number((_totRec && _totRec.v) || c.total_pago || 0);
+
+    // Total faturado em NFs
+    const _totNF = await req.db.prepare(`
+      SELECT COALESCE(SUM(valor_bruto), 0) AS v, COUNT(*) AS qtd
+      FROM notas_fiscais
+      WHERE (status_conciliacao IS NULL OR status_conciliacao != \'CANCELADA\') AND contrato_ref = ? OR (contrato_ref LIKE ? AND contrato_ref != '')
+    `).get(num, orgLike);
+    const total_nfs = Number((_totNF && _totNF.v) || 0);
+
+    // Boletins/competências distintas em que houve faturamento
+    const boletinsRows = await req.db.prepare(`
+      SELECT DISTINCT competencia
+      FROM notas_fiscais
+      WHERE (contrato_ref = ? OR (contrato_ref LIKE ? AND contrato_ref != ''))
+        AND competencia IS NOT NULL AND competencia <> ''
+      ORDER BY competencia DESC
+    `).all(num, orgLike);
+    const boletins = (Array.isArray(boletinsRows) ? boletinsRows : []).map(b => b.competencia);
+
+    // Últimos pagamentos (recebimentos). Competência: best-effort via mês
+    // do data_iso (vinculacoes não amarra extrato→NF, então não dá pra
+    // pegar a competência exata; o mês do recebimento é uma boa proxy).
+    const pagamentos = await req.db.prepare(`
+      SELECT data_iso, credito, substr(data_iso, 1, 7) AS competencia
+      FROM extratos
+      WHERE (contrato_vinculado = ? OR (contrato_vinculado LIKE ? AND contrato_vinculado != ''))
+        AND credito > 0
+        AND data_iso IS NOT NULL AND data_iso <> ''
+      ORDER BY data_iso DESC
+      LIMIT 10
+    `).all(num, orgLike);
+
+    // Aditivos / reajustes — campo livre em contratos.aditivos (JSON ou texto)
+    // ou tabela específica se existir. Tentamos tabela primeiro; cai em c.aditivos.
+    let aditivos = [];
+    try {
+      const r = await req.db.prepare(`
+        SELECT tipo, data, descricao FROM contrato_aditivos
+        WHERE contrato_id = ? ORDER BY data DESC
+      `).all(id);
+      if (Array.isArray(r)) aditivos = r;
+    } catch (_) {
+      // Tabela não existe — tenta parsear campo texto livre
+      if (c.aditivos) {
+        try {
+          const parsed = typeof c.aditivos === 'string' ? JSON.parse(c.aditivos) : c.aditivos;
+          if (Array.isArray(parsed)) aditivos = parsed;
+        } catch (_) {
+          aditivos = [{ tipo: 'Aditivo', data: null, descricao: String(c.aditivos).slice(0, 240) }];
+        }
+      }
+    }
+
+    // Valor total estimado: prioriza colunas explícitas, depois calcula via meses
+    let valor_total_estimado = Number(c.valor_total || c.valor_total_contrato || 0);
+    if (!valor_total_estimado && c.valor_mensal_liquido && c.vigencia_inicio && c.vigencia_fim) {
+      try {
+        const _meses = await req.db.prepare(`
+          SELECT GREATEST(1, ROUND((safe_date(?) - safe_date(?))::numeric / 30.0)::int) AS m
+        `).get(c.vigencia_fim, c.vigencia_inicio);
+        const meses = (_meses && _meses.m) || 12;
+        valor_total_estimado = Number(c.valor_mensal_liquido) * meses;
+      } catch (_) { valor_total_estimado = Number(c.valor_mensal_liquido) * 12; }
+    }
+    if (!valor_total_estimado) valor_total_estimado = total_pago + Number(c.total_aberto || 0);
+
+    const percentual_executado = valor_total_estimado > 0
+      ? Math.min(100, Math.round((total_pago / valor_total_estimado) * 100))
+      : 0;
+
+    res.json({
+      contrato: { ...c, numContrato: num },
+      dias_para_vencer,
+      total_pago: +total_pago.toFixed(2),
+      total_nfs: +total_nfs.toFixed(2),
+      qtd_nfs: Number((_totNF && _totNF.qtd) || 0),
+      boletins,
+      pagamentos: (pagamentos || []).map(p => ({ ...p, credito: Number(p.credito || 0) })),
+      aditivos,
+      valor_total_estimado: +valor_total_estimado.toFixed(2),
+      percentual_executado,
+    });
+  } catch (e) { errRes(res, e); }
 });
 
 // ─── CLASSIFICAR CRÉDITOS INTERNO / INVESTIMENTO ─────────────────
@@ -4180,8 +4925,8 @@ router.post('/extratos/classificar-interno', async (req, res) => {
          AND (${buildWhere(PALAVRAS_INVESTIMENTO)})`
     );
 
-    const resInt = stmtInt.run(...buildParams(PALAVRAS_INTERNO));
-    const resInv = stmtInv.run(...buildParams(PALAVRAS_INVESTIMENTO));
+    const resInt = await stmtInt.run(...buildParams(PALAVRAS_INTERNO));
+    const resInv = await stmtInv.run(...buildParams(PALAVRAS_INVESTIMENTO));
 
     // Contagem de cada tipo após classificação
     const contagens = await db.prepare(`
@@ -4376,18 +5121,20 @@ router.post('/extratos/classificar-todos', async (req, res) => {
         ${extraWhere}
     `).all(extraParams);
 
-    const stmtUpdate = db.prepare(`
-      UPDATE extratos
-      SET status_conciliacao = @status,
-          contrato_vinculado  = CASE WHEN @contrato IS NOT NULL THEN @contrato ELSE contrato_vinculado END,
-          updated_at=NOW()
-      WHERE id = @id
-    `);
-
     let totalAtualizados = 0;
     const porCategoria = {};
 
-    const updateMany = db.transaction(async () => {
+    // P0 fix (2026-04-30): stmtUpdate fora da tx + .run() sem await em PG
+    // não esperava completar dentro da transaction. Movido pra dentro
+    // (tx.prepare) e cada .run() agora com await.
+    const updateMany = db.transaction(async (tx) => {
+      const stmtUpdate = tx.prepare(`
+        UPDATE extratos
+        SET status_conciliacao = @status,
+            contrato_vinculado  = CASE WHEN @contrato IS NOT NULL THEN @contrato ELSE contrato_vinculado END,
+            updated_at=NOW()
+        WHERE id = @id
+      `);
       for (const e of pendentes) {
         const hist = (e.historico || '').toUpperCase();
         for (const regra of REGRAS) {
@@ -4397,7 +5144,7 @@ router.post('/extratos/classificar-todos', async (req, res) => {
           });
           if (matched) {
             const status = regra.categoria;
-            stmtUpdate.run({ id: e.id, status, contrato: regra.contrato || null });
+            await stmtUpdate.run({ id: e.id, status, contrato: regra.contrato || null });
             totalAtualizados++;
             const key = regra.contrato || regra.categoria;
             porCategoria[key] = (porCategoria[key] || 0) + 1;
@@ -4407,7 +5154,7 @@ router.post('/extratos/classificar-todos', async (req, res) => {
       }
     });
 
-    updateMany();
+    await updateMany();
 
     // Resumo pós-classificação
     const contagens = await db.prepare(`
@@ -4588,7 +5335,7 @@ router.get('/conciliacao/dashboard', async (req, res) => {
     const anoFiltro = ano || new Date().getFullYear().toString();
 
     // Progresso por mês (créditos)
-    const porMes = db.prepare(`
+    const _porMesRaw = await db.prepare(`
       SELECT
         substr(data_iso,1,7) as mes,
         COUNT(*) as total_lancamentos,
@@ -4601,9 +5348,10 @@ router.get('/conciliacao/dashboard', async (req, res) => {
       GROUP BY substr(data_iso,1,7)
       ORDER BY mes
     `).all({ ano: anoFiltro });
+    const porMes = Array.isArray(_porMesRaw) ? _porMesRaw : [];
 
     // Progresso por contrato (somente extratos vinculados)
-    const porContrato = db.prepare(`
+    const _porContratoRaw = await db.prepare(`
       SELECT
         contrato_vinculado,
         COUNT(*) as qtd_lancamentos,
@@ -4618,6 +5366,7 @@ router.get('/conciliacao/dashboard', async (req, res) => {
       GROUP BY contrato_vinculado
       ORDER BY total_recebido DESC
     `).all({ ano: anoFiltro });
+    const porContrato = Array.isArray(_porContratoRaw) ? _porContratoRaw : [];
 
     // Totais gerais do ano
     const totais = await db.prepare(`
@@ -4706,26 +5455,27 @@ router.get('/conciliacao/duplicatas', async (req, res) => {
     if (to)   { dateWhere += ' AND a.data_iso <= @to';   dateParams.to   = to; }
 
     // Busca pares de créditos em bancos diferentes com valor idêntico e datas próximas
-    const pares = db.prepare(`
+    const _paresRaw = await db.prepare(`
       SELECT
         a.id as id_a, a.data as data_a, a.banco as banco_a, a.conta as conta_a,
         a.credito as credito_a, a.historico as historico_a, a.status_conciliacao as status_a,
         b.id as id_b, b.data as data_b, b.banco as banco_b, b.conta as conta_b,
         b.credito as credito_b, b.historico as historico_b, b.status_conciliacao as status_b,
         ABS(a.credito - b.credito) as diferenca_valor,
-        ABS(julianday(a.data_iso) - julianday(b.data_iso)) as diferenca_dias
+        ABS(EXTRACT(EPOCH FROM (a.data_iso::timestamp - b.data_iso::timestamp))/86400) as diferenca_dias
       FROM extratos a
       JOIN extratos b ON (
         a.id < b.id
         AND (a.banco != b.banco OR a.conta != b.conta)
         AND ABS(a.credito - b.credito) / a.credito <= @tol
-        AND ABS(julianday(a.data_iso) - julianday(b.data_iso)) <= @janela
+        AND ABS(EXTRACT(EPOCH FROM (a.data_iso::timestamp - b.data_iso::timestamp))/86400) <= @janela
         AND a.credito > 0 AND b.credito > 0
       )
       WHERE 1=1 ${dateWhere}
       ORDER BY a.data_iso DESC, a.credito DESC
       LIMIT 100
     `).all({ ...dateParams, tol: parseFloat(tolerancia_valor), janela });
+    const pares = Array.isArray(_paresRaw) ? _paresRaw : [];
 
     res.json({
       ok: true,
@@ -4930,7 +5680,7 @@ router.post('/compras/requisicoes', async (req, res) => {
       `);
       for (const it of itens) {
         if (!it.descricao) continue;
-        stmtItem.run(reqId, it.descricao, it.unidade || 'un', it.quantidade || 1, it.valor_unitario_est || null);
+        await stmtItem.run(reqId, it.descricao, it.unidade || 'un', it.quantidade || 1, it.valor_unitario_est || null);
       }
     }
 

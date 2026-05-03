@@ -7,7 +7,7 @@ const CATS = ['EQUIPAMENTO','MAQUINARIO','EPI','UNIFORME','CONSUMIVEL','MATERIAL
 
 // Garante tabela ficha_epi existe
 async function ensureFichaTable(db) {
-  db.prepare(`CREATE TABLE IF NOT EXISTS estoque_ficha_epi (
+  await db.prepare(`CREATE TABLE IF NOT EXISTS estoque_ficha_epi (
     id BIGSERIAL PRIMARY KEY,
     funcionario_id INTEGER,
     funcionario_nome TEXT NOT NULL,
@@ -26,7 +26,8 @@ async function ensureFichaTable(db) {
     created_at TIMESTAMP DEFAULT NOW()
   )`).run();
   // Migração: adicionar colunas se não existirem
-  const cols = await db.prepare(`SELECT column_name as name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='estoque_ficha_epi' ORDER BY ordinal_position`).all().map(c => c.name);
+  const colRows = await db.prepare(`SELECT column_name as name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='estoque_ficha_epi' ORDER BY ordinal_position`).all();
+  const cols = (Array.isArray(colRows) ? colRows : []).map(c => c.name);
   if (!cols.includes('data_validade')) await db.prepare(`ALTER TABLE estoque_ficha_epi ADD COLUMN data_validade TEXT`).run();
   if (!cols.includes('contrato_ref'))  await db.prepare(`ALTER TABLE estoque_ficha_epi ADD COLUMN contrato_ref TEXT`).run();
   if (!cols.includes('posto'))         await db.prepare(`ALTER TABLE estoque_ficha_epi ADD COLUMN posto TEXT`).run();
@@ -34,7 +35,8 @@ async function ensureFichaTable(db) {
 }
 
 async function ensureItemCols(db) {
-  const cols = await db.prepare(`SELECT column_name as name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='estoque_itens' ORDER BY ordinal_position`).all().map(c => c.name);
+  const colRows = await db.prepare(`SELECT column_name as name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='estoque_itens' ORDER BY ordinal_position`).all();
+  const cols = (Array.isArray(colRows) ? colRows : []).map(c => c.name);
   if (!cols.includes('ca_numero'))         await db.prepare(`ALTER TABLE estoque_itens ADD COLUMN ca_numero TEXT`).run();
   if (!cols.includes('ca_validade'))       await db.prepare(`ALTER TABLE estoque_itens ADD COLUMN ca_validade TEXT`).run();
   if (!cols.includes('vida_util_meses'))   await db.prepare(`ALTER TABLE estoque_itens ADD COLUMN vida_util_meses INTEGER`).run();
@@ -73,7 +75,8 @@ function detectarEmpresaItem(nome, categoria) {
 }
 
 async function ensureMovCols(db) {
-  const cols = await db.prepare(`SELECT column_name as name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='estoque_movimentos' ORDER BY ordinal_position`).all().map(c => c.name);
+  const colRows = await db.prepare(`SELECT column_name as name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='estoque_movimentos' ORDER BY ordinal_position`).all();
+  const cols = (Array.isArray(colRows) ? colRows : []).map(c => c.name);
   if (!cols.includes('contrato_ref')) await db.prepare(`ALTER TABLE estoque_movimentos ADD COLUMN contrato_ref TEXT`).run();
   if (!cols.includes('posto'))        await db.prepare(`ALTER TABLE estoque_movimentos ADD COLUMN posto TEXT`).run();
 }
@@ -82,7 +85,7 @@ async function ensureMovCols(db) {
 router.get('/itens', async (req, res) => {
   try {
     const db = req.db;
-    ensureItemCols(db);
+    await ensureItemCols(db);
     const { categoria, busca, baixo_estoque, todos, contrato_ref } = req.query;
     let sql = todos === '1' ? `SELECT * FROM estoque_itens WHERE 1=1` : `SELECT * FROM estoque_itens WHERE ativo = 1`;
     const params = [];
@@ -120,7 +123,7 @@ router.get('/itens/:id', async (req, res) => {
 router.post('/itens', async (req, res) => {
   try {
     const db = req.db;
-    ensureItemCols(db);
+    await ensureItemCols(db);
     const { codigo, nome, categoria, descricao, unidade, estoque_minimo, valor_unitario, localizacao,
             ca_numero, ca_validade, vida_util_meses, fabricante, contrato_ref, empresa_restrita } = req.body;
     if (!nome || !categoria) return res.status(400).json({ error: 'nome e categoria obrigatórios' });
@@ -147,7 +150,7 @@ router.post('/itens', async (req, res) => {
 router.put('/itens/:id', async (req, res) => {
   try {
     const db = req.db;
-    ensureItemCols(db);
+    await ensureItemCols(db);
     const { codigo, nome, categoria, descricao, unidade, estoque_minimo, valor_unitario, localizacao, ativo,
             ca_numero, ca_validade, vida_util_meses, fabricante, contrato_ref, empresa_restrita } = req.body;
     const empRestrita = empresa_restrita !== undefined ? (empresa_restrita || null) : detectarEmpresaItem(nome, categoria);
@@ -171,7 +174,7 @@ router.put('/itens/:id', async (req, res) => {
 router.post('/movimentos', async (req, res) => {
   try {
     const db = req.db;
-    ensureMovCols(db);
+    await ensureMovCols(db);
     const { item_id, tipo, quantidade, valor_unitario, data_movimento, motivo, fornecedor, nota_fiscal,
             responsavel, destino, obs, contrato_ref, posto } = req.body;
     if (!item_id || !tipo || !quantidade || !data_movimento)
@@ -217,7 +220,7 @@ router.post('/movimentos', async (req, res) => {
 router.get('/resumo', async (req, res) => {
   try {
     const db = req.db;
-    ensureItemCols(db);
+    await ensureItemCols(db);
     const cats = await db.prepare(`
       SELECT categoria,
         COUNT(*) as total_itens,
@@ -248,7 +251,7 @@ router.get('/resumo', async (req, res) => {
 router.get('/alertas', async (req, res) => {
   try {
     const db = req.db;
-    ensureItemCols(db);
+    await ensureItemCols(db);
     const hoje = new Date().toISOString().split('T')[0];
     const em30 = new Date(Date.now() + 30*86400000).toISOString().split('T')[0];
 
@@ -309,7 +312,7 @@ router.get('/alertas', async (req, res) => {
 router.get('/custo-contrato', async (req, res) => {
   try {
     const db = req.db;
-    ensureMovCols(db);
+    await ensureMovCols(db);
     const { ano, mes, contrato_ref } = req.query;
     let sql = `
       SELECT
@@ -491,7 +494,7 @@ router.post('/ficha-epi', async (req, res) => {
       const novoEstoque = item.estoque_atual - qtd;
       if (novoEstoque < 0) throw new Error(`Estoque insuficiente: ${item.estoque_atual} ${item.unidade} disponíveis`);
 
-      ensureMovCols(db);
+      await ensureMovCols(db);
       await db.prepare(`
         INSERT INTO estoque_movimentos
           (item_id,tipo,quantidade,valor_unitario,total,data_movimento,motivo,responsavel,destino,contrato_ref,posto)
@@ -523,7 +526,7 @@ router.patch('/ficha-epi/:id/devolucao', async (req, res) => {
     const registrar = db.transaction(async () => {
       await db.prepare(`UPDATE estoque_ficha_epi SET data_devolucao=?, obs=COALESCE(obs||' | ','')|| ? WHERE id=?`)
         .run(data_devolucao, obs ? `Devolução: ${obs}` : 'Devolvido', req.params.id);
-      ensureMovCols(db);
+      await ensureMovCols(db);
       await db.prepare(`
         INSERT INTO estoque_movimentos
           (item_id,tipo,quantidade,valor_unitario,total,data_movimento,motivo,destino,contrato_ref,posto)

@@ -27,7 +27,10 @@ router.get('/smtp', async (req, res) => {
 // PUT /api/notificacoes/smtp
 router.put('/smtp', async (req, res) => {
   const { host, port, user, pass, from, to } = req.body;
-  const upsert = req.db.prepare(`INSERT INTO configuracoes (chave,valor,updated_at) VALUES (@chave,@valor,NOW())`);
+  const upsert = req.db.prepare(`
+    INSERT INTO configuracoes (chave,valor,updated_at) VALUES (@chave,@valor,NOW())
+    ON CONFLICT (chave) DO UPDATE SET valor=EXCLUDED.valor, updated_at=NOW()
+  `);
   const trans = req.db.transaction(async () => {
     if (host !== undefined) upsert.run({ chave:'smtp_host',  valor: host       || '' });
     if (port !== undefined) upsert.run({ chave:'smtp_port',  valor: String(port|| 587) });
@@ -211,7 +214,7 @@ router.post('/enviar', async (req, res) => {
 // ─── Função reutilizável exportada para o cron do server.js ──────
 /**
  * enviarAlertasEmpresa(db, company) — verifica alertas e envia email se houver.
- * @param {import('better-sqlite3').Database} db  — instância do banco da empresa
+ * @param {object} db                              — pool PG da empresa (db_pg.js)
  * @param {{ nome, nomeAbrev }} company            — objeto da empresa (de COMPANIES)
  * @returns {Promise<{ enviado: boolean, total: number }>}
  */
@@ -292,7 +295,7 @@ async function enviarAlertasEmpresa(db, company) {
     reajusteAlertas = await db.prepare(`
       SELECT numContrato, contrato, data_proximo_reajuste, indice_reajuste,
              pct_reajuste_ultimo, valor_mensal_bruto,
-             CAST((julianday(data_proximo_reajuste) - julianday('now')) AS INTEGER) as dias_faltam
+             CAST(((data_proximo_reajuste)::date - CURRENT_DATE::date) AS INTEGER) as dias_faltam
       FROM contratos
       WHERE data_proximo_reajuste IS NOT NULL
         AND data_proximo_reajuste != ''
@@ -360,7 +363,7 @@ router.post('/alertar-reajustes', async (req, res) => {
     const reajustes = await req.db.prepare(`
       SELECT numContrato, contrato, data_proximo_reajuste, indice_reajuste,
              pct_reajuste_ultimo, valor_mensal_bruto,
-             CAST((julianday(data_proximo_reajuste) - julianday('now')) AS INTEGER) as dias_faltam
+             CAST(((data_proximo_reajuste)::date - CURRENT_DATE::date) AS INTEGER) as dias_faltam
       FROM contratos
       WHERE data_proximo_reajuste IS NOT NULL
         AND data_proximo_reajuste != ''
@@ -465,7 +468,7 @@ async function verificarDuplicatas(db, companyKey) {
   try {
     const dupNfs = await db.prepare(`
       SELECT numero, COUNT(*) cnt, MIN(data_emissao) data_emissao,
-             GROUP_CONCAT(tomador, ' / ') tomadores
+             STRING_AGG(tomador::text, ' / ') tomadores
       FROM notas_fiscais
       WHERE numero != '' AND numero != '0'
       GROUP BY numero HAVING cnt > 1

@@ -364,25 +364,30 @@ router.post('/importar', async (req, res) => {
       allNfses.push(...page);
     }
 
-    ensureExtraColumns(db);
-
-    const ins = db.prepare(`
-      INSERT INTO notas_fiscais
-        (numero, competencia, cidade, tomador, cnpj_tomador,
-         valor_bruto, valor_liquido,
-         inss, ir, iss, csll, pis, cofins, retencao,
-         data_emissao, status_conciliacao,
-         webiss_numero_nfse, discriminacao)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `);
+    // P0 fix (2026-04-29): ensureExtraColumns é async — sem await ALTER TABLE
+    // podia rodar depois do INSERT, e fn de transaction precisava ser async.
+    await ensureExtraColumns(db);
 
     let imported = 0, skipped = 0;
 
-    db.transaction(rows => {
-      for (const nf of rows) {
+    // P0 fix v2 (2026-04-29 14:00): try/catch dentro de transaction PG aborta
+    // a tx inteira ("current transaction is aborted"). Solução: ON CONFLICT
+    // DO NOTHING — Postgres-native, evita o crash sem precisar de SAVEPOINT.
+    const trans = db.transaction(async (tx) => {
+      const ins = tx.prepare(`
+        INSERT INTO notas_fiscais
+          (numero, competencia, cidade, tomador, cnpj_tomador,
+           valor_bruto, valor_liquido,
+           inss, ir, iss, csll, pis, cofins, retencao,
+           data_emissao, status_conciliacao,
+           webiss_numero_nfse, discriminacao)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT DO NOTHING
+      `);
+      for (const nf of allNfses) {
         const retencao = nf.valorInss + nf.valorIr + nf.valorIss +
                          nf.valorCsll + nf.valorPis + nf.valorCofins;
-        const r = ins.run(
+        const r = await ins.run(
           nf.numero,
           nf.competencia,
           'Palmas/TO',
@@ -402,9 +407,10 @@ router.post('/importar', async (req, res) => {
           nf.numero,       // webiss_numero_nfse
           nf.discriminacao,
         );
-        if (r.changes > 0) imported++; else skipped++;
+        if (r && r.changes > 0) imported++; else skipped++;
       }
-    })(allNfses);
+    });
+    await trans();
 
     res.json({ ok: true, total: allNfses.length, imported, skipped });
   } catch (e) {

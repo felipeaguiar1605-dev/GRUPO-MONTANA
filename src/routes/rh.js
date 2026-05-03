@@ -66,30 +66,30 @@ function calcFolhaItem(func, diasTrabalhados = 30, horasExtras = 0, numDependent
 
 // ─── CARGOS ──────────────────────────────────────────────────────────────────
 
-router.get('/cargos', (req, res) => {
-  const rows = req.db.prepare('SELECT * FROM rh_cargos ORDER BY nome').all();
+router.get('/cargos', async (req, res) => {
+  const rows = await req.db.prepare('SELECT * FROM rh_cargos ORDER BY nome').all();
   res.json(rows);
 });
 
-router.post('/cargos', (req, res) => {
+router.post('/cargos', async (req, res) => {
   const { nome, cbo, salario_base } = req.body;
   if (!nome) return res.status(400).json({ erro: 'Nome obrigatório' });
-  const r = req.db.prepare(
+  const r = await req.db.prepare(
     'INSERT INTO rh_cargos (nome, cbo, salario_base) VALUES (?, ?, ?)'
   ).run(nome, cbo || '', salario_base || 0);
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 
-router.patch('/cargos/:id', (req, res) => {
+router.patch('/cargos/:id', async (req, res) => {
   const { nome, cbo, salario_base } = req.body;
-  req.db.prepare(
+  await req.db.prepare(
     'UPDATE rh_cargos SET nome=?, cbo=?, salario_base=? WHERE id=?'
   ).run(nome, cbo || '', salario_base || 0, req.params.id);
   res.json({ ok: true });
 });
 
-router.delete('/cargos/:id', (req, res) => {
-  req.db.prepare('DELETE FROM rh_cargos WHERE id=?').run(req.params.id);
+router.delete('/cargos/:id', async (req, res) => {
+  await req.db.prepare('DELETE FROM rh_cargos WHERE id=?').run(req.params.id);
   res.json({ ok: true });
 });
 
@@ -108,11 +108,11 @@ router.get('/funcionarios', async (req, res) => {
   if (contrato_ref) { where.push('f.contrato_ref = ?'); params.push(contrato_ref); }
   if (where.length) sql += ' WHERE ' + where.join(' AND ');
   sql += ' ORDER BY f.nome';
-  res.json(await req.db.prepare(sql).all(params));
+  res.json(await req.db.prepare(sql).all(...params));
 });
 
-router.get('/funcionarios/:id', (req, res) => {
-  const f = req.db.prepare(`
+router.get('/funcionarios/:id', async (req, res) => {
+  const f = await req.db.prepare(`
     SELECT f.*, c.nome as cargo_nome FROM rh_funcionarios f
     LEFT JOIN rh_cargos c ON c.id = f.cargo_id WHERE f.id = ?
   `).get(req.params.id);
@@ -120,7 +120,7 @@ router.get('/funcionarios/:id', (req, res) => {
   res.json(f);
 });
 
-router.post('/funcionarios', (req, res) => {
+router.post('/funcionarios', async (req, res) => {
   const {
     nome, cpf, rg, data_nascimento, data_admissao, cargo_id, contrato_ref,
     lotacao, salario_base, pis, ctps_numero, ctps_serie,
@@ -129,7 +129,7 @@ router.post('/funcionarios', (req, res) => {
   if (!nome || !data_admissao || !salario_base) {
     return res.status(400).json({ erro: 'Nome, data_admissao e salario_base são obrigatórios' });
   }
-  const r = req.db.prepare(`
+  const r = await req.db.prepare(`
     INSERT INTO rh_funcionarios
       (nome,cpf,rg,data_nascimento,data_admissao,cargo_id,contrato_ref,lotacao,
        salario_base,pis,ctps_numero,ctps_serie,banco,agencia,conta_banco,tipo_conta,email,telefone,obs)
@@ -140,18 +140,18 @@ router.post('/funcionarios', (req, res) => {
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 
-router.patch('/funcionarios/:id', (req, res) => {
+router.patch('/funcionarios/:id', async (req, res) => {
   const {
     nome, cpf, rg, data_nascimento, data_admissao, data_demissao, cargo_id,
     contrato_ref, lotacao, salario_base, status, pis, ctps_numero, ctps_serie,
     banco, agencia, conta_banco, tipo_conta, email, telefone, obs
   } = req.body;
-  req.db.prepare(`
+  await req.db.prepare(`
     UPDATE rh_funcionarios SET
       nome=?,cpf=?,rg=?,data_nascimento=?,data_admissao=?,data_demissao=?,cargo_id=?,
       contrato_ref=?,lotacao=?,salario_base=?,status=?,pis=?,ctps_numero=?,ctps_serie=?,
       banco=?,agencia=?,conta_banco=?,tipo_conta=?,email=?,telefone=?,obs=?,
-      updated_at=datetime('now')
+      updated_at=NOW()
     WHERE id=?
   `).run(nome,cpf||'',rg||'',data_nascimento||'',data_admissao,data_demissao||'',cargo_id||null,
          contrato_ref||'',lotacao||'',salario_base,status||'ATIVO',pis||'',ctps_numero||'',ctps_serie||'',
@@ -159,10 +159,10 @@ router.patch('/funcionarios/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete('/funcionarios/:id', (req, res) => {
+router.delete('/funcionarios/:id', async (req, res) => {
   // Soft delete — registra demissão
-  req.db.prepare(`
-    UPDATE rh_funcionarios SET status='DEMITIDO', data_demissao=CURRENT_DATE, updated_at=datetime('now')
+  await req.db.prepare(`
+    UPDATE rh_funcionarios SET status='DEMITIDO', data_demissao=CURRENT_DATE, updated_at=NOW()
     WHERE id=?
   `).run(req.params.id);
   res.json({ ok: true });
@@ -170,8 +170,8 @@ router.delete('/funcionarios/:id', (req, res) => {
 
 // ─── FOLHA DE PAGAMENTO ──────────────────────────────────────────────────────
 
-router.get('/folha', (req, res) => {
-  const rows = req.db.prepare(`
+router.get('/folha', async (req, res) => {
+  const rows = await req.db.prepare(`
     SELECT f.*,
       COUNT(i.id)               as qtd_funcionarios,
       COALESCE(SUM(i.inss),0)  as total_inss,
@@ -184,36 +184,46 @@ router.get('/folha', (req, res) => {
   res.json(rows);
 });
 
-router.post('/folha', (req, res) => {
+router.post('/folha', async (req, res) => {
   const { competencia, data_pagamento, obs } = req.body;
   if (!competencia) return res.status(400).json({ erro: 'Competência obrigatória' });
-  const existe = req.db.prepare('SELECT id FROM rh_folha WHERE competencia=?').get(competencia);
+  const existe = await req.db.prepare('SELECT id FROM rh_folha WHERE competencia=?').get(competencia);
   if (existe) return res.status(400).json({ erro: 'Folha para esta competência já existe' });
-  const r = req.db.prepare(
+  const r = await req.db.prepare(
     'INSERT INTO rh_folha (competencia, data_pagamento, obs) VALUES (?,?,?)'
   ).run(competencia, data_pagamento || '', obs || '');
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 
-router.post('/folha/:id/calcular', (req, res) => {
-  const folha = req.db.prepare('SELECT * FROM rh_folha WHERE id=?').get(req.params.id);
+router.post('/folha/:id/calcular', async (req, res) => {
+  const folha = await req.db.prepare('SELECT * FROM rh_folha WHERE id=?').get(req.params.id);
   if (!folha) return res.status(404).json({ erro: 'Folha não encontrada' });
 
-  const funcionarios = req.db.prepare(
+  const funcionarios = await req.db.prepare(
     "SELECT * FROM rh_funcionarios WHERE status='ATIVO'"
   ).all();
 
-  const calcItem = req.db.prepare(`
-    INSERT OR REPLACE INTO rh_folha_itens
+  const calcItem = await req.db.prepare(`
+    INSERT INTO rh_folha_itens
       (folha_id,funcionario_id,salario_base,dias_trabalhados,horas_extras,valor_he,
        inss,irrf,total_bruto,total_descontos,total_liquido)
     VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT (folha_id, funcionario_id) DO UPDATE SET
+      salario_base     = EXCLUDED.salario_base,
+      dias_trabalhados = EXCLUDED.dias_trabalhados,
+      horas_extras     = EXCLUDED.horas_extras,
+      valor_he         = EXCLUDED.valor_he,
+      inss             = EXCLUDED.inss,
+      irrf             = EXCLUDED.irrf,
+      total_bruto      = EXCLUDED.total_bruto,
+      total_descontos  = EXCLUDED.total_descontos,
+      total_liquido    = EXCLUDED.total_liquido
   `);
 
   let totalBruto = 0, totalDescontos = 0, totalLiquido = 0;
 
-  const processar = req.db.transaction(() => {
-    req.db.prepare('DELETE FROM rh_folha_itens WHERE folha_id=?').run(folha.id);
+  const processar = req.db.transaction(async () => {
+    await req.db.prepare('DELETE FROM rh_folha_itens WHERE folha_id=?').run(folha.id);
     for (const f of funcionarios) {
       const calc = calcFolhaItem(f);
       calcItem.run(folha.id, f.id, f.salario_base, 30, 0, 0,
@@ -222,7 +232,7 @@ router.post('/folha/:id/calcular', (req, res) => {
       totalDescontos += calc.totalDescontos;
       totalLiquido  += calc.totalLiquido;
     }
-    req.db.prepare(`
+    await req.db.prepare(`
       UPDATE rh_folha SET total_bruto=?,total_descontos=?,total_liquido=?,status='PROCESSADO'
       WHERE id=?
     `).run(
@@ -237,8 +247,8 @@ router.post('/folha/:id/calcular', (req, res) => {
   res.json({ ok: true, funcionarios: funcionarios.length, totalBruto, totalDescontos, totalLiquido });
 });
 
-router.get('/folha/:id/itens', (req, res) => {
-  const itens = req.db.prepare(`
+router.get('/folha/:id/itens', async (req, res) => {
+  const itens = await req.db.prepare(`
     SELECT i.*, f.nome as funcionario_nome, f.cargo_id, c.nome as cargo_nome
     FROM rh_folha_itens i
     JOIN rh_funcionarios f ON f.id = i.funcionario_id
@@ -249,24 +259,24 @@ router.get('/folha/:id/itens', (req, res) => {
   res.json(itens);
 });
 
-router.patch('/folha/:id', (req, res) => {
+router.patch('/folha/:id', async (req, res) => {
   const { status, data_pagamento, obs } = req.body;
-  req.db.prepare('UPDATE rh_folha SET status=?,data_pagamento=?,obs=? WHERE id=?')
+  await req.db.prepare('UPDATE rh_folha SET status=?,data_pagamento=?,obs=? WHERE id=?')
     .run(status || 'RASCUNHO', data_pagamento || '', obs || '', req.params.id);
   res.json({ ok: true });
 });
 
-router.patch('/folha/itens/:id', (req, res) => {
+router.patch('/folha/itens/:id', async (req, res) => {
   const {
     dias_trabalhados, horas_extras, adicional_noturno,
     vale_transporte, vale_alimentacao, outros_proventos,
     inss, irrf, faltas, outros_descontos
   } = req.body;
 
-  const item = req.db.prepare('SELECT * FROM rh_folha_itens WHERE id=?').get(req.params.id);
+  const item = await req.db.prepare('SELECT * FROM rh_folha_itens WHERE id=?').get(req.params.id);
   if (!item) return res.status(404).json({ erro: 'Item não encontrado' });
 
-  const func = req.db.prepare('SELECT * FROM rh_funcionarios WHERE id=?').get(item.funcionario_id);
+  const func = await req.db.prepare('SELECT * FROM rh_funcionarios WHERE id=?').get(item.funcionario_id);
   const calc = calcFolhaItem(func, dias_trabalhados || 30, horas_extras || 0);
 
   const inssF = inss !== undefined ? inss : calc.inss;
@@ -275,7 +285,7 @@ router.patch('/folha/itens/:id', (req, res) => {
   const totalDescontos = Math.round((inssF + irrfF + (faltas||0) + (outros_descontos||0)) * 100) / 100;
   const totalLiquido = Math.round((totalBruto - totalDescontos - (vale_transporte||0)) * 100) / 100;
 
-  req.db.prepare(`
+  await req.db.prepare(`
     UPDATE rh_folha_itens SET
       dias_trabalhados=?,horas_extras=?,valor_he=?,adicional_noturno=?,
       vale_transporte=?,vale_alimentacao=?,outros_proventos=?,
@@ -300,13 +310,13 @@ router.get('/ferias', async (req, res) => {
   const params = [];
   if (funcionario_id) { sql += ' WHERE fe.funcionario_id=?'; params.push(funcionario_id); }
   sql += ' ORDER BY fe.data_inicio DESC';
-  res.json(await req.db.prepare(sql).all(params));
+  res.json(await req.db.prepare(sql).all(...params));
 });
 
-router.post('/ferias', (req, res) => {
+router.post('/ferias', async (req, res) => {
   const { funcionario_id, periodo_aquisitivo_inicio, periodo_aquisitivo_fim, data_inicio, data_fim, dias, valor, obs } = req.body;
   if (!funcionario_id || !data_inicio) return res.status(400).json({ erro: 'funcionario_id e data_inicio obrigatórios' });
-  const r = req.db.prepare(`
+  const r = await req.db.prepare(`
     INSERT INTO rh_ferias (funcionario_id,periodo_aquisitivo_inicio,periodo_aquisitivo_fim,data_inicio,data_fim,dias,valor,obs)
     VALUES (?,?,?,?,?,?,?,?)
   `).run(funcionario_id, periodo_aquisitivo_inicio||'', periodo_aquisitivo_fim||'',
@@ -314,9 +324,9 @@ router.post('/ferias', (req, res) => {
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 
-router.patch('/ferias/:id', (req, res) => {
+router.patch('/ferias/:id', async (req, res) => {
   const { status, data_inicio, data_fim, dias, valor, obs } = req.body;
-  req.db.prepare('UPDATE rh_ferias SET status=?,data_inicio=?,data_fim=?,dias=?,valor=?,obs=? WHERE id=?')
+  await req.db.prepare('UPDATE rh_ferias SET status=?,data_inicio=?,data_fim=?,dias=?,valor=?,obs=? WHERE id=?')
     .run(status||'AGENDADA', data_inicio||'', data_fim||'', dias||30, valor||0, obs||'', req.params.id);
   res.json({ ok: true });
 });
@@ -332,30 +342,30 @@ router.get('/afastamentos', async (req, res) => {
   const params = [];
   if (funcionario_id) { sql += ' WHERE a.funcionario_id=?'; params.push(funcionario_id); }
   sql += ' ORDER BY a.data_inicio DESC';
-  res.json(await req.db.prepare(sql).all(params));
+  res.json(await req.db.prepare(sql).all(...params));
 });
 
-router.post('/afastamentos', (req, res) => {
+router.post('/afastamentos', async (req, res) => {
   const { funcionario_id, tipo, data_inicio, data_fim, dias, motivo, obs } = req.body;
   if (!funcionario_id || !data_inicio) return res.status(400).json({ erro: 'funcionario_id e data_inicio obrigatórios' });
-  const r = req.db.prepare(`
+  const r = await req.db.prepare(`
     INSERT INTO rh_afastamentos (funcionario_id,tipo,data_inicio,data_fim,dias,motivo,obs)
     VALUES (?,?,?,?,?,?,?)
   `).run(funcionario_id, tipo||'', data_inicio, data_fim||'', dias||0, motivo||'', obs||'');
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 
-router.patch('/afastamentos/:id', (req, res) => {
+router.patch('/afastamentos/:id', async (req, res) => {
   const { tipo, data_inicio, data_fim, dias, motivo, obs } = req.body;
-  req.db.prepare('UPDATE rh_afastamentos SET tipo=?,data_inicio=?,data_fim=?,dias=?,motivo=?,obs=? WHERE id=?')
+  await req.db.prepare('UPDATE rh_afastamentos SET tipo=?,data_inicio=?,data_fim=?,dias=?,motivo=?,obs=? WHERE id=?')
     .run(tipo||'', data_inicio||'', data_fim||'', dias||0, motivo||'', obs||'', req.params.id);
   res.json({ ok: true });
 });
 
 // ─── RELATÓRIOS ──────────────────────────────────────────────────────────────
 
-router.get('/relatorios/quadro', (req, res) => {
-  const quadro = req.db.prepare(`
+router.get('/relatorios/quadro', async (req, res) => {
+  const quadro = await req.db.prepare(`
     SELECT f.id, f.nome, f.salario_base, f.data_admissao, f.contrato_ref, f.lotacao,
            c.nome as cargo, f.status
     FROM rh_funcionarios f
@@ -367,12 +377,12 @@ router.get('/relatorios/quadro', (req, res) => {
   res.json({ quadro, total_funcionarios: quadro.length, total_folha: Math.round(total*100)/100 });
 });
 
-router.get('/relatorios/fgts', (req, res) => {
+router.get('/relatorios/fgts', async (req, res) => {
   const { competencia } = req.query;
   if (!competencia) return res.status(400).json({ erro: 'competencia obrigatória' });
-  const folha = req.db.prepare('SELECT * FROM rh_folha WHERE competencia=?').get(competencia);
+  const folha = await req.db.prepare('SELECT * FROM rh_folha WHERE competencia=?').get(competencia);
   if (!folha) return res.json({ itens: [], total_fgts: 0 });
-  const itens = req.db.prepare(`
+  const itens = await req.db.prepare(`
     SELECT i.total_bruto, f.nome, f.pis, f.data_admissao,
            ROUND(i.total_bruto * 0.08, 2) as fgts
     FROM rh_folha_itens i
@@ -385,7 +395,7 @@ router.get('/relatorios/fgts', (req, res) => {
 });
 
 // ─── CALC TRIBUTOS (endpoint público p/ frontend) ─────────────
-router.get('/calcular-tributos', (req, res) => {
+router.get('/calcular-tributos', async (req, res) => {
   const salario = parseFloat(req.query.salario) || 0;
   const dependentes = parseInt(req.query.dependentes) || 0;
   const inss = calcINSS(salario);
@@ -400,13 +410,13 @@ router.get('/calcular-tributos', (req, res) => {
 });
 
 // ─── HOLERITE PDF ──────────────────────────────────────────────
-router.get('/folha/:id/holerite/:func_id', (req, res) => {
+router.get('/folha/:id/holerite/:func_id', async (req, res) => {
   try {
     const PDFDocument = require('pdfkit');
-    const folha = req.db.prepare('SELECT * FROM rh_folha WHERE id=?').get(req.params.id);
+    const folha = await req.db.prepare('SELECT * FROM rh_folha WHERE id=?').get(req.params.id);
     if (!folha) return res.status(404).json({ erro: 'Folha não encontrada' });
 
-    const item = req.db.prepare(`
+    const item = await req.db.prepare(`
       SELECT i.*, f.nome, f.cpf, f.pis, f.ctps_numero, f.cargo_id, f.lotacao, f.banco, f.agencia, f.conta_banco,
              c.nome as cargo_nome, c.cbo
       FROM rh_folha_itens i
@@ -514,7 +524,7 @@ router.get('/folha/:id/holerite/:func_id', (req, res) => {
 });
 
 // ─── IMPORTAR FOLHA VIA EXCEL ─────────────────────────────────
-router.post('/folha/:id/importar-excel', (req, res, next) => {
+router.post('/folha/:id/importar-excel', async (req, res, next) => {
   const multer = require('multer');
   const upload = multer({ dest: 'uploads/tmp/' }).single('file');
   upload(req, res, async (err) => {
@@ -523,7 +533,7 @@ router.post('/folha/:id/importar-excel', (req, res, next) => {
       if (!req.file) return res.status(400).json({ erro: 'Arquivo não enviado' });
       const ExcelJS = require('exceljs');
       const fs = require('fs');
-      const folha = req.db.prepare('SELECT * FROM rh_folha WHERE id=?').get(req.params.id);
+      const folha = await req.db.prepare('SELECT * FROM rh_folha WHERE id=?').get(req.params.id);
       if (!folha) { fs.unlinkSync(req.file.path); return res.status(404).json({ erro: 'Folha não encontrada' }); }
 
       const wb = new ExcelJS.Workbook();
@@ -548,7 +558,7 @@ router.post('/folha/:id/importar-excel', (req, res, next) => {
       };
 
       let importados = 0, erros = [];
-      const upd = req.db.prepare(`
+      const upd = await req.db.prepare(`
         UPDATE rh_folha_itens SET
           dias_trabalhados=?,horas_extras=?,valor_he=?,adicional_noturno=?,
           vale_transporte=?,vale_alimentacao=?,outros_proventos=?,outros_descontos=?,
@@ -556,12 +566,13 @@ router.post('/folha/:id/importar-excel', (req, res, next) => {
         WHERE folha_id=? AND funcionario_id=?
       `);
 
-      const processar = req.db.transaction(() => {
-        ws.eachRow((row, rowNum) => {
-          if (rowNum === 1) return; // header
+      const processar = req.db.transaction(async () => {
+        const rows = [];
+        ws.eachRow((row, rowNum) => { if (rowNum > 1) rows.push({ row, rowNum }); });
+        for (const { row, rowNum } of rows) {
           const nome = getStr(row, 'nome');
-          if (!nome) return;
-          const func = req.db.prepare(`SELECT * FROM rh_funcionarios WHERE LOWER(nome) LIKE LOWER(?)`).get(`%${nome}%`);
+          if (!nome) continue;
+          const func = await req.db.prepare(`SELECT * FROM rh_funcionarios WHERE LOWER(nome) LIKE LOWER(?)`).get(`%${nome}%`);
           if (!func) { erros.push(`Linha ${rowNum}: funcionário "${nome}" não encontrado`); return; }
 
           const dias = get(row, 'dias_trabalhados') || 30;
@@ -570,15 +581,15 @@ router.post('/folha/:id/importar-excel', (req, res, next) => {
           const totalBruto = calc.totalBruto + get(row,'adicional_noturno') + get(row,'vale_alimentacao') + get(row,'outros_proventos');
           const totalDesc  = calc.inss + calc.irrf + get(row,'outros_descontos');
           const totalLiq   = totalBruto - totalDesc - get(row,'vale_transporte');
-          const r = upd.run(dias, he, calc.valorHE, get(row,'adicional_noturno'),
+          const r = await upd.run(dias, he, calc.valorHE, get(row,'adicional_noturno'),
                     get(row,'vale_transporte'), get(row,'vale_alimentacao'), get(row,'outros_proventos'), get(row,'outros_descontos'),
                     calc.inss, calc.irrf,
                     +totalBruto.toFixed(2), +totalDesc.toFixed(2), +totalLiq.toFixed(2),
                     folha.id, func.id);
           if (r.changes > 0) importados++;
-        });
+        }
       });
-      processar();
+      await processar();
       res.json({ ok: true, importados, erros, message: `${importados} funcionário(s) atualizados na folha` });
     } catch(e) {
       res.status(500).json({ erro: e.message });
@@ -589,14 +600,14 @@ router.post('/folha/:id/importar-excel', (req, res, next) => {
 // ─── Holerite Digital ─────────────────────────────────────────────────────────
 
 // GET /rh/holerite/:funcionario_id/:competencia — dados JSON
-router.get('/holerite/:funcionario_id/:competencia', (req, res) => {
+router.get('/holerite/:funcionario_id/:competencia', async (req, res) => {
   const db = req.db;
   const { funcionario_id, competencia } = req.params; // competencia = YYYY-MM
 
-  const func = db.prepare('SELECT * FROM rh_funcionarios WHERE id=?').get(funcionario_id);
+  const func = await db.prepare('SELECT * FROM rh_funcionarios WHERE id=?').get(funcionario_id);
   if (!func) return res.status(404).json({ error: 'Funcionário não encontrado' });
 
-  const folha = db.prepare(`
+  const folha = await db.prepare(`
     SELECT fi.* FROM rh_folha_itens fi
     JOIN rh_folha f ON fi.folha_id = f.id
     WHERE f.funcionario_id=? AND substr(f.competencia,1,7)=?
@@ -622,15 +633,15 @@ router.get('/holerite/:funcionario_id/:competencia', (req, res) => {
 });
 
 // GET /rh/holerite-html/:funcionario_id/:competencia — retorna HTML para impressão (sem auth obrigatório)
-router.get('/holerite-html/:funcionario_id/:competencia', (req, res) => {
+router.get('/holerite-html/:funcionario_id/:competencia', async (req, res) => {
   const db = req.db;
   const { funcionario_id, competencia } = req.params;
   const company = req.company;
 
-  const func = db.prepare('SELECT * FROM rh_funcionarios WHERE id=?').get(funcionario_id);
+  const func = await db.prepare('SELECT * FROM rh_funcionarios WHERE id=?').get(funcionario_id);
   if (!func) return res.status(404).send('<h1>Funcionário não encontrado</h1>');
 
-  const folha = db.prepare(`
+  const folha = await db.prepare(`
     SELECT fi.* FROM rh_folha_itens fi
     JOIN rh_folha f ON fi.folha_id = f.id
     WHERE f.funcionario_id=? AND substr(f.competencia,1,7)=?

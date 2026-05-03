@@ -8,13 +8,27 @@ const COMPANIES_META = {
 
 let currentCompany = localStorage.getItem('montana_company') || 'assessoria';
 
+// P0-6 fix: trocar empresa exige confirmação — antes era silencioso.
+// Risco fiscal alto: emitir NF / aprovar boletim na empresa errada.
 function switchCompany(key) {
+  if (key === currentCompany) return; // sem trocar pra mesma
+  const meta = (typeof COMPANIES_META !== 'undefined' && COMPANIES_META[key]) || { nome: key, cnpj: '?' };
+  const atual = (typeof COMPANIES_META !== 'undefined' && COMPANIES_META[currentCompany]) || { nome: currentCompany };
+  const ok = confirm(
+    `Trocar empresa ativa?\n\n` +
+    `De:    ${atual.nome}\n` +
+    `Para:  ${meta.nome}  (CNPJ ${meta.cnpj})\n\n` +
+    `⚠️  Toda ação posterior (cadastro, emissão de NF, aprovação) será registrada nesta empresa.`
+  );
+  if (!ok) return;
+
   currentCompany = key;
   localStorage.setItem('montana_company', key);
   _contratos = []; // forçar reload dos contratos ao trocar empresa
   _extMes = ''; _extMesManual = false; _extMesesDisponiveis = []; _extPage = 1; // resetar filtro mês ao trocar empresa
   applyCompanyTheme();
   loadDashboard();
+  if (typeof toast === 'function') toast(`✓ Empresa ativa: ${meta.nome}`, 'info');
 }
 
 function applyCompanyTheme() {
@@ -85,15 +99,30 @@ function toast(msg,type='success'){
 
 // ─── Loading overlay ─────────────────────────────────────────────
 let _loadingCount=0;
+let _loadingTimeoutId=null;
 function showLoading(msg){
   _loadingCount++;
   const el=document.getElementById('loading-overlay');
   if(el){ el.style.display='flex'; const m=el.querySelector('.loading-msg'); if(m&&msg)m.textContent=msg; }
+  // Auto-fechamento de segurança após 30s — evita ficar preso se um handler
+  // não chamar hideLoading() (bug em rede, exceção não-capturada, etc).
+  if(_loadingTimeoutId) clearTimeout(_loadingTimeoutId);
+  _loadingTimeoutId=setTimeout(()=>{ console.warn('[loading] timeout 30s — forçando fechar'); resetLoading(); }, 30000);
 }
 function hideLoading(){
   _loadingCount=Math.max(0,_loadingCount-1);
-  if(_loadingCount===0){const el=document.getElementById('loading-overlay'); if(el) el.style.display='none';}
+  if(_loadingCount===0){
+    const el=document.getElementById('loading-overlay'); if(el) el.style.display='none';
+    if(_loadingTimeoutId){ clearTimeout(_loadingTimeoutId); _loadingTimeoutId=null; }
+  }
 }
+// Reset hard — chamado em navGo ao trocar de aba para evitar overlay preso.
+function resetLoading(){
+  _loadingCount=0;
+  const el=document.getElementById('loading-overlay'); if(el) el.style.display='none';
+  if(_loadingTimeoutId){ clearTimeout(_loadingTimeoutId); _loadingTimeoutId=null; }
+}
+window.showLoading=showLoading; window.hideLoading=hideLoading; window.resetLoading=resetLoading;
 
 async function api(url,opts){
   const headers={'X-Company':currentCompany};
@@ -135,6 +164,8 @@ function toggleNavGroup(id){
 }
 // navGo: opens correct group, marks item active, closes sidebar on mobile
 function navGo(id,el){
+  // Reset overlay de loading ao trocar de aba (evita overlay travado de outra tela).
+  try { resetLoading(); } catch(_) {}
   // Close sidebar on mobile
   if(window.innerWidth<=768) closeSidebar();
   // Expand parent group if collapsed
@@ -176,7 +207,7 @@ function showTab(id,el){
   if(id==='pag') loadPagamentos();
   if(id==='desp') loadDespesas();
   if(id==='import'){ loadImportHist(); setTimeout(initDragDrop,100); }
-  if(id==='pref') loadPrefeitura();
+  if(id==='pref') loadPrefNfs();  // antes carregava dashboard de prefeitura; agora só NFS-e
   if(id==='fluxo') loadFluxoProjetado();
   if(id==='usuarios') loadUsuarios();
   // Novos módulos (extras) — também tratados em app-extras.js via override
@@ -190,6 +221,63 @@ function showTab(id,el){
   if(id==='compras')   window.comprasInit    && window.comprasInit();
   if(id==='supervisor')window.supervisorInit && window.supervisorInit();
   if(id==='painel-pgto') window.painelPgtoInit && window.painelPgtoInit();
+  if(id==='patrimonio')  window.patrimonioInit && window.patrimonioInit();
+  if(id==='faturamento-prev') loadFaturamentoPrevisto();
+  // Sub-nav consistente entre páginas relacionadas (introduzido em 2026-04
+  // para reduzir clutter do menu lateral). Páginas no mapa abaixo recebem
+  // uma faixa de sub-abas no topo que navega entre os irmãos.
+  _renderPageSubnav(id);
+}
+
+// ─── Sub-nav entre páginas relacionadas ──────────────────────────
+const _SUBNAV_GRUPO_NFS = [
+  { tab: 'nfs',         label: '🧾 Notas Fiscais' },
+  { tab: 'nf-modelos',  label: '🧰 Modelos' },
+];
+const _SUBNAV_GRUPO_CONTRATOS = [
+  { tab: 'cont',              label: '📋 Contratos' },
+  { tab: 'painel-pgto',       label: '💰 Adimplência' },
+  { tab: 'faturamento-prev',  label: '📅 Faturamento Previsto' },
+];
+const _SUBNAV_GRUPO_CAIXA = [
+  { tab: 'fluxo',        label: '📈 Fluxo de Caixa' },
+  { tab: 'caixa-livre',  label: '💵 Caixa Livre' },
+  { tab: 'fluxo-proj',   label: '🔮 Projetado' },
+];
+const _SUBNAV_GRUPO_CONCILIA = [
+  { tab: 'conciliacao3v',    label: '📊 3 Vias' },
+  { tab: 'concilia-robusta', label: '🧩 IA / Pendentes' },
+];
+const _SUBNAV_GRUPO_DESPESAS = [
+  { tab: 'desp', label: '💸 Despesas / Contas a Pagar' },
+  { tab: 'pag',  label: '🧾 Comprovantes' },
+];
+const _PAGE_SUBNAVS = {
+  nfs:                _SUBNAV_GRUPO_NFS,
+  'nf-modelos':       _SUBNAV_GRUPO_NFS,
+  cont:               _SUBNAV_GRUPO_CONTRATOS,
+  'painel-pgto':      _SUBNAV_GRUPO_CONTRATOS,
+  'faturamento-prev': _SUBNAV_GRUPO_CONTRATOS,
+  fluxo:              _SUBNAV_GRUPO_CAIXA,
+  'caixa-livre':      _SUBNAV_GRUPO_CAIXA,
+  'fluxo-proj':       _SUBNAV_GRUPO_CAIXA,
+  conciliacao3v:      _SUBNAV_GRUPO_CONCILIA,
+  'concilia-robusta': _SUBNAV_GRUPO_CONCILIA,
+  desp:               _SUBNAV_GRUPO_DESPESAS,
+  pag:                _SUBNAV_GRUPO_DESPESAS,
+};
+function _renderPageSubnav(active) {
+  const items = _PAGE_SUBNAVS[active];
+  if (!items) return;
+  const wrap = document.getElementById('pg-' + active + '__subnav');
+  if (!wrap) return;
+  wrap.style.cssText = 'display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin:0 0 14px 0;padding:0';
+  const baseStyle = 'padding:8px 16px;font-size:11px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;color:#64748b;margin-bottom:-2px;text-decoration:none;user-select:none';
+  const activeStyle = ';border-bottom-color:#7c3aed;color:#7c3aed';
+  wrap.innerHTML = items.map(it => {
+    const a = it.tab === active;
+    return `<a onclick="navGo('${it.tab}')" style="${baseStyle}${a ? activeStyle : ''}">${it.label}</a>`;
+  }).join('');
 }
 
 // ─── Global Period Filter ────────────────────────────────────────
@@ -245,6 +333,63 @@ function clearGlobalPeriod(){
 }
 
 // ─── Dashboard ───────────────────────────────────────────────────
+// P2-20: Painel "Fechar este mês" — agrega pendências da competência atual
+// Busca prévias pendentes, contratos sem boletim, NFs em erro de emissão.
+async function _carregarPainelFechamento() {
+  const painel = document.getElementById('dash-fechamento');
+  const itens  = document.getElementById('dash-fech-itens');
+  const titulo = document.getElementById('dash-fech-titulo');
+  if (!painel || !itens) return;
+
+  const hoje = new Date();
+  const comp = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+  const compAnterior = (() => {
+    const d = new Date(hoje); d.setDate(1); d.setMonth(d.getMonth() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  })();
+  const compAlvo = hoje.getDate() <= 5 ? compAnterior : comp;
+  if (titulo) titulo.textContent = `Fechar competência ${compAlvo}`;
+
+  try {
+    // Carrega prévias da competência alvo
+    const r = await api(`/boletins/previas?competencia=${compAlvo}`);
+    const previas = (r && r.data) || [];
+    const previaCount = previas.filter(p => p.status === 'previa').length;
+    const aprovadasCount = previas.filter(p => p.status === 'aprovado_para_emissao').length;
+    const emitindo = previas.filter(p => p.status === 'emitindo').length;
+    const erro = previas.filter(p => p.status === 'erro_emissao').length;
+    const emitido = previas.filter(p => p.status === 'emitido').length;
+    const totalBoletins = previas.length;
+
+    // Render
+    const card = (titulo, valor, cor, ico, click) => `
+      <div ${click ? `onclick="${click}"` : ''} style="background:rgba(255,255,255,.12);padding:10px 12px;border-radius:8px;${click ? 'cursor:pointer;' : ''}">
+        <div style="font-size:9px;opacity:.75;text-transform:uppercase;letter-spacing:.4px">${ico} ${titulo}</div>
+        <div style="font-size:22px;font-weight:800;color:${cor};margin-top:2px">${valor}</div>
+      </div>
+    `;
+
+    let html = '';
+    if (totalBoletins === 0) {
+      html += card('Boletins do mês', 'Nenhum', '#fde047', '⚠️', 'abrirPrevias()');
+      html += card('Próxima ação', 'Gerar prévias', '#fff', '➡️', 'abrirPrevias()');
+    } else {
+      if (previaCount > 0)    html += card('Em prévia', previaCount, '#fde047', '📋', 'abrirPrevias()');
+      if (aprovadasCount > 0) html += card('Aguardando emitir', aprovadasCount, '#86efac', '✓', 'abrirPrevias()');
+      if (emitindo > 0)       html += card('Emitindo agora', emitindo, '#fcd34d', '⏳', 'abrirPrevias()');
+      if (erro > 0)           html += card('Com erro', erro, '#fca5a5', '✗', 'abrirPrevias()');
+      if (emitido > 0)        html += card('Emitidas (OK)', emitido, '#86efac', '✅', 'abrirPrevias()');
+      const acaoNecessaria = previaCount > 0 ? 'Aprovar prévias' : aprovadasCount > 0 ? 'Emitir NFs' : erro > 0 ? 'Tentar reemissão' : 'Tudo em dia ✓';
+      html += card('Próxima ação', acaoNecessaria, '#fff', '➡️', 'abrirPrevias()');
+    }
+    itens.innerHTML = html;
+    painel.style.display = 'block';
+  } catch (e) {
+    // Silencia em caso de auth/erro — não quebra o dashboard
+    painel.style.display = 'none';
+  }
+}
+
 async function loadDashboard(){
   let url='/dashboard?';
   if(_from)url+='from='+_from+'&';
@@ -298,6 +443,9 @@ async function loadDashboard(){
   document.getElementById('h-cont').textContent=d.contratos.total;
   document.getElementById('h-pgs').textContent=d.pagamentos.total;
   document.getElementById('h-vinc').textContent=d.vinculacoes.total;
+
+  // P2-20: Painel "Fechar este mês" — pendências da competência atual
+  _carregarPainelFechamento().catch(() => {});
 
   // Saldo
   const saldo = e.total_creditos - e.total_debitos;
@@ -903,14 +1051,47 @@ async function autoVincular(){
 }
 
 // ─── NFs ─────────────────────────────────────────────────────────
+let _nfsBusca = '';
+let _nfsAberto = false;
+function _nfsAplicarBusca() {
+  _nfsBusca = (document.getElementById('nfs-q')?.value || '').trim();
+  _nfsAberto = document.getElementById('nfs-aberto')?.checked || false;
+  _nfsPage = 1;
+  loadNfs();
+}
+function _nfsLimpar() {
+  if (document.getElementById('nfs-q')) document.getElementById('nfs-q').value = '';
+  if (document.getElementById('nfs-aberto')) document.getElementById('nfs-aberto').checked = false;
+  _nfsBusca = ''; _nfsAberto = false; _nfsPage = 1;
+  loadNfs();
+}
 async function loadNfs(){
+  // Renderiza barra de filtros uma vez (idempotente — recria sempre, valores preservados via state)
+  const fbar = document.getElementById('nfs-filters');
+  if (fbar && !fbar.querySelector('#nfs-q')) {
+    fbar.innerHTML = `
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="nfs-q" type="text" placeholder="🔍 Buscar nº NF, tomador, cidade ou contrato..." style="padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;flex:1;min-width:280px">
+        <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#475569;font-weight:600">
+          <input id="nfs-aberto" type="checkbox" style="margin:0"> Apenas em aberto
+        </label>
+        <button onclick="_nfsAplicarBusca()" style="padding:6px 14px;background:#3b82f6;color:#fff;border:0;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Buscar</button>
+        <button onclick="_nfsLimpar()" style="padding:6px 12px;background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;border-radius:6px;font-size:11px;cursor:pointer">Limpar</button>
+      </div>`;
+    document.getElementById('nfs-q').addEventListener('keydown', e => { if (e.key === 'Enter') _nfsAplicarBusca(); });
+    if (_nfsBusca) document.getElementById('nfs-q').value = _nfsBusca;
+    if (_nfsAberto) document.getElementById('nfs-aberto').checked = true;
+  }
+
   let url=`/nfs?page=${_nfsPage}&limit=${PAGE_SIZE}`;
   if(_from) url+='&from='+_from;
   if(_to)   url+='&to='+_to;
+  if(_nfsBusca) url+='&q='+encodeURIComponent(_nfsBusca);
+  if(_nfsAberto) url+='&aberto=1';
   const d=await api(url);
 
   // Alerta de NFs sem data
-  const semData = await api('/nfs/sem-data');
+  const semData = await api('/nfs/sem-data').catch(()=>({total:0}));
   const alertEl  = document.getElementById('nfs-alerta-sem-data');
   const textoEl  = document.getElementById('nfs-alerta-sem-data-texto');
   if (alertEl && textoEl) {
@@ -922,20 +1103,27 @@ async function loadNfs(){
     }
   }
   document.getElementById('nfs-head').innerHTML=`<tr><th>NF</th><th>Competência</th><th>Cidade</th><th>Tomador</th><th class="r">V. Bruto</th><th class="r">V. Líquido</th><th class="r">Retenção</th><th style="width:50px">Ação</th></tr>`;
-  document.getElementById('nfs-body').innerHTML=(d.data||[]).map(r=>`<tr>
-    <td class="mono" style="color:#7c3aed;font-weight:600">NF ${r.numero}</td>
-    <td style="font-size:10px;color:#64748b">${r.competencia||''}</td>
-    <td style="font-size:10px;color:#475569">${r.cidade||''}</td>
-    <td style="font-size:10px;color:#475569">${(r.tomador||'').substring(0,40)}</td>
-    <td class="r mono" style="color:#b45309;font-weight:600">${brl(r.valor_bruto)}</td>
-    <td class="r mono green" style="font-weight:600">${brl(r.valor_liquido)}</td>
-    <td class="r mono red">${brl(r.retencao)}</td>
-    <td><button onclick="excluirNf(${r.id},'${(r.numero||'').replace(/'/g,"\\'")}')" style="padding:2px 6px;font-size:9px;border:1px solid #fca5a5;border-radius:4px;background:#fee2e2;color:#dc2626;cursor:pointer" title="Excluir NF">✕</button></td>
-  </tr>`).join('');
-  document.getElementById('nfs-counter').textContent=`${d.total} notas fiscais`;
+  const linhas = d.data || [];
+  if (linhas.length === 0) {
+    document.getElementById('nfs-body').innerHTML = `<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px">Nenhuma NF encontrada${_nfsBusca?` para "${_nfsBusca}"`:''}.</td></tr>`;
+  } else {
+    document.getElementById('nfs-body').innerHTML=linhas.map(r=>`<tr>
+      <td class="mono" style="color:#7c3aed;font-weight:600">NF ${r.numero}</td>
+      <td style="font-size:10px;color:#64748b">${r.competencia||''}</td>
+      <td style="font-size:10px;color:#475569">${r.cidade||''}</td>
+      <td style="font-size:10px;color:#475569" title="${(r.tomador||'').replace(/"/g,'&quot;')}">${(r.tomador||'').substring(0,40)}${(r.tomador||'').length>40?'…':''}</td>
+      <td class="r mono" style="color:#b45309;font-weight:600">${brl(r.valor_bruto)}</td>
+      <td class="r mono green" style="font-weight:600">${brl(r.valor_liquido)}</td>
+      <td class="r mono red">${brl(r.retencao)}</td>
+      <td><button onclick="excluirNf(${r.id},'${(r.numero||'').replace(/'/g,"\\'")}')" style="padding:2px 6px;font-size:9px;border:1px solid #fca5a5;border-radius:4px;background:#fee2e2;color:#dc2626;cursor:pointer" title="Excluir NF">✕</button></td>
+    </tr>`).join('');
+  }
+  const totalNum = (d.total != null) ? d.total : linhas.length;
+  const somaInfo = (d.soma_bruto || d.soma_liquido) ? ` · Bruto ${brl(d.soma_bruto)} · Líquido ${brl(d.soma_liquido)}` : '';
+  document.getElementById('nfs-counter').textContent=`${totalNum} nota${totalNum===1?'':'s'} fiscai${totalNum===1?'l':'s'}${_nfsBusca?` (filtro: "${_nfsBusca}")`:''}${somaInfo}`;
   document.getElementById('nfs-pag').innerHTML=`
     <button ${d.page<=1?'disabled':''} onclick="_nfsPage--;loadNfs()">← Anterior</button>
-    <span>Página ${d.page} de ${d.pages}</span>
+    <span>Página ${d.page||1} de ${d.pages||1}</span>
     <button ${d.page>=d.pages?'disabled':''} onclick="_nfsPage++;loadNfs()">Próxima →</button>
     <button onclick="exportarExcel('nfs')" style="margin-left:10px;padding:4px 12px;font-size:10px;border:1px solid #7c3aed;border-radius:5px;background:#f5f3ff;color:#7c3aed;cursor:pointer;font-weight:600">⬇ Excel</button>`;
 }
@@ -1085,8 +1273,9 @@ async function loadContratos(){
     const total=c.total_pago+c.total_aberto;
     const pct=total>0?((c.total_pago/total)*100).toFixed(1):0;
     const barColor=pct>=80?'#15803d':pct>=50?'#d97706':'#dc2626';
-    const id=c.numContrato.replace(/[^a-zA-Z0-9]/g,'_');
-    const numEsc = c.numContrato.replace(/'/g,"\\'");
+    const numContratoStr = String(c.numContrato || '');
+    const id=numContratoStr.replace(/[^a-zA-Z0-9]/g,'_') || ('contrato_'+(c.id||Math.random().toString(36).slice(2,8)));
+    const numEsc = numContratoStr.replace(/'/g,"\\'");
 
     // Alerta de vigência
     let vigAlerta = '';
@@ -1130,6 +1319,15 @@ async function loadContratos(){
           <div style="min-width:120px"><div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Em Aberto</div><div style="font-size:14px;font-weight:700;color:${c.total_aberto>0?'#dc2626':'#15803d'}">${brl(c.total_aberto)}</div></div>
           ${receitaMedia ? `<div style="min-width:120px" title="Receita média efetiva / mês — baseado em NFs conciliadas"><div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Receita Média/mês</div><div style="font-size:14px;font-weight:700;color:${desvioMes !== null && desvioMes < -20 ? '#dc2626' : desvioMes !== null && desvioMes > 10 ? '#15803d' : '#475569'}">${receitaMedia}${desvioMes !== null ? ` <span style="font-size:9px;font-weight:600">(${desvioMes>0?'+':''}${desvioMes}%)</span>` : ''}</div></div>` : ''}
           <div style="min-width:80px"><div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Parcelas</div><div style="font-size:14px;font-weight:700;color:#475569">${c.qtd_parcelas}</div></div>
+          ${(() => {
+            // P1-4: última competência faturada + alerta de gap
+            const u = c.ultima_competencia_faturada;
+            const m = c.meses_sem_faturar;
+            if (!u) return `<div style="min-width:130px" title="Nenhuma NF emitida vinculada a este contrato"><div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Última Comp.</div><div style="font-size:14px;font-weight:700;color:#94a3b8">—</div></div>`;
+            const cor = m === 0 || m === null ? '#15803d' : (m === 1 ? '#d97706' : '#dc2626');
+            const tag = m === 0 ? 'em dia' : m === 1 ? '1 mês atrás' : `${m} meses atrás`;
+            return `<div style="min-width:130px" title="Última competência com NF emitida"><div style="font-size:9px;color:#64748b;font-weight:600;text-transform:uppercase">Última Comp.</div><div style="font-size:14px;font-weight:700;color:${cor}">${u}</div><div style="font-size:9px;color:${cor}">${tag}</div></div>`;
+          })()}
         </div>
         <div style="background:#f1f5f9;border-radius:6px;height:8px;overflow:hidden">
           <div style="background:${barColor};height:100%;width:${pct}%;border-radius:6px;transition:width .3s"></div>
@@ -2141,11 +2339,18 @@ async function loadDespData(){
                   : cc==='DIVIDENDOS'  ? `<span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#dcfce7;color:#15803d;font-weight:600">💰 Dividendos</span>`
                   : '';
     const cName = cc ? '' : (r.contrato_ref||r.contrato_vinculado||'').replace(/\s*—.*$/,'');
+    // Badge de vínculo Estoque/Patrimônio (Opção B)
+    let vincBadge = '';
+    if (r.vinculo_tipo === 'estoque' && r.vinculo_id) {
+      vincBadge = `<span title="Vinculado ao item de estoque #${r.vinculo_id}" style="font-size:9px;padding:1px 6px;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:700;border:1px solid #fcd34d;margin-left:6px;white-space:nowrap">📦 ESTOQUE #${r.vinculo_id}</span>`;
+    } else if (r.vinculo_tipo === 'patrimonio' && r.vinculo_id) {
+      vincBadge = `<span title="Cadastrado em patrimônio #${r.vinculo_id}" style="font-size:9px;padding:1px 6px;border-radius:4px;background:#dcfce7;color:#15803d;font-weight:700;border:1px solid #86efac;margin-left:6px;white-space:nowrap">🏗️ PATRIM #${r.vinculo_id}</span>`;
+    }
     return `<tr>
     <td style="font-size:10px;color:#64748b;white-space:nowrap">${r.data_despesa||''}</td>
     <td>${despCatBadge(r.categoria)}</td>
     <td style="font-size:10px;font-weight:600;color:#1d4ed8;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.contrato_ref||r.contrato_vinculado||cc}">${ccBadge||cName||'—'}</td>
-    <td style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.descricao||'').replace(/"/g,'&quot;')}">${r.descricao||'—'}</td>
+    <td style="font-size:10px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.descricao||'').replace(/"/g,'&quot;')}">${r.descricao||'—'}${vincBadge}</td>
     <td class="r mono" style="font-weight:600">${brl(r.valor_bruto)}</td>
     <td class="r mono" style="color:#d97706;font-size:10px" title="IRRF ${brl(r.irrf)} · CSLL ${brl(r.csll)} · PIS ${brl(r.pis_retido)} · COFINS ${brl(r.cofins_retido)} · INSS ${brl(r.inss_retido)}">${brl(r.total_retencao)}</td>
     <td class="r mono" style="font-weight:700;color:#15803d">${brl(r.valor_liquido)}</td>
@@ -2157,6 +2362,10 @@ async function loadDespData(){
         <option value="PAGO" ${r.status==='PAGO'?'selected':''}>Pago</option>
         <option value="VENCIDO" ${r.status==='VENCIDO'?'selected':''}>Vencido</option>
       </select>
+      ${r.vinculo_tipo
+        ? `<button onclick="desvincularDesp(${r.id})" style="padding:2px 6px;font-size:9px;border:1px solid #cbd5e1;border-radius:4px;background:#f1f5f9;color:#475569;cursor:pointer;margin-left:4px" title="Remover vínculo">🔗✕</button>`
+        : `<button onclick="abrirPromocaoDesp(${r.id}, ${JSON.stringify(r.descricao||'').replace(/"/g,'&quot;')}, ${r.valor_bruto||0})" style="padding:2px 6px;font-size:9px;border:1px solid #fcd34d;border-radius:4px;background:#fef3c7;color:#92400e;cursor:pointer;margin-left:4px" title="Promover para Estoque ou Patrimônio">🔗</button>`
+      }
       <button onclick="delDesp(${r.id})" style="padding:2px 6px;font-size:9px;border:1px solid #fca5a5;border-radius:4px;background:#fee2e2;color:#dc2626;cursor:pointer;margin-left:4px" title="Excluir">✕</button>
     </td>
   </tr>`;}).join('');
@@ -2178,6 +2387,351 @@ async function delDesp(id){
   loadDespData();
 }
 
+// ─── IMPORTAÇÃO NFe XML (Item 3 — versão completa) ──────────────
+// Estado do preview entre upload e confirmação
+let _nfePreview = null;
+
+async function importNfeXml(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  showLoading('Analisando NFe...');
+  try {
+    const url = '/api/import/nfe-xml/preview?company=' + window.currentCompany;
+    const r = await fetch(url, {
+      method: 'POST', body: fd,
+      headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jwt') || '') },
+    });
+    const data = await r.json();
+    hideLoading();
+    if (!data.ok) { alert('Erro: ' + (data.error || 'desconhecido')); input.value = ''; return; }
+    _nfePreview = data.nfes;
+    abrirModalNfePreview();
+  } catch (e) {
+    hideLoading();
+    alert('Erro: ' + e.message);
+  }
+  input.value = '';
+}
+
+function abrirModalNfePreview() {
+  const old = document.getElementById('modal-nfe-preview');
+  if (old) old.remove();
+  const modal = document.createElement('div');
+  modal.id = 'modal-nfe-preview';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px';
+
+  const totalItems = _nfePreview.reduce((s, n) => s + ((n.items || []).length), 0);
+  const totalValor = _nfePreview.reduce((s, n) => s + Number(n.valor_total || 0), 0);
+  const erros = _nfePreview.filter(n => n._erro);
+
+  let html = `
+    <div style="background:#fff;border-radius:12px;max-width:1100px;width:100%;max-height:92vh;overflow-y:auto;padding:24px">
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:14px">
+        <div>
+          <div style="font-size:18px;font-weight:800;color:#0f172a">📑 Revisar NFe(s) antes de importar</div>
+          <div style="font-size:12px;color:#64748b;margin-top:2px">${_nfePreview.length} NFe(s) · ${totalItems} item(ns) · Total ${brl(totalValor)}</div>
+        </div>
+        <button onclick="document.getElementById('modal-nfe-preview').remove();_nfePreview=null" style="background:none;border:none;font-size:22px;cursor:pointer;color:#64748b">✕</button>
+      </div>
+  `;
+
+  if (erros.length) {
+    html += `<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:11px;color:#991b1b">
+      ⚠ ${erros.length} arquivo(s) com erro de parse:
+      <ul style="margin:4px 0 0 16px">${erros.map(e => `<li>${e._arquivo}: ${e._erro}</li>`).join('')}</ul>
+    </div>`;
+  }
+
+  _nfePreview.forEach((nfe, nfeIdx) => {
+    if (nfe._erro) return;
+    html += `
+      <div style="border:1px solid #e2e8f0;border-radius:10px;margin-bottom:14px;overflow:hidden">
+        <div style="padding:10px 14px;background:#f8fafc;border-bottom:1px solid #e2e8f0">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <strong style="font-size:13px">NFe ${nfe.numero || '?'}/${nfe.serie || '?'}</strong>
+              <span style="font-size:10px;color:#64748b;margin-left:6px">${nfe.data_emissao || ''} · ${nfe.emitente?.nome || ''} (${nfe.emitente?.cnpj || ''})</span>
+            </div>
+            <span style="font-size:13px;font-weight:700;color:#1d4ed8">${brl(nfe.valor_total)}</span>
+          </div>
+          <div style="font-size:9px;color:#94a3b8;margin-top:2px">${nfe.natureza || ''}</div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead>
+            <tr style="background:#1e293b;color:#fff;font-size:9px;text-transform:uppercase">
+              <th style="padding:6px 8px;text-align:left">#</th>
+              <th style="padding:6px 8px;text-align:left">Descrição</th>
+              <th style="padding:6px 8px;text-align:left">CFOP/NCM</th>
+              <th style="padding:6px 8px;text-align:right">Qtd</th>
+              <th style="padding:6px 8px;text-align:right">V.Unit</th>
+              <th style="padding:6px 8px;text-align:right">Total</th>
+              <th style="padding:6px 8px;text-align:center">Tipo</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+    (nfe.items || []).forEach((item, itemIdx) => {
+      html += `
+        <tr style="border-bottom:1px solid #f1f5f9">
+          <td style="padding:5px 8px;color:#94a3b8">${item.ordem}</td>
+          <td style="padding:5px 8px" title="${(item.descricao||'').replace(/"/g,'')}">${(item.descricao||'').slice(0, 60)}</td>
+          <td style="padding:5px 8px;font-size:9px;color:#64748b;font-family:monospace">${item.cfop||'—'}/${item.ncm||'—'}</td>
+          <td style="padding:5px 8px;text-align:right;font-family:monospace">${item.quantidade} ${item.unidade}</td>
+          <td style="padding:5px 8px;text-align:right;font-family:monospace">${brl(item.valor_unit)}</td>
+          <td style="padding:5px 8px;text-align:right;font-family:monospace;font-weight:600">${brl(item.valor_total)}</td>
+          <td style="padding:5px 8px;text-align:center">
+            <select onchange="_nfePreviewSetTipo(${nfeIdx},${itemIdx},this.value)" style="font-size:10px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px">
+              <option value="estoque" ${item.tipo_sugerido==='estoque'?'selected':''}>📦 Estoque</option>
+              <option value="patrimonio" ${item.tipo_sugerido==='patrimonio'?'selected':''}>🏗️ Patrimônio</option>
+              <option value="ignorar">— Ignorar —</option>
+            </select>
+            <div style="font-size:8px;color:#94a3b8;margin-top:1px;text-align:center" title="${item.motivo_sugestao||''}">💡 ${item.tipo_sugerido}</div>
+          </td>
+        </tr>
+      `;
+    });
+    html += `</tbody></table></div>`;
+  });
+
+  html += `
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
+        <button onclick="document.getElementById('modal-nfe-preview').remove();_nfePreview=null" style="padding:9px 18px;font-size:12px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;color:#475569;cursor:pointer">Cancelar</button>
+        <button onclick="confirmarImportNfe()" style="padding:9px 22px;font-size:12px;font-weight:800;border:none;border-radius:6px;background:#15803d;color:#fff;cursor:pointer">✓ Importar (${totalItems} item${totalItems>1?'s':''})</button>
+      </div>
+    </div>
+  `;
+
+  modal.innerHTML = html;
+  document.body.appendChild(modal);
+}
+
+function _nfePreviewSetTipo(nfeIdx, itemIdx, tipo) {
+  if (!_nfePreview) return;
+  const nfe = _nfePreview[nfeIdx];
+  if (!nfe || !nfe.items || !nfe.items[itemIdx]) return;
+  if (tipo === 'ignorar') {
+    nfe.items[itemIdx].tipo_user = '__ignorar__';
+  } else {
+    nfe.items[itemIdx].tipo_user = tipo;
+  }
+}
+
+async function confirmarImportNfe() {
+  if (!_nfePreview) return;
+  // Filtra items "ignorar"
+  const nfesEnviar = _nfePreview.map(nfe => ({
+    ...nfe,
+    items: (nfe.items || []).filter(it => it.tipo_user !== '__ignorar__'),
+  }));
+
+  showLoading('Gravando despesas e vínculos...');
+  try {
+    const r = await api('/import/nfe-xml/confirmar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nfes: nfesEnviar }),
+    });
+    hideLoading();
+    if (!r.ok) { alert('Erro: ' + (r.error || 'desconhecido')); return; }
+
+    const totalCriados = r.resultados.reduce((s, x) => s + (x.items_criados || 0), 0);
+    document.getElementById('modal-nfe-preview')?.remove();
+    _nfePreview = null;
+    toast(`✅ ${r.total_nfes} NFe(s) importada(s) · ${totalCriados} despesa(s) criada(s)`);
+    if (typeof loadImportHist === 'function') loadImportHist();
+  } catch (e) {
+    hideLoading();
+    alert('Erro: ' + e.message);
+  }
+}
+
+async function desvincularDesp(id){
+  if(!confirm('Remover o vínculo desta despesa com Estoque/Patrimônio?\n\n(O item de estoque ou patrimônio NÃO é apagado — apenas o link com a despesa.)'))return;
+  await api(`/despesas/${id}/desvincular`,{method:'POST'});
+  toast('Vínculo removido');
+  loadDespData();
+}
+
+// Modal de promoção: permite "promover" uma despesa simples existente para
+// Estoque ou Patrimônio retroativamente (Opção B + opção 2 do roadmap).
+async function abrirPromocaoDesp(id, descricao, valorBruto) {
+  // Carrega itens de estoque pra dropdown
+  let estoqueOpts = '';
+  try {
+    const eRes = await api('/estoque/itens?todos=1');
+    estoqueOpts = (eRes.itens || eRes || []).map(it =>
+      `<option value="${it.id}">${(it.nome || '').replace(/"/g,'')} ${it.categoria ? '· ' + it.categoria : ''}${it.estoque_atual!=null ? ' (' + it.estoque_atual + ' ' + (it.unidade||'UN') + ')' : ''}</option>`
+    ).join('');
+  } catch (_) {}
+
+  const old = document.getElementById('modal-promo-desp');
+  if (old) old.remove();
+  const modal = document.createElement('div');
+  modal.id = 'modal-promo-desp';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:680px;width:100%;max-height:90vh;overflow-y:auto;padding:24px">
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:14px">
+        <div>
+          <div style="font-size:16px;font-weight:800;color:#0f172a">🔗 Promover Despesa</div>
+          <div style="font-size:11px;color:#64748b;margin-top:2px">${(descricao||'').slice(0,80)} · R$ ${valorBruto.toLocaleString('pt-BR',{minimumFractionDigits:2})}</div>
+        </div>
+        <button onclick="document.getElementById('modal-promo-desp').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#64748b">✕</button>
+      </div>
+
+      <!-- Tabs -->
+      <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:14px">
+        <button id="mp-tab-estoque" onclick="_mpSwitchTab('estoque')" style="padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;border:none;border-bottom:2px solid #92400e;background:#fef3c7;color:#92400e;margin-bottom:-2px">📦 Estoque</button>
+        <button id="mp-tab-patrim" onclick="_mpSwitchTab('patrim')" style="padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;border:none;border-bottom:2px solid transparent;background:transparent;color:#64748b;margin-bottom:-2px">🏗️ Patrimônio</button>
+      </div>
+
+      <!-- Painel Estoque -->
+      <div id="mp-painel-estoque" style="display:block">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+          <div>
+            <label style="font-size:9px;color:#92400e;font-weight:700;display:block;margin-bottom:2px">ITEM EXISTENTE</label>
+            <select id="mp-est-item" onchange="_mpToggleNovo()" style="width:100%;padding:6px;font-size:11px;border:1px solid #fcd34d;border-radius:6px">
+              <option value="">— Cadastrar novo item abaixo —</option>
+              ${estoqueOpts}
+            </select>
+          </div>
+          <div id="mp-est-novo-wrap">
+            <label style="font-size:9px;color:#92400e;font-weight:700;display:block;margin-bottom:2px">NOME (NOVO ITEM)</label>
+            <input id="mp-est-novo" placeholder="Ex: Luva Nitrílica G" style="width:100%;padding:6px;font-size:11px;border:1px solid #fcd34d;border-radius:6px">
+          </div>
+          <div id="mp-est-cat-wrap">
+            <label style="font-size:9px;color:#92400e;font-weight:700;display:block;margin-bottom:2px">CATEGORIA</label>
+            <select id="mp-est-cat" style="width:100%;padding:6px;font-size:11px;border:1px solid #fcd34d;border-radius:6px">
+              <option>EPI</option><option>FARDAMENTO</option><option>FERRAMENTA</option>
+              <option>MATERIAL</option><option>LIMPEZA</option><option>EXPEDIENTE</option><option>OUTROS</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:9px;color:#92400e;font-weight:700;display:block;margin-bottom:2px">QUANTIDADE</label>
+            <input id="mp-est-qtd" type="number" step="0.01" min="0" placeholder="0" style="width:100%;padding:6px;font-size:11px;border:1px solid #fcd34d;border-radius:6px">
+          </div>
+          <div id="mp-est-un-wrap">
+            <label style="font-size:9px;color:#92400e;font-weight:700;display:block;margin-bottom:2px">UNIDADE</label>
+            <select id="mp-est-un" style="width:100%;padding:6px;font-size:11px;border:1px solid #fcd34d;border-radius:6px">
+              <option>UN</option><option>CX</option><option>PAR</option><option>KG</option><option>L</option><option>MT</option><option>PCT</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top:12px;text-align:right">
+          <button onclick="_mpConfirmarEstoque(${id})" style="padding:8px 20px;font-size:12px;font-weight:700;background:#92400e;color:#fff;border:none;border-radius:6px;cursor:pointer">✓ Promover para Estoque</button>
+        </div>
+      </div>
+
+      <!-- Painel Patrimônio -->
+      <div id="mp-painel-patrim" style="display:none">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+          <div>
+            <label style="font-size:9px;color:#15803d;font-weight:700;display:block;margin-bottom:2px">CATEGORIA</label>
+            <select id="mp-pat-cat" style="width:100%;padding:6px;font-size:11px;border:1px solid #86efac;border-radius:6px">
+              <option>Veículo</option><option>Equipamento</option><option>TI</option>
+              <option>Mobiliário</option><option>Fardamento</option><option>Outro</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:9px;color:#15803d;font-weight:700;display:block;margin-bottom:2px">VIDA ÚTIL (MESES)</label>
+            <input id="mp-pat-vida" type="number" min="1" max="600" value="60" style="width:100%;padding:6px;font-size:11px;border:1px solid #86efac;border-radius:6px">
+          </div>
+          <div>
+            <label style="font-size:9px;color:#15803d;font-weight:700;display:block;margin-bottom:2px">VALOR RESIDUAL (R$)</label>
+            <input id="mp-pat-residual" type="number" min="0" step="0.01" value="0" style="width:100%;padding:6px;font-size:11px;border:1px solid #86efac;border-radius:6px">
+          </div>
+          <div>
+            <label style="font-size:9px;color:#15803d;font-weight:700;display:block;margin-bottom:2px">Nº SÉRIE / TOMBO</label>
+            <input id="mp-pat-serie" placeholder="Ex: ABC-1234" style="width:100%;padding:6px;font-size:11px;border:1px solid #86efac;border-radius:6px">
+          </div>
+        </div>
+        <div style="margin-top:12px;text-align:right">
+          <button onclick="_mpConfirmarPatrim(${id})" style="padding:8px 20px;font-size:12px;font-weight:700;background:#15803d;color:#fff;border:none;border-radius:6px;cursor:pointer">✓ Cadastrar em Patrimônio</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+function _mpSwitchTab(tab) {
+  const isEst = tab === 'estoque';
+  const tabEst = document.getElementById('mp-tab-estoque');
+  const tabPat = document.getElementById('mp-tab-patrim');
+  if (tabEst) {
+    tabEst.style.background = isEst ? '#fef3c7' : 'transparent';
+    tabEst.style.color = isEst ? '#92400e' : '#64748b';
+    tabEst.style.borderBottomColor = isEst ? '#92400e' : 'transparent';
+  }
+  if (tabPat) {
+    tabPat.style.background = !isEst ? '#dcfce7' : 'transparent';
+    tabPat.style.color = !isEst ? '#15803d' : '#64748b';
+    tabPat.style.borderBottomColor = !isEst ? '#15803d' : 'transparent';
+  }
+  const pe = document.getElementById('mp-painel-estoque');
+  const pp = document.getElementById('mp-painel-patrim');
+  if (pe) pe.style.display = isEst ? 'block' : 'none';
+  if (pp) pp.style.display = isEst ? 'none' : 'block';
+}
+
+function _mpToggleNovo() {
+  const sel = document.getElementById('mp-est-item');
+  const usar = sel && sel.value;
+  ['mp-est-novo-wrap','mp-est-cat-wrap','mp-est-un-wrap'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.opacity = usar ? '0.4' : '1';
+    if (el) el.querySelectorAll('input,select').forEach(i => i.disabled = !!usar);
+  });
+}
+
+async function _mpConfirmarEstoque(despId) {
+  const itemId = document.getElementById('mp-est-item')?.value || '';
+  const novo   = document.getElementById('mp-est-novo')?.value?.trim() || '';
+  const qtd    = parseFloat(document.getElementById('mp-est-qtd')?.value || '0');
+  if (!qtd || qtd <= 0) { alert('Informe a quantidade.'); return; }
+  if (!itemId && !novo) { alert('Escolha um item OU informe nome do novo item.'); return; }
+  const body = {
+    item_id: itemId || null,
+    novo_nome: itemId ? '' : novo,
+    categoria: document.getElementById('mp-est-cat')?.value || 'OUTROS',
+    unidade: document.getElementById('mp-est-un')?.value || 'UN',
+    quantidade: qtd,
+  };
+  const r = await api(`/despesas/${despId}/promover-estoque`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (r.ok) {
+    document.getElementById('modal-promo-desp')?.remove();
+    toast(`📦 Promovida para Estoque (item #${r.vinculo.id})`);
+    loadDespData();
+  } else {
+    alert('Erro: ' + (r.error || 'desconhecido'));
+  }
+}
+
+async function _mpConfirmarPatrim(despId) {
+  const body = {
+    categoria: document.getElementById('mp-pat-cat')?.value || 'Outro',
+    vida_util_meses: parseInt(document.getElementById('mp-pat-vida')?.value, 10) || 60,
+    valor_residual: parseFloat(document.getElementById('mp-pat-residual')?.value) || 0,
+    numero_serie: document.getElementById('mp-pat-serie')?.value || '',
+  };
+  const r = await api(`/despesas/${despId}/promover-patrimonio`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (r.ok) {
+    document.getElementById('modal-promo-desp')?.remove();
+    toast(`🏗️ Cadastrada em Patrimônio (#${r.vinculo.id})`);
+    loadDespData();
+  } else {
+    alert('Erro: ' + (r.error || 'desconhecido'));
+  }
+}
+
 async function excluirNf(id, numero){
   if(!confirm(`Excluir NF ${numero}?\nEsta ação não pode ser desfeita.`))return;
   const r=await api('/nfs/'+id,{method:'DELETE'});
@@ -2196,6 +2750,8 @@ function onDespCatChange(){
   // Campo de contrato: visível só quando centro_custo é vazio (despesa vinculada a contrato)
   const wrap=document.getElementById('nd-contrato-wrap');
   if(wrap) wrap.style.display = cc ? 'none' : '';
+  // Auto-sugestão de tipo de lançamento (item 3)
+  if (typeof onDespCampoChange === 'function') onDespCampoChange();
   // Destaque visual para categorias de overhead
   const hdr=document.getElementById('nd-overhead-hint');
   if(hdr){
@@ -2221,10 +2777,97 @@ async function toggleDespForm(){
 
   // Carrega lista de contratos para o select
   const contratosOpts = await _loadContratosForm();
+  // Itens de estoque pra popular dropdown (se ja existirem)
+  let estoqueOpts = '';
+  try {
+    const eRes = await api('/estoque/itens?todos=1');
+    estoqueOpts = (eRes.itens || eRes || []).map(it =>
+      `<option value="${it.id}">${(it.nome || '').replace(/"/g,'')} ${it.categoria ? '· ' + it.categoria : ''}${it.estoque_atual!=null ? ' (' + it.estoque_atual + ' ' + (it.unidade||'UN') + ')' : ''}</option>`
+    ).join('');
+  } catch (_) {}
 
   w.innerHTML=`
     <div style="background:#fff;border:1px solid #93c5fd;border-radius:10px;padding:16px;margin-bottom:12px">
       <div style="font-size:13px;font-weight:700;color:#1d4ed8;margin-bottom:12px">+ Novo Lançamento de Despesa</div>
+
+      <!-- TIPO DE LANÇAMENTO (Opção B: integração com Estoque/Patrimônio) -->
+      <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;margin-bottom:12px">
+        <div style="font-size:10px;font-weight:700;color:#0369a1;text-transform:uppercase;margin-bottom:6px">Tipo de Lançamento</div>
+        <label style="font-size:11px;margin-right:14px;cursor:pointer">
+          <input type="radio" name="nd-tipo" value="simples" checked onchange="onTipoLancamentoChange()"> 💸 Despesa simples
+        </label>
+        <label style="font-size:11px;margin-right:14px;cursor:pointer">
+          <input type="radio" name="nd-tipo" value="estoque" onchange="onTipoLancamentoChange()"> 📦 Compra para Estoque
+        </label>
+        <label style="font-size:11px;cursor:pointer">
+          <input type="radio" name="nd-tipo" value="patrimonio" onchange="onTipoLancamentoChange()"> 🏗️ Aquisição de Patrimônio
+        </label>
+        <!-- Auto-sugestão heurística (item 3 do roadmap) -->
+        <div id="nd-tipo-hint" style="display:none;margin-top:6px;padding:5px 9px;background:#dbeafe;border:1px solid #93c5fd;border-radius:6px;font-size:10px;color:#1e40af"></div>
+      </div>
+
+      <!-- ── Painel ESTOQUE ── -->
+      <div id="nd-painel-estoque" style="display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px;margin-bottom:12px">
+        <div style="font-size:10px;font-weight:700;color:#92400e;text-transform:uppercase;margin-bottom:6px">Detalhes do Estoque</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px">
+          <div>
+            <label style="font-size:9px;color:#92400e;font-weight:600;display:block;margin-bottom:2px">ITEM EXISTENTE</label>
+            <select id="nd-est-item" onchange="onEstoqueItemChange()" style="width:100%;padding:5px;font-size:11px;border:1px solid #fcd34d;border-radius:5px">
+              <option value="">— Ou cadastrar novo abaixo —</option>
+              ${estoqueOpts}
+            </select>
+          </div>
+          <div id="nd-est-novo-wrap">
+            <label style="font-size:9px;color:#92400e;font-weight:600;display:block;margin-bottom:2px">NOME (NOVO ITEM)</label>
+            <input id="nd-est-novo" placeholder="Ex: Luva Nitrílica G" style="width:100%;padding:5px;font-size:11px;border:1px solid #fcd34d;border-radius:5px">
+          </div>
+          <div id="nd-est-cat-wrap">
+            <label style="font-size:9px;color:#92400e;font-weight:600;display:block;margin-bottom:2px">CATEGORIA</label>
+            <select id="nd-est-cat" style="width:100%;padding:5px;font-size:11px;border:1px solid #fcd34d;border-radius:5px">
+              <option>EPI</option><option>FARDAMENTO</option><option>FERRAMENTA</option>
+              <option>MATERIAL</option><option>LIMPEZA</option><option>EXPEDIENTE</option><option>OUTROS</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:9px;color:#92400e;font-weight:600;display:block;margin-bottom:2px">QUANTIDADE</label>
+            <input id="nd-est-qtd" type="number" step="0.01" min="0" placeholder="0" style="width:100%;padding:5px;font-size:11px;border:1px solid #fcd34d;border-radius:5px">
+          </div>
+          <div id="nd-est-un-wrap">
+            <label style="font-size:9px;color:#92400e;font-weight:600;display:block;margin-bottom:2px">UNIDADE</label>
+            <select id="nd-est-un" style="width:100%;padding:5px;font-size:11px;border:1px solid #fcd34d;border-radius:5px">
+              <option>UN</option><option>CX</option><option>PAR</option><option>KG</option><option>L</option><option>MT</option><option>PCT</option>
+            </select>
+          </div>
+        </div>
+        <div style="font-size:9px;color:#b45309;margin-top:6px">Valor unitário será calculado automaticamente: <code>valor bruto / quantidade</code></div>
+      </div>
+
+      <!-- ── Painel PATRIMÔNIO ── -->
+      <div id="nd-painel-patrimonio" style="display:none;background:#ecfdf5;border:1px solid #86efac;border-radius:8px;padding:10px 12px;margin-bottom:12px">
+        <div style="font-size:10px;font-weight:700;color:#15803d;text-transform:uppercase;margin-bottom:6px">Detalhes do Patrimônio</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px">
+          <div>
+            <label style="font-size:9px;color:#15803d;font-weight:600;display:block;margin-bottom:2px">CATEGORIA</label>
+            <select id="nd-pat-cat" style="width:100%;padding:5px;font-size:11px;border:1px solid #86efac;border-radius:5px">
+              <option>Veículo</option><option>Equipamento</option><option>TI</option>
+              <option>Mobiliário</option><option>Fardamento</option><option>Outro</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:9px;color:#15803d;font-weight:600;display:block;margin-bottom:2px">VIDA ÚTIL (MESES)</label>
+            <input id="nd-pat-vida" type="number" min="1" max="600" value="60" style="width:100%;padding:5px;font-size:11px;border:1px solid #86efac;border-radius:5px">
+          </div>
+          <div>
+            <label style="font-size:9px;color:#15803d;font-weight:600;display:block;margin-bottom:2px">VALOR RESIDUAL (R$)</label>
+            <input id="nd-pat-residual" type="number" min="0" step="0.01" value="0" style="width:100%;padding:5px;font-size:11px;border:1px solid #86efac;border-radius:5px">
+          </div>
+          <div>
+            <label style="font-size:9px;color:#15803d;font-weight:600;display:block;margin-bottom:2px">Nº SÉRIE / TOMBO (OPCIONAL)</label>
+            <input id="nd-pat-serie" placeholder="Ex: ABC-1234" style="width:100%;padding:5px;font-size:11px;border:1px solid #86efac;border-radius:5px">
+          </div>
+        </div>
+        <div style="font-size:9px;color:#166534;margin-top:6px">Depreciação linear será calculada automaticamente: <code>(valor - residual) / vida útil</code> ao mês</div>
+      </div>
 
       <!-- Hint overhead -->
       <div id="nd-overhead-hint" style="display:none;padding:8px 12px;border-radius:7px;background:#fef9c3;border:1px solid #fde68a;font-size:11px;color:#92400e;font-weight:600;margin-bottom:10px"></div>
@@ -2267,7 +2910,7 @@ async function toggleDespForm(){
         <div><label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:2px">VALOR BRUTO (R$)</label>
           <input id="nd-vbruto" type="text" onkeyup="calcRetFe()" style="width:100%;padding:6px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px;font-weight:700" placeholder="0,00"></div>
         <div><label style="font-size:9px;color:#64748b;font-weight:600;display:block;margin-bottom:2px">DESCRIÇÃO</label>
-          <input id="nd-desc" style="width:100%;padding:6px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px" placeholder="Descrição da despesa"></div>
+          <input id="nd-desc" oninput="onDespCampoChange()" style="width:100%;padding:6px;font-size:11px;border:1px solid #e2e8f0;border-radius:6px" placeholder="Descrição da despesa"></div>
       </div>
 
       <div style="margin-top:10px;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
@@ -2322,6 +2965,92 @@ function calcRetFe(){
   document.getElementById('nd-vliq').textContent=brl(vb-totalRet);
 }
 
+// Mostra/esconde painéis baseado no tipo de lançamento (Opção B)
+function onTipoLancamentoChange() {
+  const tipo = document.querySelector('input[name="nd-tipo"]:checked')?.value || 'simples';
+  const pe = document.getElementById('nd-painel-estoque');
+  const pp = document.getElementById('nd-painel-patrimonio');
+  if (pe) pe.style.display = (tipo === 'estoque')    ? 'block' : 'none';
+  if (pp) pp.style.display = (tipo === 'patrimonio') ? 'block' : 'none';
+}
+
+// Heurística: dado categoria + descrição, sugere ('estoque', 'patrimonio', null).
+// Item (3) do roadmap: classificação automática. Versão sem XML NFe — usa as
+// pistas que já estão no formulário manual e em CSVs de despesa.
+function _sugerirTipoLancamento(categoria, descricao) {
+  const cat = String(categoria || '').toUpperCase();
+  const desc = String(descricao || '').toLowerCase();
+
+  // Patrimônio (vida útil > 1 ano, valor unitário relevante, ativos fixos)
+  const PATRIM_KEYWORDS = [
+    'computador','notebook','desktop','servidor','impressora','monitor','pc ',
+    'mesa','cadeira','armário','armario','estante','rack','bancada','poltrona',
+    'veículo','veiculo','carro','moto','caminhão','caminhao','camionete','utilitário',
+    'câmera','camera','cftv','dvr','nvr','catraca','torniquete','detector',
+    'ar condicionado','split','frigobar','geladeira','fogão','fogao','micro-ondas',
+    'aspirador','enceradeira','lavadora industrial',
+    'roteador','switch','firewall','no-break','nobreak','ups',
+  ];
+  if (PATRIM_KEYWORDS.some(k => desc.includes(k))) return 'patrimonio';
+
+  // Estoque (consumível, EPI, material que entra e sai)
+  if (cat === 'EPI/FERRAMENTAS' || cat === 'EPI' || cat === 'MATERIAL LIMPEZA') return 'estoque';
+  const ESTOQUE_KEYWORDS = [
+    'luva','capacete','colete','botina','coturno','farda','fardamento','uniforme',
+    'camisa','calça','calca','jaqueta','japona','meia','bota','tênis','tenis',
+    'epi','protetor auricular','máscara','mascara','óculos','oculos',
+    'detergente','desinfetante','álcool','alcool','sabão','sabao','sanitário','sanitario',
+    'papel toalha','papel higiênico','higienico','vassoura','rodo','pano',
+    'caneta','lápis','lapis','grampeador','clips','envelope','pasta','folha a4',
+    'cartucho','toner','grafite',
+    'lacre','algema','cassetete','tonfa','espargidor','spray pimenta',
+  ];
+  if (ESTOQUE_KEYWORDS.some(k => desc.includes(k))) return 'estoque';
+
+  return null;
+}
+
+// Aplica auto-sugestão visual quando user muda categoria/descrição no form
+function onDespCampoChange() {
+  const cat = document.getElementById('nd-cat')?.value || '';
+  const desc = document.getElementById('nd-desc')?.value || '';
+  const sugestao = _sugerirTipoLancamento(cat, desc);
+  const hintEl = document.getElementById('nd-tipo-hint');
+  if (!hintEl) return;
+  if (!sugestao) {
+    hintEl.style.display = 'none';
+    return;
+  }
+  // Só sugere se ainda está em "simples" (não atrapalha quem já escolheu)
+  const atual = document.querySelector('input[name="nd-tipo"]:checked')?.value;
+  if (atual !== 'simples') {
+    hintEl.style.display = 'none';
+    return;
+  }
+  const label = sugestao === 'estoque' ? '📦 Compra para Estoque' : '🏗️ Aquisição de Patrimônio';
+  hintEl.innerHTML = `💡 Sugestão pelo conteúdo: <strong>${label}</strong>. <a onclick="_aplicarSugestaoTipo('${sugestao}')" style="color:#0369a1;cursor:pointer;text-decoration:underline">Aplicar</a> · <a onclick="document.getElementById('nd-tipo-hint').style.display='none'" style="color:#94a3b8;cursor:pointer">Ignorar</a>`;
+  hintEl.style.display = 'block';
+}
+
+function _aplicarSugestaoTipo(tipo) {
+  const radio = document.querySelector(`input[name="nd-tipo"][value="${tipo}"]`);
+  if (radio) { radio.checked = true; onTipoLancamentoChange(); }
+  const hint = document.getElementById('nd-tipo-hint');
+  if (hint) hint.style.display = 'none';
+}
+
+// Quando user seleciona um item existente do estoque, esconde os campos
+// "novo item" pra evitar confusão (vai usar o item escolhido).
+function onEstoqueItemChange() {
+  const sel = document.getElementById('nd-est-item');
+  const usarExistente = sel && sel.value;
+  ['nd-est-novo-wrap','nd-est-cat-wrap','nd-est-un-wrap'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.opacity = usarExistente ? '0.4' : '1';
+    if (el) el.querySelectorAll('input,select').forEach(i => i.disabled = !!usarExistente);
+  });
+}
+
 async function saveDespesa(){
   const vb=parseValorBR(document.getElementById('nd-vbruto').value);
   if(!vb){alert('Informe o valor bruto');return;}
@@ -2329,6 +3058,8 @@ async function saveDespesa(){
   const dataBR=dataRaw?dataRaw.split('-').reverse().join('/'):'';
   const cat=document.getElementById('nd-cat').value;
   const cc=catToCentroCusto(cat);
+  const tipo = document.querySelector('input[name="nd-tipo"]:checked')?.value || 'simples';
+
   const body={
     categoria:cat,
     centro_custo:cc,
@@ -2346,11 +3077,39 @@ async function saveDespesa(){
     cofins_retido:parseValorBR(document.getElementById('nd-cofins').value),
     inss_retido:parseValorBR(document.getElementById('nd-inss').value),
     iss_retido:parseValorBR(document.getElementById('nd-iss').value),
+    tipo_lancamento: tipo,
   };
-  await api('/despesas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+
+  if (tipo === 'estoque') {
+    const itemId = document.getElementById('nd-est-item')?.value || '';
+    const novoNome = document.getElementById('nd-est-novo')?.value?.trim() || '';
+    const qtd = parseFloat(document.getElementById('nd-est-qtd')?.value || '0');
+    if (!qtd || qtd <= 0) { alert('Informe a quantidade do estoque.'); return; }
+    if (!itemId && !novoNome) { alert('Escolha um item existente OU informe nome do novo item.'); return; }
+    body.estoque_item_id = itemId || null;
+    body.estoque_item_novo_nome = itemId ? '' : novoNome;
+    body.estoque_item_categoria = document.getElementById('nd-est-cat')?.value || 'OUTROS';
+    body.estoque_quantidade = qtd;
+    body.estoque_unidade = document.getElementById('nd-est-un')?.value || 'UN';
+  } else if (tipo === 'patrimonio') {
+    body.patrimonio_categoria = document.getElementById('nd-pat-cat')?.value || 'Outro';
+    body.patrimonio_vida_util = parseInt(document.getElementById('nd-pat-vida')?.value, 10) || 60;
+    body.patrimonio_residual  = parseFloat(document.getElementById('nd-pat-residual')?.value) || 0;
+    body.patrimonio_serie     = document.getElementById('nd-pat-serie')?.value || '';
+  }
+
+  const r = await api('/despesas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if (!r || r.ok === false) {
+    alert('Erro ao salvar: ' + (r?.error || 'desconhecido'));
+    return;
+  }
   document.getElementById('desp-form-wrap').style.display='none';
   const ccLabel={ESCRITORIO:'🏢 Escritório salvo!',OPERACIONAL:'⚙️ Custo operacional salvo!',DIVIDENDOS:'💰 Dividendos salvos!'};
-  toast(ccLabel[cc]||'Despesa salva!');
+  let msg = ccLabel[cc] || 'Despesa salva!';
+  if (r.vinculo?.tipo === 'estoque')    msg += ` 📦 Lançada em Estoque (item #${r.vinculo.id})`;
+  if (r.vinculo?.tipo === 'patrimonio') msg += ` 🏗️ Cadastrada em Patrimônio (#${r.vinculo.id})`;
+  if (r.vinculo_erro) msg += ` ⚠️ Vínculo falhou: ${r.vinculo_erro}`;
+  toast(msg);
   loadDespData();
 }
 
@@ -2622,112 +3381,19 @@ async function showAReceberContrato(){
   document.getElementById('modal-a-receber').style.display = 'block';
 }
 
-// ─── Prefeitura de Palmas ─────────────────────────────────────
-let _prefPgPage=1, _prefGestao='', _prefAno='', _prefStatus='';
-let _prefConcMes='';
+// ─── NFS-e (WebISS Palmas) ────────────────────────────────────
+// Histórico: era "Prefeitura de Palmas" com sub-abas de controle de dívidas
+// (Gestões, Pagamentos, Conciliação, Portal Transparência). Removidas em
+// 2026-04 a pedido do usuário — escopo reduzido pra apenas a parte fiscal.
 
 function showPrefSub(id, el){
   document.querySelectorAll('.pref-sub').forEach(s=>s.style.display='none');
   document.querySelectorAll('.pref-stab').forEach(t=>{t.style.color='#64748b';t.style.borderBottomColor='transparent'});
-  document.getElementById('pref-sub-'+id).style.display='block';
+  const sub = document.getElementById('pref-sub-'+id);
+  if (sub) sub.style.display='block';
   if(el){el.style.color='#7c3aed';el.style.borderBottomColor='#7c3aed';}
-  if(id==='pgtos') loadPrefPagamentos();
   if(id==='nfs') loadPrefNfs();
-  if(id==='conc') loadPrefConciliacao();
   if(id==='webiss') { initWebissFilters(); checkWebissStatus(); }
-}
-
-async function loadPrefeitura(){
-  const d = await api('/prefeitura/dashboard');
-  const t = d.totais||{};
-  const pctConc = t.total_pgtos>0?((t.recebidos/t.total_pgtos)*100).toFixed(1):0;
-
-  document.getElementById('pref-kpis').innerHTML=`
-    <div class="kpi" style="border-left:4px solid #7c3aed"><div class="kpi-l">🏛️ Total Pagamentos</div><div class="kpi-v" style="color:#7c3aed">${t.total_pgtos||0}</div><div class="kpi-s">ordens bancárias da Prefeitura</div></div>
-    <div class="kpi" style="border-left:4px solid #15803d"><div class="kpi-l">💰 Total Bruto</div><div class="kpi-v green">${brl(t.total_bruto)}</div><div class="kpi-s">valor bruto pago</div></div>
-    <div class="kpi" style="border-left:4px solid #1d4ed8"><div class="kpi-l">📋 Gestões</div><div class="kpi-v blue">${d.gestoes||0}</div><div class="kpi-s">contratos ativos</div></div>
-    <div class="kpi" style="border-left:4px solid #d97706"><div class="kpi-l">🧾 NFs</div><div class="kpi-v amber">${d.nfs||0}</div><div class="kpi-s">notas fiscais</div></div>
-    <div class="kpi" style="border-left:4px solid #15803d"><div class="kpi-l">✅ Recebidos</div><div class="kpi-v green">${t.recebidos||0}</div><div class="kpi-s">${pctConc}% conciliados</div></div>
-    <div class="kpi" style="border-left:4px solid #dc2626"><div class="kpi-l">⏳ Pendentes</div><div class="kpi-v red">${t.pendentes||0}</div><div class="kpi-s">aguardando identificação</div></div>
-  `;
-  loadPrefGestoes();
-}
-
-async function loadPrefGestoes(){
-  const d = await api('/prefeitura/gestoes');
-  document.getElementById('pref-gestoes-head').innerHTML=`<tr>
-    <th>Gestão</th><th>Código</th><th class="r">Total Pago</th><th class="r">Qtd Pgtos</th>
-    <th>Primeiro Pgto</th><th>Último Pgto</th><th>Status</th>
-  </tr>`;
-  document.getElementById('pref-gestoes-body').innerHTML=(d.data||[]).map(r=>{
-    const st = r.status==='ATIVO'?badge('ATIVO','green'):badge(r.status||'—','gray');
-    return `<tr>
-      <td style="font-size:10px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.gestao}">${r.gestao}</td>
-      <td class="mono" style="font-size:10px;color:#7c3aed;font-weight:600">${r.gestao_codigo||''}</td>
-      <td class="r mono green" style="font-weight:700">${brl(r.total_pago)}</td>
-      <td class="r mono" style="color:#475569">${r.qtd_pagamentos}</td>
-      <td style="font-size:10px;color:#64748b">${r.primeiro_pg||''}</td>
-      <td style="font-size:10px;color:#64748b">${r.ultimo_pg||''}</td>
-      <td>${st}</td>
-    </tr>`;
-  }).join('');
-}
-
-let _prefPgFiltersRendered=false;
-async function loadPrefPagamentos(){
-  if(!_prefPgFiltersRendered){
-    const g = await api('/prefeitura/gestoes');
-    const gestOpts = (g.data||[]).map(r=>`<option value="${r.gestao_codigo}">${r.gestao_codigo} — ${(r.gestao||'').substring(0,40)}</option>`).join('');
-    document.getElementById('pref-pgtos-filters').innerHTML=`
-      <div><label>Gestão</label><select id="pf-gestao" onchange="_prefPgPage=1;loadPrefPgData()"><option value="">Todas</option>${gestOpts}</select></div>
-      <div><label>Ano Empenho</label><select id="pf-ano" onchange="_prefPgPage=1;loadPrefPgData()"><option value="">Todos</option><option value="2026">2026</option><option value="2025">2025</option><option value="2024">2024</option></select></div>
-      <div><label>Status</label><select id="pf-status" onchange="_prefPgPage=1;loadPrefPgData()"><option value="">Todos</option><option value="RECEBIDO">Recebido</option><option value="PENDENTE">Pendente</option></select></div>
-    `;
-    _prefPgFiltersRendered=true;
-  }
-  await loadPrefPgData();
-}
-
-async function loadPrefPgData(){
-  const gestao=document.getElementById('pf-gestao')?.value||'';
-  const ano=document.getElementById('pf-ano')?.value||'';
-  const status=document.getElementById('pf-status')?.value||'';
-  let url=`/prefeitura/pagamentos?limit=100&offset=${(_prefPgPage-1)*100}`;
-  if(gestao) url+='&gestao='+encodeURIComponent(gestao);
-  if(ano) url+='&ano='+ano;
-  if(status) url+='&status='+status;
-  const d = await api(url);
-  const pages = Math.ceil((d.total||0)/100)||1;
-  const sm = d.sumario||{};
-  document.getElementById('pref-pgtos-counter').innerHTML=`
-    <span>${d.total} pagamentos</span> ·
-    <span style="color:#15803d;font-weight:700">Bruto: ${brl(sm.bruto)}</span> ·
-    <span style="color:#1d4ed8;font-weight:700">Líquido OB: ${brl(sm.liquido)}</span> ·
-    <span style="color:#d97706;font-weight:700">Retenção: ${brl(sm.ret)}</span>
-  `;
-  document.getElementById('pref-pgtos-head').innerHTML=`<tr>
-    <th>Data Pgto</th><th>Gestão</th><th>Fornecedor</th><th>Ano Emp.</th>
-    <th class="r">Valor Bruto</th><th class="r">Líquido OB</th><th class="r">Retenção</th>
-    <th>NF</th><th>Status</th>
-  </tr>`;
-  document.getElementById('pref-pgtos-body').innerHTML=(d.data||[]).map(r=>{
-    const stBg = r.status_conciliacao==='RECEBIDO'?'green':'amber';
-    return `<tr style="${r.status_conciliacao==='RECEBIDO'?'background:#f0fdf4':''}">
-      <td style="font-size:10px;color:#64748b;white-space:nowrap">${r.data_pagamento||''}</td>
-      <td style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.gestao}">${r.gestao_codigo||''}</td>
-      <td style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.fornecedor}">${(r.fornecedor||'').substring(0,35)}</td>
-      <td class="mono" style="font-size:10px;color:#64748b;text-align:center">${r.ano_empenho||''}</td>
-      <td class="r mono" style="font-weight:600">${brl(r.valor_pago)}</td>
-      <td class="r mono" style="color:#1d4ed8;font-weight:600">${r.valor_liquido_ob?brl(r.valor_liquido_ob):'<span class="muted">—</span>'}</td>
-      <td class="r mono" style="color:#d97706">${r.retencao?brl(r.retencao):'<span class="muted">—</span>'}</td>
-      <td style="font-size:10px;color:#7c3aed;font-weight:600">${r.nf_vinculada||'<span class="muted">—</span>'}</td>
-      <td>${badge(r.status_conciliacao||'PENDENTE',stBg)}</td>
-    </tr>`;
-  }).join('');
-  document.getElementById('pref-pgtos-pag').innerHTML=`
-    <button ${_prefPgPage<=1?'disabled':''} onclick="_prefPgPage--;loadPrefPgData()">← Anterior</button>
-    <span>Página ${_prefPgPage} de ${pages} (${d.total} registros)</span>
-    <button ${_prefPgPage>=pages?'disabled':''} onclick="_prefPgPage++;loadPrefPgData()">Próxima →</button>`;
 }
 
 async function loadPrefNfs(){
@@ -2754,84 +3420,6 @@ async function loadPrefNfs(){
       <td style="font-size:10px;color:#64748b">${r.pagamento_id?'#'+r.pagamento_id:'<span class="muted">—</span>'}</td>
     </tr>`;
   }).join('');
-}
-
-async function loadPrefConciliacao(){
-  document.getElementById('pref-conc-filters').innerHTML=`
-    <div><label>Mês</label>
-      <select id="pc-mes" onchange="loadPrefConcData()">
-        <option value="">Todos</option>
-        <option value="2026-03">Mar/2026</option><option value="2026-02">Fev/2026</option><option value="2026-01">Jan/2026</option>
-        <option value="2025-12">Dez/2025</option><option value="2025-11">Nov/2025</option><option value="2025-10">Out/2025</option>
-        <option value="2025-09">Set/2025</option><option value="2025-08">Ago/2025</option><option value="2025-07">Jul/2025</option>
-        <option value="2025-06">Jun/2025</option><option value="2025-05">Mai/2025</option><option value="2025-04">Abr/2025</option>
-        <option value="2024-12">Dez/2024</option><option value="2024-11">Nov/2024</option><option value="2024-10">Out/2024</option>
-        <option value="2024-09">Set/2024</option><option value="2024-08">Ago/2024</option><option value="2024-07">Jul/2024</option>
-        <option value="2024-06">Jun/2024</option><option value="2024-05">Mai/2024</option><option value="2024-04">Abr/2024</option>
-      </select>
-    </div>
-  `;
-  loadPrefConcData();
-}
-
-async function loadPrefConcData(){
-  const mes = document.getElementById('pc-mes')?.value||'';
-  let url = '/prefeitura/conciliacao';
-  if(mes) url += '?mes='+mes;
-  const d = await api(url);
-  const pgtos = d.pagamentos||[];
-  const nfsLivres = d.nfs_livres||[];
-  const recebidos = pgtos.filter(p=>p.status_conciliacao==='RECEBIDO').length;
-  const pendentes = pgtos.length - recebidos;
-  const totalBruto = pgtos.reduce((s,p)=>s+p.valor_pago,0);
-  const totalLiq = pgtos.filter(p=>p.valor_liquido_ob>0).reduce((s,p)=>s+p.valor_liquido_ob,0);
-
-  let html = `
-    <div class="kpis" style="margin-bottom:14px">
-      <div class="kpi"><div class="kpi-l">Pagamentos</div><div class="kpi-v blue">${pgtos.length}</div></div>
-      <div class="kpi"><div class="kpi-l">Total Bruto</div><div class="kpi-v" style="color:#7c3aed">${brl(totalBruto)}</div></div>
-      <div class="kpi"><div class="kpi-l">Líquido OB</div><div class="kpi-v green">${brl(totalLiq)}</div></div>
-      <div class="kpi"><div class="kpi-l">Recebidos</div><div class="kpi-v green">${recebidos}</div></div>
-      <div class="kpi"><div class="kpi-l">Pendentes</div><div class="kpi-v red">${pendentes}</div></div>
-      <div class="kpi"><div class="kpi-l">NFs Livres</div><div class="kpi-v amber">${nfsLivres.length}</div></div>
-    </div>
-  `;
-
-  html += `<div class="tw" style="max-height:500px;overflow-y:auto"><table>
-    <thead><tr>
-      <th>Data Pgto</th><th>Gestão</th><th class="r">Valor Bruto</th>
-      <th class="r">Líquido OB</th><th>NFs Vinculadas</th><th>Status</th><th>Data OB</th>
-    </tr></thead><tbody>`;
-  pgtos.forEach(p=>{
-    const stBadge = p.status_conciliacao==='RECEBIDO'?badge('RECEBIDO','green'):badge('PENDENTE','amber');
-    const nfs = p.nfs_vinculadas||'';
-    html += `<tr style="${p.status_conciliacao==='RECEBIDO'?'background:#f0fdf4':''}">
-      <td style="font-size:10px;color:#64748b;white-space:nowrap">${p.data_pagamento||''}</td>
-      <td style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${p.gestao}">${p.gestao_codigo||''}</td>
-      <td class="r mono" style="font-weight:600">${brl(p.valor_pago)}</td>
-      <td class="r mono" style="color:#1d4ed8;font-weight:600">${p.valor_liquido_ob?brl(p.valor_liquido_ob):'<span class="muted">—</span>'}</td>
-      <td style="font-size:10px;color:#7c3aed;font-weight:600">${nfs?'NF '+nfs.replace(/,/g,', NF '):'<span class="muted">—</span>'}</td>
-      <td>${stBadge}</td>
-      <td style="font-size:10px;color:#64748b">${p.data_ob||''}</td>
-    </tr>`;
-  });
-  html += '</tbody></table></div>';
-
-  if(nfsLivres.length){
-    html += `<div style="margin-top:16px"><h3 style="font-size:13px;font-weight:700;color:#475569;margin-bottom:8px">🧾 NFs Não Vinculadas (${nfsLivres.length})</h3>
-    <div class="tw"><table>
-      <thead><tr><th>NF</th><th>Cidade</th><th>Gestão</th><th class="r">V. Bruto</th><th class="r">V. Líquido</th><th>Status</th></tr></thead>
-      <tbody>${nfsLivres.map(n=>`<tr>
-        <td class="mono" style="color:#7c3aed;font-weight:600">NF ${n.numero}</td>
-        <td style="font-size:10px;color:#475569">${n.cidade||''}</td>
-        <td style="font-size:10px" title="${n.gestao}">${n.gestao_codigo||''}</td>
-        <td class="r mono" style="font-weight:600">${brl(n.valor_bruto)}</td>
-        <td class="r mono green">${brl(n.valor_liquido)}</td>
-        <td>${badge(n.status||'EMITIDA','amber')}</td>
-      </tr>`).join('')}</tbody>
-    </table></div></div>`;
-  }
-  document.getElementById('pref-conc-content').innerHTML=html;
 }
 
 // ─── Init ────────────────────────────────────────────────────────
@@ -4156,6 +4744,95 @@ async function verTimelineContrato(id) {
     </div>`;
 
   document.body.insertAdjacentHTML('beforeend', html);
+}
+
+// ─── FATURAMENTO PREVISTO POR MÊS ────────────────────────────────
+async function loadFaturamentoPrevisto() {
+  const meses = parseInt(document.getElementById('fp-meses')?.value, 10) || 6;
+  const cont  = document.getElementById('fp-content');
+  if (!cont) return;
+  cont.innerHTML = '<div class="loading" style="padding:30px;text-align:center;color:#94a3b8">Carregando faturamento previsto…</div>';
+
+  try {
+    const d = await api(`/contratos/faturamento-previsto?meses=${meses}`);
+    if (!d.ok) throw new Error(d.error || 'Erro');
+
+    if (!d.qtd_contratos_cadastrados) {
+      cont.innerHTML = `
+        <div style="padding:30px;text-align:center;background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;color:#92400e;font-size:13px">
+          ⚠ Nenhum contrato cadastrado no módulo Boletins.<br>
+          <span style="font-size:11px;color:#b45309">Cadastre contratos+postos em <strong>📄 Boletins</strong> para o faturamento previsto aparecer aqui.</span>
+        </div>`;
+      return;
+    }
+
+    const brl = v => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    let html = '';
+    for (const m of d.meses) {
+      const mes_label_upper = (m.mes_label || '').toUpperCase();
+      html += `
+        <details open style="margin-bottom:14px;border:1px solid #e2e8f0;border-radius:10px;background:#fff;overflow:hidden">
+          <summary style="padding:12px 16px;cursor:pointer;background:linear-gradient(to right,#f1f5f9,#fff);display:flex;justify-content:space-between;align-items:center;font-weight:700;color:#0f172a">
+            <span>📅 ${mes_label_upper} <span style="font-size:10px;color:#94a3b8;font-weight:600;margin-left:8px">${m.contratos.length} contrato(s)</span></span>
+            <span style="color:#1d4ed8;font-size:14px">${brl(m.total_geral)}</span>
+          </summary>
+          <div style="padding:0 14px 14px">
+      `;
+
+      if (m.contratos.length === 0) {
+        html += `<div style="padding:16px;color:#94a3b8;font-size:12px;text-align:center">Sem contratos ativos nesta competência.</div>`;
+      } else {
+        html += `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px">
+          <thead>
+            <tr style="background:#1e293b;color:#fff;font-size:10px;text-transform:uppercase">
+              <th style="padding:7px 10px;text-align:left">Contrato</th>
+              <th style="padding:7px 10px;text-align:left">Posto / Anexo</th>
+              <th style="padding:7px 10px;text-align:left">Município</th>
+              <th style="padding:7px 10px;text-align:right">Valor Mensal</th>
+            </tr>
+          </thead>
+          <tbody>`;
+
+        for (const c of m.contratos) {
+          const postoCount = c.postos.length;
+          c.postos.forEach((p, idx) => {
+            const isFirst = idx === 0;
+            const isLast  = idx === postoCount - 1;
+            html += `<tr style="border-bottom:${isLast ? '2px solid #cbd5e1' : '1px solid #f1f5f9'}">
+              ${isFirst
+                ? `<td rowspan="${postoCount + 1}" style="padding:8px 10px;vertical-align:top;background:#f8fafc;font-weight:700;color:#0f172a;border-right:1px solid #e2e8f0">
+                     <div>${(c.nome || '').toUpperCase()}</div>
+                     <div style="font-size:9px;color:#64748b;font-weight:500;margin-top:2px">${c.numero_contrato || c.contrato_ref || ''}</div>
+                   </td>`
+                : ''}
+              <td style="padding:6px 10px;color:#334155">${p.campus_nome || '—'}</td>
+              <td style="padding:6px 10px;color:#64748b;font-size:11px">${p.municipio || '—'}</td>
+              <td style="padding:6px 10px;text-align:right;font-family:monospace;color:#0f766e">${brl(p.valor_mensal)}</td>
+            </tr>`;
+          });
+          // Linha de total do contrato
+          html += `<tr style="border-bottom:2px solid #cbd5e1;background:#f0fdfa">
+            <td colspan="2" style="padding:6px 10px;text-align:right;font-weight:700;color:#0f766e;font-size:11px">Total ${(c.nome || '').toUpperCase()}</td>
+            <td style="padding:6px 10px;text-align:right;font-family:monospace;font-weight:800;color:#0f766e">${brl(c.total_mensal)}</td>
+          </tr>`;
+        }
+
+        // Linha de total geral da competência
+        html += `<tr style="background:#dbeafe">
+          <td colspan="3" style="padding:9px 10px;text-align:right;font-weight:800;color:#1e40af;font-size:12px;text-transform:uppercase">⊳ Total da Competência</td>
+          <td style="padding:9px 10px;text-align:right;font-family:monospace;font-weight:800;color:#1e40af;font-size:13px">${brl(m.total_geral)}</td>
+        </tr>`;
+        html += `</tbody></table>`;
+      }
+
+      html += `</div></details>`;
+    }
+
+    cont.innerHTML = html;
+  } catch (e) {
+    cont.innerHTML = `<div style="padding:20px;color:#dc2626;text-align:center">Erro: ${e.message || e}</div>`;
+  }
 }
 
 // ─── CORREÇÃO DE NFs ──────────────────────────────────────────────

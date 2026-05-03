@@ -66,12 +66,31 @@ function renderBolLista() {
   `;
 
   if (_bolContratos.length === 0) {
+    // P0-2: empty state explicado em detalhes — antes era ambíguo
     tableHtml += `<tr><td colspan="6">
-      <div style="text-align:center;padding:30px 20px">
+      <div style="text-align:center;padding:30px 20px;max-width:640px;margin:0 auto">
         <div style="font-size:32px;margin-bottom:8px">📋</div>
-        <div style="font-weight:700;color:#334155;margin-bottom:4px">Nenhum contrato de boletim cadastrado</div>
-        <div style="font-size:12px;color:#94a3b8;margin-bottom:16px">Cadastre manualmente ou inicialize a partir dos contratos financeiros existentes</div>
-        <button onclick="bolInicializarDeContratos()" style="padding:8px 20px;font-size:12px;font-weight:700;background:#7c2d12;color:#fff;border:none;border-radius:6px;cursor:pointer">🚀 Inicializar a partir dos Contratos Financeiros</button>
+        <div style="font-weight:700;color:#334155;margin-bottom:4px;font-size:14px">Nenhum contrato cadastrado no módulo de Boletins</div>
+        <div style="font-size:11px;color:#64748b;margin-bottom:16px">
+          O módulo de Boletins é separado do módulo de Contratos Financeiros, mas pode ser populado a partir dele.
+        </div>
+
+        <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;text-align:left;margin-bottom:16px;font-size:11px;color:#78350f">
+          <strong>ℹ️ O que esse botão faz?</strong>
+          <ul style="margin:6px 0 0;padding-left:20px;line-height:1.6">
+            <li>Lê todos os contratos da aba <strong>📋 Contratos</strong> (status ATIVO)</li>
+            <li>Cria <strong>1 entrada nova aqui</strong> para cada um, copiando: nome, número, contratante, valor</li>
+            <li><strong>Não deleta nada</strong> — só adiciona registros novos.</li>
+            <li>É <strong>idempotente</strong>: rodar 2x não duplica.</li>
+            <li>Depois você ajusta postos/itens manualmente (estrutura específica do boletim).</li>
+          </ul>
+        </div>
+
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+          <button onclick="bolInicializarDeContratos()" class="btn btn-primary btn-sm">🚀 Importar dos Contratos Financeiros</button>
+          <button onclick="abrirImportarTemplate()" class="btn btn-sm" style="background:#d97706;color:#fff;border-color:#d97706">📥 Importar Template (.json)</button>
+        </div>
+        <div style="font-size:10px;color:#94a3b8;margin-top:10px">Ou cadastre um contrato manualmente clicando em "+ Novo contrato" (acima).</div>
       </div>
     </td></tr>`;
   }
@@ -417,56 +436,58 @@ function bolEditarContrato(id) {
   document.getElementById('modal-editar-contrato-bol')?.remove();
   const overlay = document.createElement('div');
   overlay.id = 'modal-editar-contrato-bol';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;overflow-y:auto;padding:20px';
+  // align-items:flex-start + padding-top:5vh => modal sempre fica no topo,
+  // mesmo se o conteúdo for grande. Evita ficar deslocado/cortado.
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:5vh 20px';
 
   const fld = (lbl, key, hint) => `
-    <div style="margin-bottom:10px">
-      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:3px">${lbl}${hint?`<span style="font-weight:400;color:#94a3b8"> — ${hint}</span>`:''}</label>
+    <div style="margin-bottom:7px">
+      <label style="font-size:10px;font-weight:700;color:#475569;display:block;margin-bottom:2px">${lbl}${hint?`<span style="font-weight:400;color:#94a3b8;font-size:9px"> — ${hint}</span>`:''}</label>
       <input id="bec-${key}" value="${(c[key]||'').replace(/"/g,'&quot;')}"
-        style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+        style="width:100%;padding:5px 9px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
     </div>`;
 
   overlay.innerHTML = `
-    <div style="background:#fff;border-radius:14px;padding:28px;width:560px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.35)">
-      <h3 style="margin:0 0 18px;font-size:16px;font-weight:800;color:#1e293b">✏️ Editar Contrato de Boletim</h3>
+    <div style="background:#fff;border-radius:12px;padding:18px 20px;width:min(480px, 92vw);min-width:300px;box-shadow:0 20px 60px rgba(0,0,0,.35);font-size:12px">
+      <h3 style="margin:0 0 12px;font-size:14px;font-weight:800;color:#1e293b">✏️ Editar Contrato de Boletim</h3>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">
         ${fld('Nome','nome')}
         ${fld('Nº Contrato','numero_contrato')}
       </div>
-      ${fld('Contratante (Razão Social do Órgão)','contratante')}
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+      ${fld('Contratante','contratante')}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">
         ${fld('Processo','processo')}
         ${fld('Pregão','pregao')}
       </div>
       ${fld('Descrição do Serviço','descricao_servico')}
       ${fld('Escala','escala')}
 
-      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;margin:12px 0">
-        <div style="font-size:11px;font-weight:800;color:#1d4ed8;margin-bottom:8px">🔗 Vinculação Financeira (necessário para emissão NFS-e)</div>
-        ${fld('Referência do Contrato Financeiro','contrato_ref','numContrato exato da tabela contratos — ex: UFT 16/2025')}
-        ${fld('CNPJ do Tomador','insc_municipal','CNPJ do órgão contratante — 18 caracteres c/ máscara')}
-        ${fld('Orgão/Campo auxiliar','orgao','deixe vazio — preenchido automaticamente se contrato_ref estiver correto')}
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:7px;padding:9px 10px;margin:8px 0">
+        <div style="font-size:10px;font-weight:800;color:#1d4ed8;margin-bottom:5px">🔗 Vinculação Financeira (NFS-e)</div>
+        ${fld('Referência do Contrato Financeiro','contrato_ref','numContrato — ex: UFT 16/2025')}
+        ${fld('CNPJ do Tomador','insc_municipal','CNPJ do órgão')}
+        ${fld('Órgão (auto)','orgao','vazio = preenchido pelo contrato_ref')}
       </div>
 
-      <div style="background:#f8fafc;border-radius:8px;padding:12px;margin:12px 0">
-        <div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:8px">Dados da Empresa Emitente</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+      <div style="background:#f8fafc;border-radius:7px;padding:9px 10px;margin:8px 0">
+        <div style="font-size:10px;font-weight:700;color:#475569;margin-bottom:5px">Dados da Empresa Emitente</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">
           ${fld('Razão Social','empresa_razao')}
           ${fld('CNPJ','empresa_cnpj')}
         </div>
         ${fld('Endereço','empresa_endereco')}
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">
           ${fld('E-mail','empresa_email')}
           ${fld('Telefone','empresa_telefone')}
         </div>
       </div>
 
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px">
         <button onclick="document.getElementById('modal-editar-contrato-bol').remove()"
-          style="padding:8px 18px;background:#f1f5f9;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">Cancelar</button>
+          style="padding:6px 14px;background:#f1f5f9;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-weight:600">Cancelar</button>
         <button id="bec-salvar-btn" onclick="_bolSalvarContrato(${id})"
-          style="padding:8px 18px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">💾 Salvar</button>
+          style="padding:6px 14px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-weight:700">💾 Salvar</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -931,6 +952,239 @@ function abrirPainelFaturamento() {
   renderPainelFaturamento();
 }
 
+// Abre o preview do PDF do boletim em nova aba (não baixa, só visualiza)
+// Aceita contrato_id+competencia opcionais como fallback caso boletim_id esteja stale
+async function previewBoletimPDF(boletim_id, contrato_id, competencia) {
+  const token = localStorage.getItem('jwt') || localStorage.getItem('montana_jwt') || '';
+  // FIX: `currentCompany` é declarado com `let` em app.js — NÃO está em window.
+  // Lê direto da variável global (mesmo escopo) ou do localStorage como fallback.
+  // Sem isso, middleware default pra 'seguranca' → SEDUC não encontrado.
+  const company = (typeof currentCompany !== 'undefined' && currentCompany)
+    || localStorage.getItem('montana_company')
+    || 'assessoria';
+  // Monta query string com fallback contrato_id+competencia
+  const params = new URLSearchParams({ company });
+  if (contrato_id) params.set('contrato_id', String(contrato_id));
+  if (competencia) params.set('competencia', String(competencia));
+  try {
+    const r = await fetch(`/api/boletins/${boletim_id}/preview-pdf?${params}`, {
+      headers: { 'Authorization': 'Bearer ' + token, 'X-Company': company },
+    });
+    if (!r.ok) {
+      let msg = '';
+      let ids = '';
+      try {
+        const j = await r.json();
+        msg = j.error || JSON.stringify(j);
+        if (j.ids_disponiveis && j.ids_disponiveis.length) {
+          ids = '\n\nIDs disponíveis no banco:\n' + j.ids_disponiveis.slice(0, 8).map(b =>
+            `  • id=${b.id} contrato=${b.contrato_id} comp=${b.competencia} R$${b.valor_total||b.valor_base||0}`
+          ).join('\n');
+        }
+      } catch (_) { msg = await r.text().catch(() => '') || r.status; }
+      alert('Erro ao gerar preview: ' + msg + ids + '\n\n(O frontend tentou id=' + boletim_id + ', contrato_id=' + (contrato_id||'?') + ', competencia=' + (competencia||'?') + ')');
+      return;
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) {
+    alert('Erro: ' + e.message);
+  }
+}
+
+// ─── Templates pré-configurados de contratos (Boletins) ─────────
+// Cada template tem o JSON pronto pra POST /boletins/seed-template,
+// idempotente. Cadastra contrato + postos + items + boletim em rascunho
+// pra competência selecionada.
+const _BOL_TEMPLATES = {
+  'SEDUC_016_2023': {
+    label: 'SEDUC 016/2023 — Limpeza/Conservação Palmas (R$ 209.815,61/mês)',
+    empresa: 'assessoria',
+    payload: {
+      contrato: {
+        nome: 'SEDUC',
+        contratante: 'SECRETARIA DA EDUCACAO',
+        numero_contrato: '016/2023',
+        processo: '2023/27000/000120',
+        pregao: '',
+        // Descrição oficial conforme NFS-e emitida (PRESERVAR esse texto exato — usado pela emissão)
+        descricao_servico: 'SERVICOS COPEIRAGEM, LIMPEZA, CONSERVACAO, HIGIENIZACAO E JARDINAGEM, COM FORNECIMENTO DE MATERIAIS E PRODUTOS DE CONSUMO APROPRIADOS, MAQUINAS E EQUIPAMENTOS A SEREM PRESTADOS NAS DEPENDENCIAS INTERNAS E EXTERNAS DA SECRETARIA DA EDUCACAO, JUVENTUDE E ESPORTES E ANEXOS.',
+        escala: 'Mensal',
+        // Prestador (Montana Assessoria) — confirmado na NFS-e
+        empresa_razao: 'MONTANA ASSESSORIA EMPRESARIAL LTDA - EPP',
+        empresa_cnpj: '14.092.519/0001-51',
+        empresa_endereco: 'Quadra ACSE 1 Rua SE 5, 19, Plano Diretor Sul - CEP: 77020-018 - Palmas/TO',
+        empresa_email: 'MONTANAEMPRESARIAL@GMAIL.COM',
+        empresa_telefone: '(63) 3215-0351',
+        // Tomador (SEDUC) — extraído da NFS-e 301/2026
+        contrato_ref: 'SEDUC 016/2023',
+        orgao: 'SECRETARIA DA EDUCACAO',
+        // CAMPO CRÍTICO PARA EMISSÃO: insc_municipal armazena o CNPJ do tomador
+        // (nomenclatura herdada do WebISS — apesar do nome confuso)
+        insc_municipal: '25.053.083/0001-08',
+      },
+      postos: [{
+        campus_key: 'PALMAS_SEDE',
+        campus_nome: 'SEDUC PALMAS - SEDE E ANEXOS',
+        municipio: 'PALMAS/TO',
+        descricao_posto: 'Limpeza, asseio, conservação, copeiragem e jardinagem',
+        label_resumo: 'PALMAS SEDE',
+        ordem: 1,
+        itens: [
+          { descricao: 'AUXILIAR DE SERVIÇO GERAL', quantidade: 24, valor_unitario: 5481.89 },
+          { descricao: 'COPEIRA',                   quantidade: 13, valor_unitario: 4060.53 },
+          { descricao: 'ENCARREGADA',               quantidade:  2, valor_unitario: 5513.62 },
+          { descricao: 'JARDINEIRO',                quantidade:  3, valor_unitario: 4812.04 },
+        ],
+      }],
+    },
+  },
+};
+
+function abrirImportarTemplate() {
+  const old = document.getElementById('modal-bol-template');
+  if (old) old.remove();
+  // Sem filtro por empresa — o backend (POST /boletins/seed-template)
+  // direciona automaticamente pra empresa atual via companyMiddleware.
+  // O campo `empresa` no template é apenas informativo (dica de UX).
+  const empresaAtual = window.currentCompany || '(empresa atual)';
+  const opcoes = Object.entries(_BOL_TEMPLATES)
+    .map(([k, t]) => {
+      const aviso = t.empresa && t.empresa !== window.currentCompany
+        ? ` ⚠ desenhado para ${t.empresa}`
+        : '';
+      return `<option value="${k}">${t.label}${aviso}</option>`;
+    })
+    .join('');
+
+  const modal = document.createElement('div');
+  modal.id = 'modal-bol-template';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:560px;width:100%;padding:24px">
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:14px">
+        <div>
+          <div style="font-size:17px;font-weight:800;color:#0f172a">📥 Importar Template de Contrato</div>
+          <div style="font-size:11px;color:#64748b;margin-top:2px">Cadastra contrato + postos + items + boletim em rascunho. Idempotente — pode rodar 2x sem duplicar.</div>
+        </div>
+        <button onclick="document.getElementById('modal-bol-template').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#64748b">✕</button>
+      </div>
+
+      ${opcoes ? `
+      <div style="margin-bottom:12px">
+        <label style="font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;display:block;margin-bottom:4px">Template</label>
+        <select id="bt-template" style="width:100%;padding:8px;font-size:12px;border:1px solid #cbd5e1;border-radius:6px">
+          ${opcoes}
+        </select>
+      </div>
+      <div style="margin-bottom:14px">
+        <label style="font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;display:block;margin-bottom:4px">Competência (gera boletim em rascunho)</label>
+        <input id="bt-comp" type="month" value="${(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;})()}" style="width:100%;padding:8px;font-size:12px;border:1px solid #cbd5e1;border-radius:6px">
+      </div>
+      <div style="margin-bottom:14px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px">
+        <div style="font-size:10px;font-weight:700;color:#c2410c;text-transform:uppercase;margin-bottom:6px">⚠ Opções avançadas</div>
+        <label style="font-size:11px;display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:4px">
+          <input type="checkbox" id="bt-force-update">
+          <span><strong>Atualizar dados do contrato</strong> existente (sobrescreve nome, endereço, CNPJ tomador, processo, descrição etc.)</span>
+        </label>
+        <label style="font-size:11px;display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:4px">
+          <input type="checkbox" id="bt-reset-postos">
+          <span><strong>Resetar postos + items</strong> antes de importar (apaga estrutura existente do contrato)</span>
+        </label>
+        <label style="font-size:11px;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="bt-reset-boletim">
+          <span><strong>Resetar boletim</strong> da competência (apaga rascunho/aprovado; protege EMITIDA)</span>
+        </label>
+        <div style="font-size:9px;color:#9a3412;margin-top:6px">Marque os 3 pra um sync completo do template no contrato existente.</div>
+      </div>
+      <div id="bt-result" style="display:none;padding:10px 12px;border-radius:8px;font-size:11px;margin-bottom:10px"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button onclick="document.getElementById('modal-bol-template').remove()" style="padding:8px 16px;font-size:12px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;color:#475569;cursor:pointer">Cancelar</button>
+        <button onclick="confirmarImportTemplate()" style="padding:8px 22px;font-size:12px;font-weight:800;border:none;border-radius:6px;background:#d97706;color:#fff;cursor:pointer">✓ Importar</button>
+      </div>
+      ` : `
+      <div style="padding:14px;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;font-size:11px;color:#92400e">
+        Nenhum template disponível para a empresa <strong>${empresaAtual}</strong>.<br>
+        Os templates são pré-configurados por empresa. Quem precisa adicionar templates novos: <code>app-boletins.js → _BOL_TEMPLATES</code>.
+      </div>
+      `}
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+async function confirmarImportTemplate() {
+  const sel = document.getElementById('bt-template');
+  const compEl = document.getElementById('bt-comp');
+  const resEl = document.getElementById('bt-result');
+  if (!sel || !compEl) return;
+  const tpl = _BOL_TEMPLATES[sel.value];
+  if (!tpl) return;
+  const competencia = compEl.value || null;
+  const resetPostos    = document.getElementById('bt-reset-postos')?.checked || false;
+  const resetBoletim   = document.getElementById('bt-reset-boletim')?.checked || false;
+  const forceUpdate    = document.getElementById('bt-force-update')?.checked || false;
+
+  // Confirmação extra se reset estiver ativado (perigoso)
+  if (resetPostos || resetBoletim) {
+    const aviso = [
+      resetPostos  && 'apagar TODOS os postos+items existentes do contrato',
+      resetBoletim && `apagar o boletim da competência ${competencia || ''}`,
+    ].filter(Boolean).join(' E ');
+    if (!confirm(`⚠ Você marcou opções de reset.\n\nIsso vai ${aviso}.\n\n(Não apaga boletim com NFS-e EMITIDA — proteção.)\n\nProsseguir?`)) return;
+  }
+
+  const body = {
+    ...tpl.payload,
+    gerar_boletim_competencia: competencia,
+    reset_postos: resetPostos,
+    reset_boletim: resetBoletim,
+    force_update_contrato: forceUpdate,
+  };
+  resEl.style.display = 'block';
+  resEl.style.background = '#f8fafc';
+  resEl.style.color = '#334155';
+  resEl.style.border = '1px solid #e2e8f0';
+  resEl.innerHTML = '⏳ Cadastrando...';
+
+  try {
+    const r = await api('/boletins/seed-template', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(r.error || 'erro desconhecido');
+
+    resEl.style.background = '#dcfce7';
+    resEl.style.color = '#15803d';
+    resEl.style.border = '1px solid #86efac';
+    const resetLine = (r.reset && (r.reset.postos_deletados || r.reset.itens_deletados || r.reset.boletim_deletado))
+      ? `<br>🧹 Reset: ${r.reset.postos_deletados} posto(s), ${r.reset.itens_deletados} item(ns)${r.reset.boletim_deletado ? ', boletim apagado' : ''}`
+      : '';
+    const updateLine = r.contrato_atualizado ? '<br>📝 <strong>Dados do contrato atualizados</strong>' : '';
+    resEl.innerHTML = `
+      ✅ <strong>Template importado.</strong>${resetLine}${updateLine}<br>
+      Contrato: ${r.contrato_existia_antes ? 'já existia (id=' + r.contrato_id + ')' : 'criado (id=' + r.contrato_id + ')'}<br>
+      Postos novos: ${r.postos_criados}, Itens novos: ${r.itens_criados}<br>
+      Boletim ${competencia || ''}: ${r.boletim?.status === 'criado' ? '<strong>rascunho criado</strong> (id=' + r.boletim.id + ')' : (r.boletim?.status === 'ja_existia' ? 'já existia' : '—')}
+    `;
+
+    setTimeout(() => {
+      document.getElementById('modal-bol-template')?.remove();
+      // Refresh do painel/lista de boletins
+      if (typeof loadBoletins === 'function') loadBoletins();
+      if (typeof renderPainelFaturamento === 'function' && _bolView === 'painel') renderPainelFaturamento();
+    }, 1800);
+  } catch (e) {
+    resEl.style.background = '#fee2e2';
+    resEl.style.color = '#991b1b';
+    resEl.style.border = '1px solid #fca5a5';
+    resEl.innerHTML = `❌ Erro: ${e.message || e}`;
+  }
+}
+
 async function renderPainelFaturamento() {
   const el = document.getElementById('bol-content');
   el.innerHTML = '<div class="loading">Carregando painel...</div>';
@@ -1098,7 +1352,12 @@ function _renderLinhaContratoPainel(c, idx, mes) {
            style="padding:4px 8px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">📦 ZIP</button>`
       : '';
 
-    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${btnAjustar}${btnAprovar}${btnEmitir}${btnPacote}</div>`;
+    // Preview do PDF do boletim (visualizar layout antes de emitir)
+    // Passa contrato_id+competencia como fallback caso o id esteja stale
+    const btnPreview = `<button onclick="previewBoletimPDF(${bol.id}, ${c.contrato_id}, '${mes}')" title="Visualizar PDF do boletim"
+           style="padding:4px 8px;background:#0ea5e9;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">👁️ PDF</button>`;
+
+    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${btnPreview}${btnAjustar}${btnAprovar}${btnEmitir}${btnPacote}</div>`;
   }
 
   const valorBase   = brl(c.valor_mensal_bruto);
@@ -1200,50 +1459,148 @@ async function painelAprovarTodos(mes) {
 }
 
 // FIX: recebe objeto boletim completo para pre-preencher valores existentes
+// ════════════════════════════════════════════════════════════════════
+//  PAINEL AJUSTAR BOLETIM — 3 sub-abas
+//   • Glosas/Acréscimos (totalizadores simples, padrão legado)
+//   • Colaboradores (nominal por posto)
+//   • Glosas detalhadas (motivo + valor + posto)
+// ════════════════════════════════════════════════════════════════════
+
+function _bolBrl(v) { return 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2}); }
+function _bolEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+// Estado mantido entre re-renders das sub-abas
+window._ajusteState = {
+  boletim_id: null, mes: null, valorBase: 0, bolObj: null,
+  abaAtiva: 'glosas',
+  colaboradores: [],   // [{ id?, posto_id, nome_colaborador, cpf, funcao, observacao }]
+  glosasDet: [],       // [{ id?, posto_id, motivo, valor, data_referencia }]
+  postos: [],          // [{ id, descricao_posto, mostrar_colaboradores }]
+};
+
+async function _ajusteBolFetch(url, opts) {
+  const token = localStorage.getItem('montana_jwt') || '';
+  const r = await fetch('/api/boletins' + url, {
+    ...opts,
+    headers: {
+      'X-Company': currentCompany,
+      'Authorization': 'Bearer ' + token,
+      'Content-Type': 'application/json',
+      ...(opts?.headers || {}),
+    },
+  });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(d.error || ('HTTP ' + r.status));
+  }
+  return r.json();
+}
+
 function painelAjustar(boletim_id, mes, bolObj) {
-  // bolObj pode ser passado inline ou buscamos via closure
   const glosas     = bolObj?.glosas     || 0;
   const acrescimos = bolObj?.acrescimos || 0;
   const obs        = bolObj?.obs        || '';
   const valorBase  = bolObj?.valor_base || bolObj?.valor_total || 0;
-  const brl = v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2});
+
+  window._ajusteState = {
+    boletim_id, mes, valorBase, bolObj,
+    abaAtiva: 'glosas',
+    colaboradores: [], glosasDet: [], postos: [],
+  };
 
   document.getElementById('modal-ajustar-boletim')?.remove();
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:30px;overflow:auto';
   overlay.id = 'modal-ajustar-boletim';
   overlay.innerHTML = `
-    <div style="background:#fff;border-radius:14px;padding:28px;width:400px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.35)">
-      <h3 style="margin:0 0 4px;font-size:16px;font-weight:800;color:#1e293b">✏️ Ajustar Boletim #${boletim_id}</h3>
-      <div style="font-size:11px;color:#64748b;margin-bottom:16px">Valor base: <strong>${brl(valorBase)}</strong></div>
-      <div style="margin-bottom:12px">
-        <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Glosas (R$) — desconto por serviço não executado</label>
-        <input id="ajuste-glosas" type="number" step="0.01" min="0" value="${glosas}"
-          oninput="_ajustePreview(${valorBase})"
-          style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box">
-      </div>
-      <div style="margin-bottom:12px">
-        <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Acréscimos (R$)</label>
-        <input id="ajuste-acrescimos" type="number" step="0.01" min="0" value="${acrescimos}"
-          oninput="_ajustePreview(${valorBase})"
-          style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box">
-      </div>
-      <div id="ajuste-preview" style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;text-align:center;color:#1e293b">
-        Valor final: <strong id="ajuste-preview-val">${brl(valorBase - glosas + acrescimos)}</strong>
-      </div>
-      <div style="margin-bottom:16px">
-        <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Observação</label>
-        <textarea id="ajuste-obs" rows="2"
-          style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;resize:vertical;box-sizing:border-box">${obs}</textarea>
-      </div>
-      <div style="display:flex;gap:8px;justify-content:flex-end">
+    <div style="background:#fff;border-radius:14px;padding:24px;width:760px;max-width:96vw;box-shadow:0 20px 60px rgba(0,0,0,.35)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <h3 style="margin:0;font-size:16px;font-weight:800;color:#1e293b">✏️ Ajustar Boletim #${boletim_id}</h3>
         <button onclick="document.getElementById('modal-ajustar-boletim').remove()"
-          style="padding:8px 16px;background:#f1f5f9;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">Cancelar</button>
-        <button id="ajuste-btn-salvar" onclick="_painelSalvarAjuste(${boletim_id},'${mes}')"
-          style="padding:8px 16px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">Salvar</button>
+          style="background:none;border:none;font-size:18px;cursor:pointer;color:#64748b">✕</button>
+      </div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:14px">Valor base: <strong>${_bolBrl(valorBase)}</strong> · Competência: <strong>${mes}</strong></div>
+
+      <!-- Sub-tabs -->
+      <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:14px">
+        <button class="aju-subtab" data-aba="glosas" onclick="_ajusteAba('glosas')"
+          style="padding:8px 16px;border:none;border-bottom:2px solid #2563eb;background:transparent;font-size:12px;font-weight:700;color:#2563eb;cursor:pointer;margin-bottom:-2px">
+          💰 Glosas / Acréscimos
+        </button>
+        <button class="aju-subtab" data-aba="colaboradores" onclick="_ajusteAba('colaboradores')"
+          style="padding:8px 16px;border:none;border-bottom:2px solid transparent;background:transparent;font-size:12px;font-weight:700;color:#64748b;cursor:pointer;margin-bottom:-2px">
+          🧑 Colaboradores
+        </button>
+        <button class="aju-subtab" data-aba="glosasdet" onclick="_ajusteAba('glosasdet')"
+          style="padding:8px 16px;border:none;border-bottom:2px solid transparent;background:transparent;font-size:12px;font-weight:700;color:#64748b;cursor:pointer;margin-bottom:-2px">
+          📉 Glosas detalhadas
+        </button>
+      </div>
+
+      <div id="aju-conteudo" style="min-height:280px"></div>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;padding-top:14px;border-top:1px solid #e2e8f0">
+        <button onclick="document.getElementById('modal-ajustar-boletim').remove()"
+          style="padding:8px 16px;background:#f1f5f9;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">Fechar</button>
+        <button id="aju-btn-salvar" onclick="_ajusteSalvarTudo()"
+          style="padding:8px 16px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">💾 Salvar tudo</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
+
+  // Renderiza a aba inicial e carrega dados das outras em paralelo
+  _ajusteRenderAbaGlosas();
+  _ajusteCarregarColaboradores().catch(()=>{});
+  _ajusteCarregarGlosasDet().catch(()=>{});
+  _ajusteCarregarPostos().catch(()=>{});
+}
+
+function _ajusteAba(nome) {
+  window._ajusteState.abaAtiva = nome;
+  // Atualiza estilo das tabs
+  document.querySelectorAll('.aju-subtab').forEach(b => {
+    const ativa = b.dataset.aba === nome;
+    b.style.borderBottomColor = ativa ? '#2563eb' : 'transparent';
+    b.style.color = ativa ? '#2563eb' : '#64748b';
+  });
+  // Renderiza conteúdo
+  if (nome === 'glosas') _ajusteRenderAbaGlosas();
+  else if (nome === 'colaboradores') _ajusteRenderAbaColaboradores();
+  else if (nome === 'glosasdet') _ajusteRenderAbaGlosasDet();
+}
+
+// ─── ABA 1: Glosas / Acréscimos (legado) ──────────────────────────
+function _ajusteRenderAbaGlosas() {
+  const s = window._ajusteState;
+  const glosas     = s.bolObj?.glosas     || 0;
+  const acrescimos = s.bolObj?.acrescimos || 0;
+  const obs        = s.bolObj?.obs        || '';
+  const cont = document.getElementById('aju-conteudo');
+  if (!cont) return;
+  cont.innerHTML = `
+    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px;margin-bottom:14px;font-size:11px;color:#854d0e">
+      💡 Use estes campos para ajustes simples (totalizadores). Para detalhar glosas por posto/motivo, use a aba <strong>Glosas detalhadas</strong>. O total das glosas detalhadas sobrescreve este campo.
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Glosas — total (R$)</label>
+      <input id="ajuste-glosas" type="number" step="0.01" min="0" value="${glosas}"
+        oninput="_ajustePreview(${s.valorBase})"
+        style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box">
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Acréscimos (R$)</label>
+      <input id="ajuste-acrescimos" type="number" step="0.01" min="0" value="${acrescimos}"
+        oninput="_ajustePreview(${s.valorBase})"
+        style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box">
+    </div>
+    <div id="ajuste-preview" style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;text-align:center;color:#1e293b">
+      Valor final: <strong id="ajuste-preview-val">${_bolBrl(s.valorBase - glosas + acrescimos)}</strong>
+    </div>
+    <div>
+      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Observação</label>
+      <textarea id="ajuste-obs" rows="2"
+        style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;resize:vertical;box-sizing:border-box">${_bolEsc(obs)}</textarea>
+    </div>`;
 }
 
 function _ajustePreview(base) {
@@ -1254,29 +1611,297 @@ function _ajustePreview(base) {
   if (el) el.textContent = 'R$ ' + total.toLocaleString('pt-BR',{minimumFractionDigits:2});
 }
 
-async function _painelSalvarAjuste(boletim_id, mes) {
-  const token = localStorage.getItem('montana_jwt') || '';
-  const btn = document.getElementById('ajuste-btn-salvar');
-  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+// ─── ABA 2: Colaboradores ─────────────────────────────────────────
+async function _ajusteCarregarColaboradores() {
+  const s = window._ajusteState;
   try {
-    const glosas      = parseFloat(document.getElementById('ajuste-glosas').value) || 0;
-    const acrescimos  = parseFloat(document.getElementById('ajuste-acrescimos').value) || 0;
-    const obs         = document.getElementById('ajuste-obs').value || '';
-    const r = await fetch(`/api/boletins/${boletim_id}/ajustar`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({ glosas, acrescimos, obs }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error);
-    document.getElementById('modal-ajustar-boletim')?.remove();
-    toast('✅ Ajuste salvo', 'success');
-    renderPainelFaturamento();
-  } catch (err) {
-    toast('Erro: ' + err.message, 'error');
-    if (btn) { btn.disabled = false; btn.textContent = 'Salvar'; }
+    const r = await _ajusteBolFetch('/' + s.boletim_id + '/colaboradores');
+    s.colaboradores = (r.colaboradores || []).map(c => ({ ...c, _saved: true }));
+    if (s.abaAtiva === 'colaboradores') _ajusteRenderAbaColaboradores();
+  } catch (_) {}
+}
+
+async function _ajusteCarregarPostos() {
+  const s = window._ajusteState;
+  if (!s.bolObj?.contrato_id) return;
+  try {
+    const r = await _ajusteBolFetch('/contratos/' + s.bolObj.contrato_id + '/postos');
+    s.postos = Array.isArray(r) ? r : (r.postos || []);
+    if (s.abaAtiva === 'colaboradores') _ajusteRenderAbaColaboradores();
+  } catch (_) {}
+}
+
+function _ajusteRenderAbaColaboradores() {
+  const s = window._ajusteState;
+  const cont = document.getElementById('aju-conteudo');
+  if (!cont) return;
+
+  const postoOptions = (postoId) => {
+    const opts = ['<option value="">— sem posto —</option>'];
+    for (const p of s.postos) {
+      const sel = String(p.id) === String(postoId) ? ' selected' : '';
+      opts.push(`<option value="${p.id}"${sel}>${_bolEsc(p.descricao_posto || p.campus_nome || ('Posto ' + p.id))}${p.mostrar_colaboradores === false ? ' (oculto na NF)' : ''}</option>`);
+    }
+    return opts.join('');
+  };
+
+  const linhas = s.colaboradores.map((c, i) => `
+    <tr>
+      <td style="padding:3px 4px"><input value="${_bolEsc(c.nome_colaborador||'')}" oninput="_ajusteState.colaboradores[${i}].nome_colaborador=this.value;_ajusteState.colaboradores[${i}]._dirty=true" placeholder="Nome completo" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px"></td>
+      <td style="padding:3px 4px"><input value="${_bolEsc(c.cpf||'')}" oninput="_ajusteState.colaboradores[${i}].cpf=this.value;_ajusteState.colaboradores[${i}]._dirty=true" placeholder="CPF" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px"></td>
+      <td style="padding:3px 4px"><input value="${_bolEsc(c.funcao||'')}" oninput="_ajusteState.colaboradores[${i}].funcao=this.value;_ajusteState.colaboradores[${i}]._dirty=true" placeholder="Função" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px"></td>
+      <td style="padding:3px 4px"><select onchange="_ajusteState.colaboradores[${i}].posto_id=this.value||null;_ajusteState.colaboradores[${i}]._dirty=true" style="width:100%;padding:4px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px">${postoOptions(c.posto_id)}</select></td>
+      <td style="padding:3px 4px;text-align:center;width:40px"><button onclick="_ajusteRemoverColab(${i})" style="background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;padding:2px 7px;border-radius:4px;cursor:pointer;font-size:10px;font-weight:700">×</button></td>
+    </tr>`).join('');
+
+  cont.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">
+      <div style="font-size:11px;color:#475569">
+        ${s.colaboradores.length} colaborador${s.colaboradores.length===1?'':'es'} ·
+        ${s.postos.length} posto${s.postos.length===1?'':'s'} no contrato
+      </div>
+      <div style="display:flex;gap:6px">
+        <button onclick="_ajusteCopiarMesAnterior()" title="Copia colaboradores do boletim anterior do mesmo contrato"
+          style="background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;padding:5px 10px;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700">📋 Copiar mês anterior</button>
+        <button onclick="_ajusteAddColab()"
+          style="background:#dcfce7;color:#15803d;border:1px solid #86efac;padding:5px 10px;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700">+ Adicionar</button>
+      </div>
+    </div>
+    <div style="max-height:340px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px">
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <thead style="background:#f8fafc;position:sticky;top:0">
+          <tr>
+            <th style="padding:6px 4px;text-align:left;font-size:10px;color:#475569;font-weight:700">Nome *</th>
+            <th style="padding:6px 4px;text-align:left;font-size:10px;color:#475569;font-weight:700;width:120px">CPF</th>
+            <th style="padding:6px 4px;text-align:left;font-size:10px;color:#475569;font-weight:700;width:120px">Função</th>
+            <th style="padding:6px 4px;text-align:left;font-size:10px;color:#475569;font-weight:700;width:180px">Posto</th>
+            <th style="width:40px"></th>
+          </tr>
+        </thead>
+        <tbody>${linhas || '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:30px;font-size:11px">Nenhum colaborador cadastrado.<br>Clique em <strong>+ Adicionar</strong> ou <strong>📋 Copiar mês anterior</strong>.</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div style="margin-top:10px;font-size:10px;color:#64748b">
+      Postos com flag "<strong>oculto na NF</strong>" não nominam colaboradores na descrição da NF emitida (sigilo / contratos de segurança privada).
+    </div>`;
+}
+
+function _ajusteAddColab() {
+  window._ajusteState.colaboradores.push({ nome_colaborador: '', cpf: '', funcao: '', posto_id: null, _dirty: true });
+  _ajusteRenderAbaColaboradores();
+}
+
+function _ajusteRemoverColab(idx) {
+  const c = window._ajusteState.colaboradores[idx];
+  if (c?.id && c?._saved) {
+    if (!confirm('Remover ' + (c.nome_colaborador || 'este colaborador') + ' permanentemente?')) return;
+    c._delete = true;
+    // mantém na lista pra ser deletado no save
+    _ajusteRenderAbaColaboradores();
+  } else {
+    window._ajusteState.colaboradores.splice(idx, 1);
+    _ajusteRenderAbaColaboradores();
   }
 }
+
+async function _ajusteCopiarMesAnterior() {
+  const s = window._ajusteState;
+  if (!confirm('Copiar colaboradores do boletim anterior do mesmo contrato?\nIsso SUBSTITUI a lista atual.')) return;
+  try {
+    const r = await _ajusteBolFetch('/' + s.boletim_id + '/colaboradores/copiar-mes-anterior', { method: 'POST' });
+    if (typeof toast === 'function') toast('✅ ' + (r.copiados || 0) + ' colaborador(es) copiado(s) do boletim ' + (r.fonte_boletim_id || 'anterior'), 'success');
+    await _ajusteCarregarColaboradores();
+  } catch (e) {
+    if (typeof toast === 'function') toast('Erro: ' + e.message, 'error');
+  }
+}
+
+// ─── ABA 3: Glosas detalhadas ─────────────────────────────────────
+async function _ajusteCarregarGlosasDet() {
+  const s = window._ajusteState;
+  try {
+    const r = await _ajusteBolFetch('/' + s.boletim_id + '/glosas');
+    s.glosasDet = (r.glosas || []).map(g => ({ ...g, _saved: true }));
+    if (s.abaAtiva === 'glosasdet') _ajusteRenderAbaGlosasDet();
+  } catch (_) {}
+}
+
+function _ajusteRenderAbaGlosasDet() {
+  const s = window._ajusteState;
+  const cont = document.getElementById('aju-conteudo');
+  if (!cont) return;
+  const total = s.glosasDet.filter(g => !g._delete).reduce((sum, g) => sum + (parseFloat(g.valor) || 0), 0);
+
+  const postoOptions = (postoId) => {
+    const opts = ['<option value="">— geral —</option>'];
+    for (const p of s.postos) {
+      const sel = String(p.id) === String(postoId) ? ' selected' : '';
+      opts.push(`<option value="${p.id}"${sel}>${_bolEsc(p.descricao_posto || p.campus_nome || ('Posto ' + p.id))}</option>`);
+    }
+    return opts.join('');
+  };
+
+  const linhas = s.glosasDet.map((g, i) => g._delete ? '' : `
+    <tr>
+      <td style="padding:3px 4px"><input value="${_bolEsc(g.motivo||'')}" oninput="_ajusteState.glosasDet[${i}].motivo=this.value;_ajusteState.glosasDet[${i}]._dirty=true" placeholder="Ex: 3 dias de falta colaborador X" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px"></td>
+      <td style="padding:3px 4px"><input type="number" step="0.01" value="${g.valor||0}" oninput="_ajusteState.glosasDet[${i}].valor=parseFloat(this.value)||0;_ajusteState.glosasDet[${i}]._dirty=true;_ajusteRecalcGlosaTotal()" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px;text-align:right;font-family:monospace"></td>
+      <td style="padding:3px 4px"><select onchange="_ajusteState.glosasDet[${i}].posto_id=this.value||null;_ajusteState.glosasDet[${i}]._dirty=true" style="width:100%;padding:4px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px">${postoOptions(g.posto_id)}</select></td>
+      <td style="padding:3px 4px"><input type="date" value="${g.data_referencia||''}" oninput="_ajusteState.glosasDet[${i}].data_referencia=this.value;_ajusteState.glosasDet[${i}]._dirty=true" style="width:100%;padding:4px 6px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px"></td>
+      <td style="padding:3px 4px;text-align:center;width:40px"><button onclick="_ajusteRemoverGlosa(${i})" style="background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;padding:2px 7px;border-radius:4px;cursor:pointer;font-size:10px;font-weight:700">×</button></td>
+    </tr>`).join('');
+
+  cont.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">
+      <div style="font-size:11px;color:#475569">
+        ${s.glosasDet.filter(g=>!g._delete).length} glosa${s.glosasDet.filter(g=>!g._delete).length===1?'':'s'} · Total <strong id="aju-glosa-total">${_bolBrl(total)}</strong>
+      </div>
+      <button onclick="_ajusteAddGlosa()"
+        style="background:#fef9c3;color:#854d0e;border:1px solid #fde68a;padding:5px 10px;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700">+ Adicionar glosa</button>
+    </div>
+    <div style="max-height:340px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px">
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <thead style="background:#f8fafc;position:sticky;top:0">
+          <tr>
+            <th style="padding:6px 4px;text-align:left;font-size:10px;color:#475569;font-weight:700">Motivo *</th>
+            <th style="padding:6px 4px;text-align:right;font-size:10px;color:#475569;font-weight:700;width:120px">Valor (R$) *</th>
+            <th style="padding:6px 4px;text-align:left;font-size:10px;color:#475569;font-weight:700;width:160px">Posto</th>
+            <th style="padding:6px 4px;text-align:left;font-size:10px;color:#475569;font-weight:700;width:130px">Data</th>
+            <th style="width:40px"></th>
+          </tr>
+        </thead>
+        <tbody>${linhas || '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:30px;font-size:11px">Nenhuma glosa detalhada.<br>Clique em <strong>+ Adicionar glosa</strong>.</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div style="margin-top:10px;font-size:10px;color:#64748b">
+      Ao salvar, o total das glosas detalhadas é gravado em <code>bol_boletins.glosas</code> e <code>valor_total</code> é recalculado automaticamente.
+    </div>`;
+}
+
+function _ajusteAddGlosa() {
+  window._ajusteState.glosasDet.push({ motivo: '', valor: 0, posto_id: null, data_referencia: '', _dirty: true });
+  _ajusteRenderAbaGlosasDet();
+}
+
+function _ajusteRemoverGlosa(idx) {
+  const g = window._ajusteState.glosasDet[idx];
+  if (g?.id && g?._saved) {
+    if (!confirm('Remover esta glosa permanentemente?')) return;
+    g._delete = true;
+    _ajusteRenderAbaGlosasDet();
+  } else {
+    window._ajusteState.glosasDet.splice(idx, 1);
+    _ajusteRenderAbaGlosasDet();
+  }
+}
+
+function _ajusteRecalcGlosaTotal() {
+  const s = window._ajusteState;
+  const total = s.glosasDet.filter(g => !g._delete).reduce((sum, g) => sum + (parseFloat(g.valor) || 0), 0);
+  const el = document.getElementById('aju-glosa-total');
+  if (el) el.textContent = _bolBrl(total);
+}
+
+// ─── SALVAR TUDO ──────────────────────────────────────────────────
+async function _ajusteSalvarTudo() {
+  const s = window._ajusteState;
+  const btn = document.getElementById('aju-btn-salvar');
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+  let erros = [];
+
+  try {
+    // 1. Glosas/Acréscimos legado (se aba renderizada e campos existem)
+    const gEl = document.getElementById('ajuste-glosas');
+    if (gEl) {
+      const glosas      = parseFloat(gEl.value) || 0;
+      const acrescimos  = parseFloat(document.getElementById('ajuste-acrescimos')?.value) || 0;
+      const obs         = document.getElementById('ajuste-obs')?.value || '';
+      try {
+        await _ajusteBolFetch('/' + s.boletim_id + '/ajustar', {
+          method: 'PATCH',
+          body: JSON.stringify({ glosas, acrescimos, obs }),
+        });
+      } catch (e) { erros.push('Glosas/Acréscimos: ' + e.message); }
+    }
+
+    // 2. Colaboradores — DELETE pendentes, PUT modificados, POST novos em lote
+    const colabsParaDeletar = s.colaboradores.filter(c => c._delete && c.id);
+    const colabsParaAtualizar = s.colaboradores.filter(c => c.id && c._saved && c._dirty && !c._delete);
+    const colabsNovos = s.colaboradores.filter(c => !c.id && !c._delete && (c.nome_colaborador || '').trim());
+
+    for (const c of colabsParaDeletar) {
+      try { await _ajusteBolFetch('/colaboradores/' + c.id, { method: 'DELETE' }); }
+      catch (e) { erros.push('Excluir colaborador #' + c.id + ': ' + e.message); }
+    }
+    for (const c of colabsParaAtualizar) {
+      try {
+        await _ajusteBolFetch('/colaboradores/' + c.id, {
+          method: 'PUT',
+          body: JSON.stringify({
+            nome_colaborador: c.nome_colaborador, cpf: c.cpf || null,
+            funcao: c.funcao || null, observacao: c.observacao || null,
+          }),
+        });
+      } catch (e) { erros.push('Atualizar colaborador: ' + e.message); }
+    }
+    if (colabsNovos.length) {
+      try {
+        await _ajusteBolFetch('/' + s.boletim_id + '/colaboradores', {
+          method: 'POST',
+          body: JSON.stringify({ colaboradores: colabsNovos }),
+        });
+      } catch (e) { erros.push('Inserir colaboradores: ' + e.message); }
+    }
+
+    // 3. Glosas detalhadas
+    const glosasParaDeletar = s.glosasDet.filter(g => g._delete && g.id);
+    const glosasParaAtualizar = s.glosasDet.filter(g => g.id && g._saved && g._dirty && !g._delete);
+    const glosasNovas = s.glosasDet.filter(g => !g.id && !g._delete && (g.motivo || '').trim() && parseFloat(g.valor) > 0);
+
+    for (const g of glosasParaDeletar) {
+      try { await _ajusteBolFetch('/glosas/' + g.id, { method: 'DELETE' }); }
+      catch (e) { erros.push('Excluir glosa #' + g.id + ': ' + e.message); }
+    }
+    for (const g of glosasParaAtualizar) {
+      try {
+        await _ajusteBolFetch('/glosas/' + g.id, {
+          method: 'PUT',
+          body: JSON.stringify({
+            motivo: g.motivo, valor: parseFloat(g.valor) || 0,
+            posto_id: g.posto_id || null, data_referencia: g.data_referencia || null,
+          }),
+        });
+      } catch (e) { erros.push('Atualizar glosa: ' + e.message); }
+    }
+    for (const g of glosasNovas) {
+      try {
+        await _ajusteBolFetch('/' + s.boletim_id + '/glosas', {
+          method: 'POST',
+          body: JSON.stringify({
+            motivo: g.motivo, valor: parseFloat(g.valor) || 0,
+            posto_id: g.posto_id || null, data_referencia: g.data_referencia || null,
+          }),
+        });
+      } catch (e) { erros.push('Inserir glosa: ' + e.message); }
+    }
+
+    if (erros.length) {
+      if (typeof toast === 'function') toast('⚠ ' + erros.length + ' erro(s): ' + erros[0], 'error');
+      console.error('[ajuste] erros:', erros);
+      if (btn) { btn.disabled = false; btn.textContent = '💾 Salvar tudo'; }
+      return;
+    }
+
+    document.getElementById('modal-ajustar-boletim')?.remove();
+    if (typeof toast === 'function') toast('✅ Ajustes salvos', 'success');
+    if (typeof renderPainelFaturamento === 'function') renderPainelFaturamento();
+  } catch (err) {
+    if (typeof toast === 'function') toast('Erro inesperado: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Salvar tudo'; }
+  }
+}
+
+// Backwards compat — código legado pode chamar essa função diretamente
+async function _painelSalvarAjuste(boletim_id, mes) { return _ajusteSalvarTudo(); }
 
 async function painelEmitirLote(mes) {
   const qtd = parseInt(event?.target?.textContent?.match(/\d+/)?.[0] || '0');

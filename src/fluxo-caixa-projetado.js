@@ -15,7 +15,7 @@
  *     - Soma líquida dos extratos até hoje (credito - debito)
  *
  * API principal:
- *   projecaoFluxoCaixa(db, company, { dias = 90, buckets = 'semanal'|'mensal' })
+ *   await projecaoFluxoCaixa(db, company, { dias = 90, buckets = 'semanal'|'mensal' })
  *   => { saldo_inicial, buckets: [{ini, fim, entradas, saidas, saldo_final, itens_entrada, itens_saida}] }
  */
 
@@ -51,16 +51,16 @@ function lastDayOfMonth(year, month) {
 // ────────────────────────────────────────────────────────────────────────────
 // SLAs por tomador (mesmo algoritmo de alertas-operacionais.js)
 // ────────────────────────────────────────────────────────────────────────────
-function calcularSLAs(db) {
-  const rows = db.prepare(`
+async function calcularSLAs(db) {
+  const rows = await db.prepare(`
     SELECT tomador,
-           AVG(julianday(data_pagamento) - julianday(data_emissao)) AS dias_medio,
+           AVG((data_pagamento::date - data_emissao::date)) AS dias_medio,
            COUNT(*) AS amostras
     FROM notas_fiscais
     WHERE data_emissao IS NOT NULL
       AND data_pagamento IS NOT NULL
       AND data_pagamento > data_emissao
-      AND (julianday(data_pagamento) - julianday(data_emissao)) BETWEEN 1 AND 365
+      AND ((data_pagamento::date - data_emissao::date)) BETWEEN 1 AND 365
     GROUP BY tomador
   `).all();
   const slaMap = new Map();
@@ -73,13 +73,13 @@ function calcularSLAs(db) {
 // ────────────────────────────────────────────────────────────────────────────
 // Saldo inicial — soma líquida dos extratos
 // ────────────────────────────────────────────────────────────────────────────
-function calcularSaldoInicial(db) {
+async function calcularSaldoInicial(db) {
   try {
-    const row = db.prepare(`
+    const row = await db.prepare(`
       SELECT COALESCE(SUM(credito), 0) - COALESCE(SUM(debito), 0) AS saldo,
              MAX(data_iso) AS ultima_data
       FROM extratos
-      WHERE data_iso <= date('now')
+      WHERE data_iso <= to_char(CURRENT_DATE, 'YYYY-MM-DD')
     `).get();
     return {
       saldo:        Number(row?.saldo || 0),
@@ -93,13 +93,13 @@ function calcularSaldoInicial(db) {
 // ────────────────────────────────────────────────────────────────────────────
 // Entradas projetadas — NFs a receber
 // ────────────────────────────────────────────────────────────────────────────
-function projectarEntradas(db, horizonteDias) {
+async function projectarEntradas(db, horizonteDias) {
   const hoje = toISO(new Date());
   const limite = addDays(hoje, horizonteDias);
-  const slas = calcularSLAs(db);
+  const slas = await calcularSLAs(db);
 
   // NFs em aberto
-  const abertas = db.prepare(`
+  const abertas = await db.prepare(`
     SELECT numero, tomador, valor_liquido, valor_bruto, data_emissao, contrato_ref,
            status_conciliacao
     FROM notas_fiscais
@@ -107,7 +107,7 @@ function projectarEntradas(db, horizonteDias) {
       AND COALESCE(status_conciliacao, '') NOT IN ('CONCILIADO', 'ASSESSORIA', 'IGNORAR')
       AND data_emissao IS NOT NULL
       AND COALESCE(valor_bruto, 0) > 0
-      AND data_emissao >= date('now', '-365 days')
+      AND data_emissao >= to_char(CURRENT_DATE - INTERVAL '365 days', 'YYYY-MM-DD')
   `).all();
 
   const itens = [];
@@ -156,7 +156,7 @@ function projectarEntradas(db, horizonteDias) {
 // ────────────────────────────────────────────────────────────────────────────
 // Saídas projetadas — folha + despesas recorrentes
 // ────────────────────────────────────────────────────────────────────────────
-function projectarSaidas(db, horizonteDias) {
+async function projectarSaidas(db, horizonteDias) {
   const hoje = toISO(new Date());
   const limite = addDays(hoje, horizonteDias);
   const itens = [];
@@ -164,17 +164,17 @@ function projectarSaidas(db, horizonteDias) {
   // 1) Folha recorrente — média dos últimos N meses
   let folhaMedia = 0;
   try {
-    const row = db.prepare(`
+    const row = await db.prepare(`
       SELECT AVG(total_liquido) AS media, COUNT(*) AS n
       FROM rh_folha
       WHERE COALESCE(total_liquido, 0) > 0
-        AND competencia >= strftime('%Y-%m', date('now', '-${MESES_FOLHA_MEDIA} months'))
+        AND competencia >= to_char(CURRENT_DATE - INTERVAL '${MESES_FOLHA_MEDIA} months', 'YYYY-MM')
     `).get();
     folhaMedia = Number(row?.media || 0);
 
     // Fallback: se não houver folha nos últimos N meses, usa média histórica
     if (folhaMedia === 0) {
-      const row2 = db.prepare(`
+      const row2 = await db.prepare(`
         SELECT AVG(total_liquido) AS media FROM rh_folha WHERE COALESCE(total_liquido, 0) > 0
       `).get();
       folhaMedia = Number(row2?.media || 0);
@@ -184,11 +184,11 @@ function projectarSaidas(db, horizonteDias) {
   // Se não tem folha em rh_folha, usa média de despesas categoria "Folha Pgto"
   if (folhaMedia === 0) {
     try {
-      const row = db.prepare(`
+      const row = await db.prepare(`
         SELECT SUM(valor_liquido) / 6.0 AS media
         FROM despesas
         WHERE lower(categoria) LIKE '%folha%'
-          AND data_iso >= date('now', '-180 days')
+          AND data_iso >= to_char(CURRENT_DATE - INTERVAL '180 days', 'YYYY-MM-DD')
       `).get();
       folhaMedia = Number(row?.media || 0);
     } catch (_) {}
@@ -218,12 +218,12 @@ function projectarSaidas(db, horizonteDias) {
   // 2) Despesas recorrentes por categoria (média mensal dos últimos 6 meses)
   let catMedias = [];
   try {
-    catMedias = db.prepare(`
+    catMedias = await db.prepare(`
       SELECT categoria,
              SUM(valor_liquido) / 6.0 AS media_mensal,
              COUNT(*) AS n
       FROM despesas
-      WHERE data_iso >= date('now', '-${JANELA_HISTORICA} days')
+      WHERE data_iso >= to_char(CURRENT_DATE - INTERVAL '${JANELA_HISTORICA} days', 'YYYY-MM-DD')
         AND COALESCE(valor_liquido, 0) > 0
         AND lower(categoria) NOT LIKE '%folha%'
       GROUP BY categoria
@@ -314,14 +314,14 @@ function agregarBuckets(saldoInicial, entradas, saidas, dias, periodicidade) {
 // ────────────────────────────────────────────────────────────────────────────
 // API principal
 // ────────────────────────────────────────────────────────────────────────────
-function projecaoFluxoCaixa(db, company, opcoes = {}) {
+async function projecaoFluxoCaixa(db, company, opcoes = {}) {
   const dias          = Math.max(7, Math.min(365, Number(opcoes.dias) || 90));
   const periodicidade = opcoes.periodicidade === 'semanal' ? 'semanal' : 'mensal';
   const incluirItens  = opcoes.incluir_itens !== false;
 
-  const saldo     = calcularSaldoInicial(db);
-  const entradas  = projectarEntradas(db, dias);
-  const saidas    = projectarSaidas(db, dias);
+  const saldo     = await calcularSaldoInicial(db);
+  const entradas  = await projectarEntradas(db, dias);
+  const saidas    = await projectarSaidas(db, dias);
   const buckets   = agregarBuckets(saldo.saldo, entradas, saidas, dias, periodicidade);
 
   // Totais

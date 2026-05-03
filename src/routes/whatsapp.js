@@ -67,7 +67,10 @@ router.put('/config', async (req, res) => {
       updated_at TIMESTAMP DEFAULT NOW()
     )`).run();
   } catch(e) {}
-  const upsert = req.db.prepare("INSERT INTO configuracoes (chave,valor,updated_at) VALUES (@chave,@valor,NOW())");
+  const upsert = req.db.prepare(`
+    INSERT INTO configuracoes (chave,valor,updated_at) VALUES (@chave,@valor,NOW())
+    ON CONFLICT (chave) DO UPDATE SET valor=EXCLUDED.valor, updated_at=NOW()
+  `);
   const t = req.db.transaction(async () => {
     if (provider)        upsert.run({ chave:'whatsapp_provider',       valor: provider });
     if (instance_id)     upsert.run({ chave:'whatsapp_instance_id',    valor: instance_id });
@@ -76,7 +79,7 @@ router.put('/config', async (req, res) => {
     if (api_url)         upsert.run({ chave:'whatsapp_api_url',        valor: api_url });
     if (numero_destino)  upsert.run({ chave:'whatsapp_numero_destino', valor: numero_destino });
   });
-  t();
+  await t();
   res.json({ ok: true });
 });
 

@@ -295,7 +295,7 @@ router.get('/:id/sugerir-matches', async (req, res) => {
         sql += ` AND REPLACE(REPLACE(REPLACE(cnpj_tomador,'.',''),'/',''),'-','') = ?`;
         params.push(cnpjDest);
       }
-      sql += ' ORDER BY ABS(julianday(data_emissao) - julianday(?)) LIMIT 20';
+      sql += ' ORDER BY ABS((data_emissao::date - ?::date)) LIMIT 20';
       params.push(cp.data_pagamento);
       sugestoes.nfs = await req.db.prepare(sql).all(...params);
 
@@ -304,8 +304,8 @@ router.get('/:id/sugerir-matches', async (req, res) => {
         sugestoes.extratos = await req.db.prepare(`
           SELECT id, data_iso, credito, descricao FROM extratos
           WHERE credito BETWEEN ? AND ?
-            AND ABS(julianday(data_iso) - julianday(?)) <= ?
-          ORDER BY ABS(julianday(data_iso) - julianday(?)) LIMIT 10
+            AND ABS((data_iso::date - ?::date)) <= ?
+          ORDER BY ABS((data_iso::date - ?::date)) LIMIT 10
         `).all(vmin, vmax, cp.data_pagamento, janelaDias, cp.data_pagamento);
       } catch {}
     }
@@ -322,7 +322,7 @@ router.get('/:id/sugerir-matches', async (req, res) => {
           sql += ` AND REPLACE(REPLACE(REPLACE(cnpj_fornecedor,'.',''),'/',''),'-','') = ?`;
           params.push(cnpjDest);
         }
-        sql += ' ORDER BY ABS(julianday(data_vencimento) - julianday(?)) LIMIT 20';
+        sql += ' ORDER BY ABS((data_vencimento::date - ?::date)) LIMIT 20';
         params.push(cp.data_pagamento);
         sugestoes.despesas = await req.db.prepare(sql).all(...params);
       } catch (e) { /* despesas schema varia — falha silenciosa */ }
@@ -332,8 +332,8 @@ router.get('/:id/sugerir-matches', async (req, res) => {
         sugestoes.extratos = await req.db.prepare(`
           SELECT id, data_iso, debito, descricao FROM extratos
           WHERE debito BETWEEN ? AND ?
-            AND ABS(julianday(data_iso) - julianday(?)) <= ?
-          ORDER BY ABS(julianday(data_iso) - julianday(?)) LIMIT 10
+            AND ABS((data_iso::date - ?::date)) <= ?
+          ORDER BY ABS((data_iso::date - ?::date)) LIMIT 10
         `).all(vmin, vmax, cp.data_pagamento, janelaDias, cp.data_pagamento);
       } catch {}
     }
