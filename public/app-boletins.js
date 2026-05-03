@@ -1326,6 +1326,11 @@ function _renderLinhaContratoPainel(c, idx, mes) {
            style="padding:4px 9px;background:#059669;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">🚀 Emitir NFS-e</button>`
       : '';
 
+    const btnReabrir = (bol.status === 'aprovado' && bol.nfse_status !== 'EMITIDA')
+      ? `<button onclick="painelReabrir(${bol.id},'${mes}')" title="Reabrir como rascunho para refazer"
+           style="padding:4px 8px;background:#fff;color:#b45309;border:1px solid #f59e0b;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">↩️ Reabrir</button>`
+      : '';
+
     const btnPacote = bol.nfse_status === 'EMITIDA'
       ? `<button onclick="baixarPacoteFiscal(${bol.id})" title="Baixar pacote fiscal (ZIP)"
            style="padding:4px 8px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">📦 ZIP</button>`
@@ -1336,7 +1341,7 @@ function _renderLinhaContratoPainel(c, idx, mes) {
     const btnPreview = `<button onclick="previewBoletimPDF(${bol.id}, ${c.contrato_id}, '${mes}')" title="Visualizar PDF do boletim"
            style="padding:4px 8px;background:#0ea5e9;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">👁️ PDF</button>`;
 
-    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${btnPreview}${btnAjustar}${btnAprovar}${btnEmitir}${btnPacote}</div>`;
+    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${btnPreview}${btnAjustar}${btnAprovar}${btnEmitir}${btnReabrir}${btnPacote}</div>`;
   }
 
   const valorBase   = brl(c.valor_mensal_bruto);
@@ -1404,6 +1409,23 @@ async function painelAprovar(boletim_id, mes) {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error);
     toast('✅ Boletim aprovado', 'success');
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+  }
+}
+
+async function painelReabrir(boletim_id, mes) {
+  if (!confirm('Reabrir este boletim como RASCUNHO?\n\nIsso permite editar/refazer. A NFS-e ainda não pode ter sido emitida.')) return;
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch(`/api/boletins/${boletim_id}/reabrir`, {
+      method: 'POST',
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    toast('↩️ Boletim reaberto como rascunho', 'success');
     renderPainelFaturamento();
   } catch (err) {
     toast('Erro: ' + err.message, 'error');
