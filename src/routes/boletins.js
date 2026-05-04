@@ -569,7 +569,7 @@ router.post('/gerar-boletim', async (req, res) => {
     const stmt = db.prepare(`INSERT INTO bol_boletins
       (contrato_id, competencia, data_emissao, valor_base, valor_total, glosas, acrescimos, discriminacao, status, nfse_status)
       VALUES (?, ?, CURRENT_DATE, ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')`);
-    const info = stmt.run(contrato_id, competencia, valor_base, valor_base, discriminacao);
+    const info = await stmt.run(contrato_id, competencia, valor_base, valor_base, discriminacao);
     const novo = await db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(info.lastInsertRowid);
     res.json({ data: novo, novo: true });
   } catch (err) {
