@@ -3284,6 +3284,111 @@ async function aplicarAditivos(db, contratoId, competencia, valorBase) {
 // Expor pro módulo (Fase 3 vai usar)
 router.aplicarAditivos = aplicarAditivos;
 
+// ─── AUTO-CRIAÇÃO REVERSA (cenário 4) ──────────────────────────
+// Quando uma NF foi importada (via WebISS batch, XML manual, etc.) mas não
+// existe boletim correspondente, cria um boletim "fantasma" com status
+// aprovado + nfse_status=EMITIDA, vinculado à NF. Útil pra dar visibilidade
+// no Painel de Faturamento de receitas reais sem boletim formal.
+//
+// Resolução de contrato:
+//   1) Match por CNPJ tomador: bol_contratos.insc_municipal == nf.cnpj_tomador
+//   2) Fallback por razão social: bol_contratos.contratante LIKE '%' || nf.tomador
+//   Se nada bater, a NF fica sem boletim — usuário tem que criar/editar contrato.
+
+async function autoCriarBoletinsFantasmas(db) {
+  const orfas = await db.prepare(`
+    SELECT id, numero, competencia, tomador, cnpj_tomador, valor_bruto,
+           valor_liquido, data_emissao, discriminacao
+    FROM notas_fiscais
+    WHERE boletim_id IS NULL
+      AND COALESCE(numero,'') <> ''
+      AND COALESCE(status_conciliacao,'') <> 'CANCELADA'
+    LIMIT 500
+  `).all();
+
+  let criados = 0, semContrato = 0, jaExistem = 0, linkados = 0;
+
+  for (const nf of (orfas || [])) {
+    let comp = (nf.competencia || '').slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(comp) && nf.data_emissao) {
+      comp = String(nf.data_emissao).slice(0, 7);
+    }
+    if (!/^\d{4}-\d{2}$/.test(comp)) continue;
+
+    const cnpjLimpo = String(nf.cnpj_tomador || '').replace(/\D/g, '');
+    let contrato = null;
+    if (cnpjLimpo) {
+      contrato = await db.prepare(`
+        SELECT id FROM bol_contratos
+        WHERE REGEXP_REPLACE(COALESCE(insc_municipal,''), '[^0-9]', '', 'g') = ?
+        LIMIT 1
+      `).get(cnpjLimpo);
+    }
+    if (!contrato && nf.tomador) {
+      contrato = await db.prepare(`
+        SELECT id FROM bol_contratos
+        WHERE UPPER(contratante) LIKE '%' || UPPER(?) || '%'
+           OR UPPER(?) LIKE '%' || UPPER(contratante) || '%'
+        LIMIT 1
+      `).get(nf.tomador, nf.tomador);
+    }
+
+    if (!contrato) { semContrato++; continue; }
+
+    const existente = await db.prepare(
+      'SELECT id, nfse_numero FROM bol_boletins WHERE contrato_id = ? AND competencia = ?'
+    ).get(contrato.id, comp);
+
+    if (existente) {
+      jaExistem++;
+      try {
+        await db.prepare('UPDATE notas_fiscais SET boletim_id = ? WHERE id = ?')
+                .run(existente.id, nf.id);
+        linkados++;
+      } catch (_) {}
+      continue;
+    }
+
+    try {
+      const ins = await db.prepare(`
+        INSERT INTO bol_boletins
+          (contrato_id, competencia, data_emissao, valor_base, valor_total,
+           glosas, acrescimos, discriminacao, status, nfse_status, nfse_numero,
+           nfse_data_emissao)
+        VALUES (?, ?, ?, ?, ?, 0, 0, ?, 'aprovado', 'EMITIDA', ?, ?)
+        RETURNING id
+      `).get(
+        contrato.id, comp,
+        nf.data_emissao || (comp + '-01'),
+        +(nf.valor_bruto || 0),
+        +(nf.valor_bruto || 0),
+        '[AUTO] ' + (nf.discriminacao || 'Boletim criado automaticamente a partir de NF importada'),
+        nf.numero,
+        nf.data_emissao || (comp + '-01'),
+      );
+      const boletimId = ins?.id;
+      if (boletimId) {
+        await db.prepare('UPDATE notas_fiscais SET boletim_id = ? WHERE id = ?')
+                .run(boletimId, nf.id);
+        criados++;
+      }
+    } catch (e) {
+      console.warn('[boletins] auto-create fantasma falhou pra NF', nf.numero, ':', e.message);
+    }
+  }
+
+  return { criados, sem_contrato: semContrato, ja_existem: jaExistem, linkados_existentes: linkados };
+}
+
+router.post('/_criar-fantasmas', async (req, res) => {
+  try {
+    const stats = await autoCriarBoletinsFantasmas(req.db);
+    res.json({ ok: true, ...stats });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router._autoCriarBoletinsFantasmas = autoCriarBoletinsFantasmas;
+
 // ─── DIAGNÓSTICO + MIGRAÇÃO LEGADO → PAINEL (cenário 3) ─────────
 // O fluxo /gerar (legado) cria 1 boletim com N rows em bol_boletins_nfs
 // (uma por posto). O fluxo /gerar-boletim (Painel) usa só
