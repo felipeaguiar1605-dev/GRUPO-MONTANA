@@ -140,6 +140,7 @@
       <div class="tab" data-tab="cont" onclick="navGo('cont',this)">📋 Contratos</div>
       <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)" style="padding-left:32px;font-size:11px;color:#94a3b8" title="Sub-aba de Contratos">💰 Adimplência por Contrato</div>
       <div class="tab" data-tab="faturamento-prev" onclick="navGo('faturamento-prev',this)" style="padding-left:32px;font-size:11px;color:#94a3b8" title="Sub-aba de Contratos">📅 Faturamento Previsto</div>
+      <div class="tab" data-tab="faturamento" onclick="navGo('faturamento',this)">📊 Faturamento</div>
       <div class="tab" data-tab="boletins" onclick="navGo('boletins',this)">📄 Boletins</div>
       <div class="tab" data-tab="nfs" onclick="navGo('nfs',this)">🧾 Notas Fiscais</div>
       <!-- Modelos NF: sub-aba técnica, mantida oculta no menu (acessível dentro de Notas Fiscais) -->
@@ -2262,6 +2263,11 @@
       </table>
     </div>
   </div>
+</div>
+
+<!-- Painel de Faturamento — aba de nível 1 (espelha pg-boletins em modo painel) -->
+<div id="pg-faturamento" class="pg">
+  <div id="fat-content"><div class="loading">Carregando painel…</div></div>
 </div>
 
 <!-- Modal: A Receber por Contrato -->

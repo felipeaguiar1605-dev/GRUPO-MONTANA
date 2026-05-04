@@ -7,7 +7,9 @@
   const _orig = window.showTab;
   window.showTab = function(id, el) {
     _orig(id, el);
-    if (id === 'boletins') loadBoletinsTab();
+    if (id === 'boletins')    loadBoletinsTab();
+    // Aba de nível 1 dedicada ao Painel — não passa pela tela de listagem
+    if (id === 'faturamento') abrirPainelFaturamento();
   };
 })();
 
@@ -1186,7 +1188,14 @@ async function confirmarImportTemplate() {
 }
 
 async function renderPainelFaturamento() {
-  const el = document.getElementById('bol-content');
+  // Suporta dois containers: fat-content (nova aba "Faturamento" de nível 1)
+  // e bol-content (acessar via Boletins → botão "Painel de Faturamento").
+  // O ativo é detectado por qual <div class="pg active"> está visível.
+  const pgFat = document.getElementById('pg-faturamento');
+  const usaFat = pgFat && pgFat.classList.contains('active');
+  const el = document.getElementById(usaFat ? 'fat-content' : 'bol-content')
+          || document.getElementById('bol-content');
+  if (!el) return;
   el.innerHTML = '<div class="loading">Carregando painel...</div>';
 
   const token = localStorage.getItem('montana_jwt') || '';
@@ -1224,7 +1233,7 @@ async function renderPainelFaturamento() {
 
   el.innerHTML = `
   <div style="margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-    <button onclick="_bolView='lista';renderBolLista()" style="background:#f1f5f9;border:none;border-radius:7px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;color:#475569">← Voltar</button>
+    ${usaFat ? '' : `<button onclick="_bolView='lista';renderBolLista()" style="background:#f1f5f9;border:none;border-radius:7px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;color:#475569">← Voltar</button>`}
     <h3 style="margin:0;font-size:16px;font-weight:800;color:#1e293b">📊 Painel de Faturamento</h3>
     <select onchange="_painelMes=this.value;renderPainelFaturamento()"
       style="padding:7px 12px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;font-weight:600;background:#fff;cursor:pointer;color:#1e293b">
@@ -1257,6 +1266,20 @@ async function renderPainelFaturamento() {
     Clique em ✏️ Editar no contrato e preencha <strong>contrato_ref</strong> ou <strong>CNPJ do Tomador</strong>.
   </div>` : ''}
 
+  <!-- Múltiplos boletins por contrato/competência (caso Detran: 1 NF por evento) -->
+  ${stats.duplicatas > 0 ? `
+  <div style="background:#eff6ff;border:1px solid #3b82f6;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#1e40af;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div>
+      ℹ️ <strong>${stats.duplicatas} boletim(ns) extra(s)</strong> neste mês —
+      contratos com mais de um boletim na mesma competência (ex: 1 NF por evento).
+      O painel mostra o boletim "principal" (NFS-e emitida → aprovado → maior valor); os demais aparecem no badge da linha.
+    </div>
+    <div style="display:flex;gap:6px">
+      <button onclick="painelListarDuplicatas()" style="padding:6px 12px;background:#fff;color:#1e40af;border:1px solid #3b82f6;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">📋 Listar todos</button>
+      <button onclick="if(confirm('LIMPAR boletins extras (mantém só o mais vivo).\\n\\n⚠ Use com cuidado: se forem boletins LEGÍTIMOS (NFs distintas no mesmo contrato/mês como Detran), você vai PERDÊ-LOS.\\n\\nNFS-e emitida nunca é apagada. Continuar?'))painelDeduplicar()" style="padding:6px 12px;background:#fff;color:#991b1b;border:1px solid #dc2626;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer" title="CUIDADO: apaga os extras. Só use se forem duplicatas reais.">🧹 Mesclar (cuidado)</button>
+    </div>
+  </div>` : ''}
+
   <!-- Ações em lote -->
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
     <button onclick="painelGerarTodos('${mes}')"
@@ -1271,6 +1294,10 @@ async function renderPainelFaturamento() {
       style="padding:8px 16px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer${qtdAprovados===0?';opacity:.5':''}"
       ${qtdAprovados===0?'disabled':''}>
       🚀 Emitir NFS-e Lote (${qtdAprovados} aprovados)
+    </button>
+    <button onclick="painelManutencao()" title="Auto-correção: vincula NFs, sincroniza legado, deduplica, cria fantasmas"
+      style="padding:8px 16px;background:#fff;color:#475569;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;margin-left:auto">
+      🛠️ Manutenção
     </button>
   </div>
 
@@ -1332,8 +1359,11 @@ function _renderLinhaContratoPainel(c, idx, mes) {
     // FIX: usa mapa global para evitar problemas de escape no onclick inline
     window._painelBoletins = window._painelBoletins || {};
     if (bol) window._painelBoletins[bol.id] = bol;
+    // Editar: se aprovado, primeiro reabre como rascunho (com confirmação)
+    // e em seguida abre o modal. Se rascunho, abre direto.
     const btnAjustar = bol.nfse_status !== 'EMITIDA'
-      ? `<button onclick="painelAjustar(${bol.id},'${mes}',window._painelBoletins[${bol.id}])" title="Ajustar glosas/acréscimos"
+      ? `<button onclick="painelEditar(${bol.id},'${mes}',window._painelBoletins[${bol.id}])"
+                 title="${bol.status === 'aprovado' ? 'Editar (reabre como rascunho)' : 'Ajustar glosas/acréscimos'}"
            style="padding:4px 8px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">✏️</button>`
       : '';
 
@@ -1347,6 +1377,11 @@ function _renderLinhaContratoPainel(c, idx, mes) {
            style="padding:4px 9px;background:#059669;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">🚀 Emitir NFS-e</button>`
       : '';
 
+    const btnReabrir = (bol.status === 'aprovado' && bol.nfse_status !== 'EMITIDA')
+      ? `<button onclick="painelReabrir(${bol.id},'${mes}')" title="Reabrir como rascunho para refazer"
+           style="padding:4px 8px;background:#fff;color:#b45309;border:1px solid #f59e0b;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">↩️ Reabrir</button>`
+      : '';
+
     const btnPacote = bol.nfse_status === 'EMITIDA'
       ? `<button onclick="baixarPacoteFiscal(${bol.id})" title="Baixar pacote fiscal (ZIP)"
            style="padding:4px 8px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">📦 ZIP</button>`
@@ -1357,7 +1392,18 @@ function _renderLinhaContratoPainel(c, idx, mes) {
     const btnPreview = `<button onclick="previewBoletimPDF(${bol.id}, ${c.contrato_id}, '${mes}')" title="Visualizar PDF do boletim"
            style="padding:4px 8px;background:#0ea5e9;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">👁️ PDF</button>`;
 
-    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${btnPreview}${btnAjustar}${btnAprovar}${btnEmitir}${btnPacote}</div>`;
+    // + Novo: cria um SEGUNDO boletim no mesmo (contrato, competência).
+    // Caso de uso: Detran emite N NFs por mês, cada uma vira um boletim.
+    const btnNovoExtra = `<button onclick="painelNovoBoletim(${c.contrato_id},'${mes}')" title="Criar OUTRO boletim no mesmo mês (NF complementar / 1 NF por evento)"
+           style="padding:4px 8px;background:#fff;color:#0f766e;border:1px solid #14b8a6;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">➕ Novo</button>`;
+
+    // Badge mostrando boletins adicionais neste contrato/competência
+    const badgeExtras = (c.dup_count > 0)
+      ? `<span onclick="painelListarDuplicatas('${mes}',${c.contrato_id})" title="Clique para listar todos os boletins deste contrato no mês"
+              style="display:inline-block;padding:3px 8px;background:#dbeafe;color:#1e40af;border-radius:10px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid #93c5fd">+${c.dup_count} extra(s)</span>`
+      : '';
+
+    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;align-items:center">${badgeExtras}${btnPreview}${btnAjustar}${btnAprovar}${btnEmitir}${btnReabrir}${btnPacote}${btnNovoExtra}</div>`;
   }
 
   const valorBase   = brl(c.valor_mensal_bruto);
@@ -1409,6 +1455,202 @@ async function painelGerarUm(contrato_id, mes) {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error);
     toast(d.novo ? '✅ Boletim criado' : '⚠ Boletim já existia', d.novo ? 'success' : 'info');
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+  }
+}
+
+// Editar boletim — se aprovado, reabre primeiro (com confirmação) e abre
+// o modal de ajuste já com status='rascunho'. Se rascunho, abre direto.
+async function painelEditar(boletim_id, mes, bolObj) {
+  if (!bolObj || bolObj.status !== 'aprovado') {
+    return painelAjustar(boletim_id, mes, bolObj);
+  }
+  if (!confirm('Editar este boletim irá reabri-lo como RASCUNHO.\n\nA aprovação atual será removida e você precisará aprovar de novo após editar. Continuar?')) return;
+
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch(`/api/boletins/${boletim_id}/reabrir`, {
+      method: 'POST',
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    const novo = { ...bolObj, status: 'rascunho' };
+    window._painelBoletins[boletim_id] = novo;
+    toast('↩️ Reaberto — abrindo editor…', 'info');
+    painelAjustar(boletim_id, mes, novo);
+  } catch (err) {
+    toast('Erro ao reabrir: ' + err.message, 'error');
+  }
+}
+
+// Lista os grupos duplicados em modal (somente leitura — pra revisar antes de mergear)
+async function painelListarDuplicatas() {
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch('/api/boletins/_duplicatas', {
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token }
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+
+    const brl = v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const corStatus = s => ({rascunho:'#92400e',aprovado:'#1d4ed8'}[s] || '#475569');
+    const html = d.grupos.map(g => `
+      <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:10px">
+        <div style="font-weight:700;color:#1e293b;margin-bottom:6px">${g.contrato_nome || '—'} — ${g.competencia} (${g.qtd}× duplicados)</div>
+        <table style="width:100%;font-size:11px">
+          <thead><tr style="color:#64748b"><th align="left">ID</th><th>Status</th><th>NFS-e</th><th align="right">Valor</th><th>Criado</th></tr></thead>
+          <tbody>${g.boletins.map(b => `<tr>
+            <td>${b.id}</td>
+            <td style="text-align:center;color:${corStatus(b.status)};font-weight:700">${(b.status||'').toUpperCase()}</td>
+            <td style="text-align:center">${b.nfse_status || '—'}</td>
+            <td style="text-align:right">${brl(b.valor_total || b.total_geral)}</td>
+            <td style="text-align:center;color:#64748b">${(b.created_at||'').slice(0,10)}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>`).join('') || '<div style="text-align:center;color:#94a3b8;padding:20px">Sem duplicatas</div>';
+
+    document.getElementById('modal-duplicatas')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'modal-duplicatas';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:30px;overflow:auto';
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:12px;padding:22px;width:760px;max-width:96vw;box-shadow:0 20px 60px rgba(0,0,0,.35)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <h3 style="margin:0;font-size:16px;font-weight:800;color:#1e293b">📋 Boletins Duplicados — ${d.total} grupo(s)</h3>
+          <button onclick="document.getElementById('modal-duplicatas').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:#64748b">✕</button>
+        </div>
+        ${html}
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0">
+          <button onclick="document.getElementById('modal-duplicatas').remove()" style="padding:8px 16px;background:#f1f5f9;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">Fechar</button>
+          ${d.total > 0 ? `<button onclick="document.getElementById('modal-duplicatas').remove();painelDeduplicar()" style="padding:8px 16px;background:#dc2626;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">🧹 Limpar todas</button>` : ''}
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+  }
+}
+
+async function painelDeduplicar() {
+  if (!confirm('Limpar boletins duplicados?\n\nA regra é: mantém o boletim com NFS-e emitida; senão o aprovado mais recente; senão o de maior valor. Os outros são DELETADOS (vínculos a colaboradores/glosas vão junto).\n\nNFS-e emitida nunca é apagada.')) return;
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch('/api/boletins/_dedup', {
+      method: 'POST',
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    toast(`🧹 ${d.removidos} duplicata(s) removida(s) em ${d.grupos_analisados} grupo(s)`, 'success');
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+  }
+}
+
+// ─── Sequência de manutenção: roda 4 endpoints idempotentes em ordem ──
+// 1) _link-nfs       → vincula boletim_id em notas_fiscais por nfse_numero
+// 2) _sync-legado    → preenche bol_boletins.nfse_numero a partir do legado
+// 3) _dedup          → mergea boletins duplicados (contrato+competencia)
+// 4) _criar-fantasmas → cria boletim aprovado/EMITIDA pra NF órfã
+// 5) _modelo-stats   → leitura final pra exibir distribuição
+async function painelManutencao() {
+  if (!confirm('Manutenção do Painel de Faturamento\n\n' +
+      'Vai rodar 4 operações em ordem:\n' +
+      ' 1. Vincular NFs aos boletins (por nº da NFS-e)\n' +
+      ' 2. Sincronizar boletins legados pro modelo Painel\n' +
+      ' 3. Deduplicar boletins (mantém o mais "vivo")\n' +
+      ' 4. Criar boletins fantasma para NFs órfãs com contrato resolvível\n\n' +
+      'Boletins/NFs com NFS-e EMITIDA são preservados — exclusões só atingem rascunhos/aprovados duplicados.\n\nContinuar?')) return;
+
+  const token = localStorage.getItem('montana_jwt') || '';
+  const headers = { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+
+  document.getElementById('modal-manutencao')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-manutencao';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:30px;overflow:auto';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:12px;padding:22px;width:600px;max-width:96vw;box-shadow:0 20px 60px rgba(0,0,0,.35)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <h3 style="margin:0;font-size:16px;font-weight:800;color:#1e293b">🛠️ Manutenção em andamento</h3>
+        <button onclick="document.getElementById('modal-manutencao').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:#64748b">✕</button>
+      </div>
+      <div id="manut-log" style="font-family:ui-monospace,monospace;font-size:12px;background:#0f172a;color:#e2e8f0;border-radius:8px;padding:14px;min-height:220px;max-height:60vh;overflow-y:auto;line-height:1.6">⏳ Iniciando…</div>
+      <div style="display:flex;justify-content:flex-end;margin-top:14px">
+        <button id="manut-fechar" onclick="document.getElementById('modal-manutencao').remove();renderPainelFaturamento()"
+          style="padding:8px 16px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700;display:none">Fechar e atualizar painel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const log = document.getElementById('manut-log');
+  const append = (msg) => { log.innerHTML += '\n' + msg; log.scrollTop = log.scrollHeight; };
+  log.innerHTML = '';
+
+  async function step(label, method, url, body) {
+    append(`▶ ${label}…`);
+    try {
+      const r = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      const pares = Object.entries(d).filter(([k]) => !['ok','plano','grupos'].includes(k))
+                              .map(([k,v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`);
+      append(`  ✅ ${pares.join(' · ')}`);
+      return d;
+    } catch (err) {
+      append(`  ❌ ${err.message}`);
+      return null;
+    }
+  }
+
+  await step('1/5  Vincular NFs ↔ boletins', 'POST', '/api/boletins/_link-nfs');
+  await step('2/5  Sincronizar boletins legados', 'POST', '/api/boletins/_sync-legado');
+  await step('3/5  Deduplicar boletins', 'POST', '/api/boletins/_dedup', {});
+  await step('4/5  Criar boletins fantasma', 'POST', '/api/boletins/_criar-fantasmas');
+  await step('5/5  Distribuição final',     'GET',  '/api/boletins/_modelo-stats');
+
+  append('\n✓ Manutenção concluída.');
+  document.getElementById('manut-fechar').style.display = 'inline-block';
+}
+
+// Cria outro boletim no mesmo (contrato, competência). Usado quando o
+// contrato emite múltiplas NFs no mês (ex: Detran — 1 NF por evento).
+// Backend aceita force_new=true em /gerar-boletim pra bypass do retorno
+// do "existente". Cada chamada cria um boletim novo em rascunho.
+async function painelNovoBoletim(contrato_id, mes) {
+  if (!confirm('Criar OUTRO boletim para este contrato em ' + mes + '?\n\nUse para casos como Detran, onde 1 contrato emite várias NFs no mesmo mês (1 boletim por NF/evento).\n\nO novo boletim começa como RASCUNHO — você ajusta valores e aprova depois.')) return;
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch('/api/boletins/gerar-boletim', {
+      method: 'POST',
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contrato_id, competencia: mes, force_new: true }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    toast('➕ Novo boletim criado (id=' + d.data.id + ') — ajuste e aprove', 'success');
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro ao criar: ' + err.message, 'error');
+  }
+}
+
+async function painelReabrir(boletim_id, mes) {
+  if (!confirm('Reabrir este boletim como RASCUNHO?\n\nIsso permite editar/refazer. A NFS-e ainda não pode ter sido emitida.')) return;
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch(`/api/boletins/${boletim_id}/reabrir`, {
+      method: 'POST',
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    toast('↩️ Boletim reaberto como rascunho', 'success');
     renderPainelFaturamento();
   } catch (err) {
     toast('Erro: ' + err.message, 'error');
