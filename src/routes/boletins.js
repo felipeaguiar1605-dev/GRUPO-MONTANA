@@ -3597,13 +3597,7 @@ router.post('/_dedup', async (req, res) => {
       }
     }
 
-    if (!dryRun) {
-      try {
-        await req.db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bol_uniq_contrato_comp
-                              ON bol_boletins(contrato_id, competencia)`).run();
-        global._warnedBolDup = false;
-      } catch (_) {}
-    }
+    // UNIQUE INDEX removido: cenário multi-boletim por (contrato, competência) é suportado.
 
     res.json({
       ok: true,
