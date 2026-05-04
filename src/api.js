@@ -693,7 +693,7 @@ router.get('/dashboard/apuracao-caixa', async (req, res) => {
         COALESCE(SUM(nf.cofins), 0)                             as total_cofins_ret
       FROM notas_fiscais nf
       LEFT JOIN extratos e ON e.id = nf.extrato_id
-      WHERE (status_conciliacao IS NULL OR status_conciliacao != \'CANCELADA\') AND nf.status_conciliacao = 'CONCILIADO'
+      WHERE (nf.status_conciliacao IS NULL OR nf.status_conciliacao != 'CANCELADA') AND nf.status_conciliacao = 'CONCILIADO'
         AND (
           (NULLIF(nf.data_pagamento,'') IS NOT NULL AND nf.data_pagamento BETWEEN @from AND @to)
           OR
