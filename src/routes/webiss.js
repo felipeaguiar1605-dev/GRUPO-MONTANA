@@ -252,9 +252,31 @@ async function ensureExtraColumns(db) {
   const extras = [
     ['webiss_numero_nfse', 'TEXT'],
     ['discriminacao',      'TEXT'],
+    ['boletim_id',         'BIGINT'], // FIX cenário 1: vínculo NF↔boletim
   ];
   for (const [col, type] of extras) {
     try { await db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN ${col} ${type}`).run(); } catch (_) {}
+  }
+  try { await db.prepare(`CREATE INDEX IF NOT EXISTS idx_nf_boletim ON notas_fiscais(boletim_id)`).run(); } catch (_) {}
+}
+
+// Linka NFs órfãs (boletim_id NULL) ao boletim correspondente, se existir
+// algum bol_boletins com nfse_numero igual. Idempotente — chamado após
+// importações em massa do WebISS.
+async function autoLinkNfBoletim(db) {
+  try {
+    const r = await db.prepare(`
+      UPDATE notas_fiscais nf
+      SET boletim_id = b.id
+      FROM bol_boletins b
+      WHERE nf.boletim_id IS NULL
+        AND COALESCE(NULLIF(b.nfse_numero,''), '') <> ''
+        AND nf.numero = b.nfse_numero
+    `).run();
+    return r?.changes || 0;
+  } catch (e) {
+    console.warn('[webiss] auto-link NF→boletim falhou:', e.message);
+    return 0;
   }
 }
 
@@ -412,7 +434,10 @@ router.post('/importar', async (req, res) => {
     });
     await trans();
 
-    res.json({ ok: true, total: allNfses.length, imported, skipped });
+    // Cenário 1: linka boletim_id por match nfse_numero (idempotente)
+    const linked = await autoLinkNfBoletim(db);
+
+    res.json({ ok: true, total: allNfses.length, imported, skipped, linked_boletins: linked });
   } catch (e) {
     res.status(502).json({ ok: false, error: e.message });
   }
