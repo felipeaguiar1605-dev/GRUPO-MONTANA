@@ -3526,7 +3526,7 @@ router.get('/_duplicatas', async (req, res) => {
                created_at, updated_at
         FROM bol_boletins WHERE id = ANY(?::int[])
         ORDER BY id
-      `).all(g.ids);
+      `).all([g.ids]);
     }
     res.json({ ok: true, total: grupos.length, grupos });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -3559,7 +3559,7 @@ router.post('/_dedup', async (req, res) => {
         SELECT id, status, nfse_status, COALESCE(valor_total, total_geral, 0) AS valor,
                created_at
         FROM bol_boletins WHERE id = ANY(?::int[])
-      `).all(g.ids);
+      `).all([g.ids]);
 
       const score = (b) => {
         if (b.nfse_status === 'EMITIDA') return 4;
