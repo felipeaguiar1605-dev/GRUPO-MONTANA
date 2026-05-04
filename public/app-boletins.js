@@ -7,7 +7,9 @@
   const _orig = window.showTab;
   window.showTab = function(id, el) {
     _orig(id, el);
-    if (id === 'boletins') loadBoletinsTab();
+    if (id === 'boletins')    loadBoletinsTab();
+    // Aba de nível 1 dedicada ao Painel — não passa pela tela de listagem
+    if (id === 'faturamento') abrirPainelFaturamento();
   };
 })();
 
@@ -1186,7 +1188,14 @@ async function confirmarImportTemplate() {
 }
 
 async function renderPainelFaturamento() {
-  const el = document.getElementById('bol-content');
+  // Suporta dois containers: fat-content (nova aba "Faturamento" de nível 1)
+  // e bol-content (acessar via Boletins → botão "Painel de Faturamento").
+  // O ativo é detectado por qual <div class="pg active"> está visível.
+  const pgFat = document.getElementById('pg-faturamento');
+  const usaFat = pgFat && pgFat.classList.contains('active');
+  const el = document.getElementById(usaFat ? 'fat-content' : 'bol-content')
+          || document.getElementById('bol-content');
+  if (!el) return;
   el.innerHTML = '<div class="loading">Carregando painel...</div>';
 
   const token = localStorage.getItem('montana_jwt') || '';
@@ -1224,7 +1233,7 @@ async function renderPainelFaturamento() {
 
   el.innerHTML = `
   <div style="margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-    <button onclick="_bolView='lista';renderBolLista()" style="background:#f1f5f9;border:none;border-radius:7px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;color:#475569">← Voltar</button>
+    ${usaFat ? '' : `<button onclick="_bolView='lista';renderBolLista()" style="background:#f1f5f9;border:none;border-radius:7px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;color:#475569">← Voltar</button>`}
     <h3 style="margin:0;font-size:16px;font-weight:800;color:#1e293b">📊 Painel de Faturamento</h3>
     <select onchange="_painelMes=this.value;renderPainelFaturamento()"
       style="padding:7px 12px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;font-weight:600;background:#fff;cursor:pointer;color:#1e293b">
