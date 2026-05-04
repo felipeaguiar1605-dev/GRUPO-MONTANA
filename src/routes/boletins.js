@@ -38,6 +38,26 @@ router.use(async (req, res, next) => {
     try { await db.prepare(`ALTER TABLE bol_boletins ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
   }
 
+  // Garantia de unicidade (1 boletim por contrato/competência). Se já existem
+  // duplicatas, o CREATE UNIQUE INDEX falha com 23505 — logamos uma vez e
+  // seguimos. O usuário pode listar via GET /_duplicatas e mergear via
+  // POST /_dedup. Após a limpeza, esse próprio middleware aplica o índice
+  // na próxima request.
+  try {
+    await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bol_uniq_contrato_comp
+                      ON bol_boletins(contrato_id, competencia)`).run();
+  } catch (e) {
+    if (!global._warnedBolDup) {
+      console.warn('[boletins] UNIQUE(contrato_id, competencia) não pôde ser aplicado — provável duplicata existente. Use GET /api/boletins/_duplicatas + POST /api/boletins/_dedup. Detalhe:', e.message);
+      global._warnedBolDup = true;
+    }
+  }
+
+  // Cenário 1: vínculo NF↔boletim. Garante coluna boletim_id em notas_fiscais
+  // e índice. Idempotente. (também é garantido em /emitir-nfse e webiss.js)
+  try { await db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN boletim_id BIGINT`).run(); } catch (_) {}
+  try { await db.prepare(`CREATE INDEX IF NOT EXISTS idx_nf_boletim ON notas_fiscais(boletim_id)`).run(); } catch (_) {}
+
   // Colunas adicionais na tabela bol_contratos (necessárias para vinculação contrato financeiro + NFS-e)
   const contrCols = [
     ['contrato_ref',    "TEXT DEFAULT ''"],  // numContrato da tabela contratos
@@ -430,8 +450,31 @@ router.post('/gerar', async (req, res) => {
     const { contrato_id, competencia, data_emissao, notas_fiscais } = req.body;
     // notas_fiscais = [{ posto_id: X, nf_numero: "440" }, ...]
 
+    // Cenário 3: este endpoint é LEGADO — gera 1 boletim com N entries em
+    // bol_boletins_nfs (uma por posto). Modelo novo (Painel) usa
+    // /gerar-boletim que mantém 1:1. Aviso ao cliente via header.
+    res.set('Deprecation', 'true');
+    res.set('Link', '</api/boletins/gerar-boletim>; rel="successor-version"');
+    if (!global._warnedGerarLegado) {
+      console.warn('[boletins] /gerar (legado) ainda em uso — preferir /gerar-boletim + /emitir-nfse via Painel');
+      global._warnedGerarLegado = true;
+    }
+
     const contrato = await req.db.prepare('SELECT * FROM bol_contratos WHERE id = ?').get(contrato_id);
     if (!contrato) return res.status(404).json({ error: 'Contrato não encontrado' });
+
+    // Anti-duplicação: 1 boletim por (contrato, competência). Mantém paridade
+    // com /gerar-boletim que já fazia esse check. Antes esse endpoint criava
+    // boletins novos sem verificar — gerando duplicatas no DB.
+    const dupExist = await req.db.prepare(
+      'SELECT id FROM bol_boletins WHERE contrato_id = ? AND competencia = ?'
+    ).get(contrato_id, competencia);
+    if (dupExist) {
+      return res.status(409).json({
+        error: `Já existe boletim para esse contrato/competência (id=${dupExist.id}). Reabra/edite o existente em vez de gerar outro.`,
+        boletim_id: dupExist.id,
+      });
+    }
 
     const postos = await req.db.prepare('SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem').all(contrato_id);
     for (const p of postos) {
@@ -739,17 +782,19 @@ router.post('/:id/emitir-nfse', async (req, res) => {
           const tomador      = bol.bc_contratante || tomadorRazao;
           const cnpjTomador  = tomadorCnpj ? formatCnpj(tomadorCnpj) : '';
 
-          // Garante colunas webiss_numero_nfse e discriminacao
+          // Garante colunas webiss_numero_nfse, discriminacao e boletim_id
           try { await db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN webiss_numero_nfse TEXT`).run(); } catch (_) {}
           try { await db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN discriminacao TEXT`).run(); } catch (_) {}
+          try { await db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN boletim_id BIGINT`).run(); } catch (_) {}
+          try { await db.prepare(`CREATE INDEX IF NOT EXISTS idx_nf_boletim ON notas_fiscais(boletim_id)`).run(); } catch (_) {}
 
           await db.prepare(`INSERT INTO notas_fiscais
             (numero, competencia, cidade, tomador, cnpj_tomador,
              valor_bruto, valor_liquido,
              inss, ir, iss, csll, pis, cofins, retencao,
              data_emissao, status_conciliacao,
-             webiss_numero_nfse, discriminacao)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+             webiss_numero_nfse, discriminacao, boletim_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
               nfseNum,
               competencia,
               'Palmas/TO',
@@ -768,8 +813,9 @@ router.post('/:id/emitir-nfse', async (req, res) => {
               'PENDENTE',
               nfseNum,
               bol.discriminacao || '',
+              bol.id, // FIX: vincula a NF ao boletim que a originou (cenário 1)
           );
-          console.log(`[boletins] Auto-sync NF ${nfseNum} → notas_fiscais`);
+          console.log(`[boletins] Auto-sync NF ${nfseNum} → notas_fiscais (boletim_id=${bol.id})`);
         }
       } catch (syncErr) {
         console.error('[boletins] Aviso: falha no auto-sync NF:', syncErr.message);
@@ -1587,11 +1633,29 @@ router.get('/painel-faturamento', async (req, res) => {
 
     const resultado = await Promise.all(contratos.map(async bc => {
       // FIX1: COALESCE(valor_total, total_geral)
+      // FIX5 (2026-05): se há duplicatas (mesmo contrato/competência), retorna o
+      // mais "vivo" primeiro: NFS-e EMITIDA > status='aprovado' > maior valor.
+      // Sem essa ordenação, .get() retorna não-determinístico — usuário podia
+      // ver "R$ 0,00" porque caía no rascunho órfão. Ver POST /_dedup para limpar.
       const boletim = await db.prepare(`
         SELECT *, COALESCE(valor_total, total_geral, 0) AS valor_efetivo
         FROM bol_boletins
         WHERE contrato_id = ? AND competencia = ?
+        ORDER BY
+          CASE WHEN nfse_status = 'EMITIDA' THEN 4
+               WHEN status      = 'aprovado' THEN 3
+               WHEN COALESCE(valor_total, total_geral, 0) > 0 THEN 2
+               ELSE 1 END DESC,
+          COALESCE(valor_total, total_geral, 0) DESC,
+          created_at DESC
+        LIMIT 1
       `).get(bc.id, mes);
+
+      // Conta dups deste par (contrato/competência) — pra frontend avisar se >1
+      const dupRow = await db.prepare(
+        'SELECT COUNT(*)::int AS n FROM bol_boletins WHERE contrato_id = ? AND competencia = ?'
+      ).get(bc.id, mes);
+      const dup_count = dupRow ? (dupRow.n - 1) : 0; // qtd duplicatas além do mostrado
 
       const [ano, mesNum] = mes.split('-');
       const mesNome = MESES_NOME_COMPLETO[parseInt(mesNum)] || mes;
@@ -1607,6 +1671,7 @@ router.get('/painel-faturamento', async (req, res) => {
         insc_municipal:    bc.insc_municipal || '',
         cnpj_tomador_contrato: bc.cnpj_tomador_contrato || '',
         mes_nome:          `${mesNome}/${ano}`,
+        dup_count, // qtd duplicatas além do exibido (frontend avisa se > 0)
         boletim: boletim ? {
           id:          boletim.id,
           status:      boletim.status,
@@ -1638,6 +1703,7 @@ router.get('/painel-faturamento', async (req, res) => {
       // FIX1: usa valor_efetivo
       valor_total: resultado.reduce((s, r) => s + (r.boletim?.valor_total || 0), 0),
       sem_cnpj:    semCnpj.length,
+      duplicatas:  resultado.reduce((s, r) => s + (r.dup_count || 0), 0),
     };
 
     res.json({ mes, contratos: resultado, stats });
@@ -2093,6 +2159,374 @@ router.delete('/glosas/:id', async (req, res) => {
     await req.db.prepare('DELETE FROM bol_boletim_glosas WHERE id = ?').run(req.params.id);
     const recalc = await recalcularGlosaTotal(req.db, cur.boletim_id);
     res.json({ ok: true, ...recalc });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── AUTO-CRIAÇÃO REVERSA (cenário 4) ──────────────────────────
+// Quando uma NF foi importada (via WebISS batch, XML manual, etc.) mas não
+// existe boletim correspondente, cria um boletim "fantasma" com status
+// aprovado + nfse_status=EMITIDA, vinculado à NF. Útil pra dar visibilidade
+// no Painel de Faturamento de receitas reais sem boletim formal.
+//
+// Resolução de contrato:
+//   1) Match por CNPJ tomador: bol_contratos.insc_municipal == nf.cnpj_tomador
+//   2) Fallback por razão social: bol_contratos.contratante LIKE '%' || nf.tomador
+//   Se nada bater, a NF fica sem boletim — usuário tem que criar/editar contrato.
+
+// Helper: cria boletins fantasma pras NFs órfãs com contrato resolvível.
+// Retorna { criados, sem_contrato, ja_existem }.
+async function autoCriarBoletinsFantasmas(db) {
+  const orfas = await db.prepare(`
+    SELECT id, numero, competencia, tomador, cnpj_tomador, valor_bruto,
+           valor_liquido, data_emissao, discriminacao
+    FROM notas_fiscais
+    WHERE boletim_id IS NULL
+      AND COALESCE(numero,'') <> ''
+      AND COALESCE(status_conciliacao,'') <> 'CANCELADA'
+    LIMIT 500
+  `).all();
+
+  let criados = 0, semContrato = 0, jaExistem = 0, linkados = 0;
+
+  for (const nf of (orfas || [])) {
+    // Normaliza competência pra YYYY-MM (campo pode vir 'YYYY-MM-DD' ou 'YYYY-MM')
+    let comp = (nf.competencia || '').slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(comp) && nf.data_emissao) {
+      comp = String(nf.data_emissao).slice(0, 7);
+    }
+    if (!/^\d{4}-\d{2}$/.test(comp)) continue; // sem competência confiável
+
+    // Tenta resolver contrato por CNPJ primeiro
+    const cnpjLimpo = String(nf.cnpj_tomador || '').replace(/\D/g, '');
+    let contrato = null;
+    if (cnpjLimpo) {
+      contrato = await db.prepare(`
+        SELECT id FROM bol_contratos
+        WHERE REGEXP_REPLACE(COALESCE(insc_municipal,''), '[^0-9]', '', 'g') = ?
+        LIMIT 1
+      `).get(cnpjLimpo);
+    }
+    // Fallback por razão social
+    if (!contrato && nf.tomador) {
+      contrato = await db.prepare(`
+        SELECT id FROM bol_contratos
+        WHERE UPPER(contratante) LIKE '%' || UPPER(?) || '%'
+           OR UPPER(?) LIKE '%' || UPPER(contratante) || '%'
+        LIMIT 1
+      `).get(nf.tomador, nf.tomador);
+    }
+
+    if (!contrato) { semContrato++; continue; }
+
+    // Já existe boletim deste contrato/competência?
+    const existente = await db.prepare(
+      'SELECT id, nfse_numero FROM bol_boletins WHERE contrato_id = ? AND competencia = ?'
+    ).get(contrato.id, comp);
+
+    if (existente) {
+      jaExistem++;
+      // Linka esta NF ao boletim existente (mesmo se nfse_numero diferente —
+      // pode ser uma NF complementar pro mesmo período).
+      try {
+        await db.prepare('UPDATE notas_fiscais SET boletim_id = ? WHERE id = ?')
+                .run(existente.id, nf.id);
+        linkados++;
+      } catch (_) {}
+      continue;
+    }
+
+    // Cria boletim fantasma — flag via discriminacao com prefixo
+    try {
+      const ins = await db.prepare(`
+        INSERT INTO bol_boletins
+          (contrato_id, competencia, data_emissao, valor_base, valor_total,
+           glosas, acrescimos, discriminacao, status, nfse_status, nfse_numero,
+           nfse_data_emissao)
+        VALUES (?, ?, ?, ?, ?, 0, 0, ?, 'aprovado', 'EMITIDA', ?, ?)
+        RETURNING id
+      `).get(
+        contrato.id, comp,
+        nf.data_emissao || (comp + '-01'),
+        +(nf.valor_bruto || 0),
+        +(nf.valor_bruto || 0),
+        '[AUTO] ' + (nf.discriminacao || 'Boletim criado automaticamente a partir de NF importada'),
+        nf.numero,
+        nf.data_emissao || (comp + '-01'),
+      );
+      const boletimId = ins?.id;
+      if (boletimId) {
+        await db.prepare('UPDATE notas_fiscais SET boletim_id = ? WHERE id = ?')
+                .run(boletimId, nf.id);
+        criados++;
+      }
+    } catch (e) {
+      // UNIQUE violado (race) ou outro erro — segue
+      console.warn('[boletins] auto-create fantasma falhou pra NF', nf.numero, ':', e.message);
+    }
+  }
+
+  return { criados, sem_contrato: semContrato, ja_existem: jaExistem, linkados_existentes: linkados };
+}
+
+// POST /api/boletins/_criar-fantasmas — cria boletins fantasma pras NFs órfãs
+router.post('/_criar-fantasmas', async (req, res) => {
+  try {
+    const stats = await autoCriarBoletinsFantasmas(req.db);
+    res.json({ ok: true, ...stats });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Expose helper para webiss.js + outros importadores chamarem
+router._autoCriarBoletinsFantasmas = autoCriarBoletinsFantasmas;
+
+// ─── DIAGNÓSTICO + MIGRAÇÃO LEGADO → PAINEL (cenário 3) ─────────
+// O fluxo /gerar (legado) cria 1 boletim com N rows em bol_boletins_nfs
+// (uma por posto). O fluxo /gerar-boletim (Painel) usa só
+// bol_boletins.nfse_numero (1:1). Coexistem — esses endpoints permitem
+// auditar e sincronizar boletins legados ao formato novo sem perda.
+
+// GET /api/boletins/_modelo-stats — quantos boletins em cada modelo
+router.get('/_modelo-stats', async (req, res) => {
+  try {
+    const tem = await req.db.prepare(`
+      SELECT COUNT(*)::int n FROM information_schema.tables
+      WHERE table_schema = current_schema() AND table_name = 'bol_boletins_nfs'
+    `).get();
+    if (!tem || tem.n === 0) {
+      return res.json({ ok: true, total: 0, painel: 0, legado: 0, hibrido: 0, sem_nf: 0 });
+    }
+
+    const r = await req.db.prepare(`
+      SELECT
+        COUNT(*)::int                                                    AS total,
+        COUNT(*) FILTER (WHERE COALESCE(b.nfse_numero,'') <> ''
+                              AND NOT EXISTS (SELECT 1 FROM bol_boletins_nfs WHERE boletim_id=b.id))::int AS painel,
+        COUNT(*) FILTER (WHERE COALESCE(b.nfse_numero,'') = ''
+                              AND EXISTS    (SELECT 1 FROM bol_boletins_nfs WHERE boletim_id=b.id))::int AS legado,
+        COUNT(*) FILTER (WHERE COALESCE(b.nfse_numero,'') <> ''
+                              AND EXISTS    (SELECT 1 FROM bol_boletins_nfs WHERE boletim_id=b.id))::int AS hibrido,
+        COUNT(*) FILTER (WHERE COALESCE(b.nfse_numero,'') = ''
+                              AND NOT EXISTS (SELECT 1 FROM bol_boletins_nfs WHERE boletim_id=b.id))::int AS sem_nf
+      FROM bol_boletins b
+    `).get();
+    res.json({ ok: true, ...r });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/boletins/_sync-legado — copia o 1º nf_numero de bol_boletins_nfs
+// para bol_boletins.nfse_numero quando este último estiver vazio. Idempotente.
+// Não apaga bol_boletins_nfs (preserva histórico de PDFs por posto).
+router.post('/_sync-legado', async (req, res) => {
+  try {
+    const tem = await req.db.prepare(`
+      SELECT COUNT(*)::int n FROM information_schema.tables
+      WHERE table_schema = current_schema() AND table_name = 'bol_boletins_nfs'
+    `).get();
+    if (!tem || tem.n === 0) {
+      return res.json({ ok: true, sincronizados: 0, motivo: 'tabela bol_boletins_nfs não existe nesta empresa' });
+    }
+
+    const r = await req.db.prepare(`
+      UPDATE bol_boletins b
+      SET nfse_numero = sub.primeira_nf,
+          updated_at  = NOW()
+      FROM (
+        SELECT boletim_id, MIN(nf_numero) AS primeira_nf
+        FROM bol_boletins_nfs
+        WHERE COALESCE(nf_numero,'') <> ''
+        GROUP BY boletim_id
+      ) sub
+      WHERE b.id = sub.boletim_id
+        AND COALESCE(b.nfse_numero,'') = ''
+    `).run();
+    res.json({ ok: true, sincronizados: r?.changes || 0 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── VÍNCULO NF ↔ BOLETIM (cenário 1) ───────────────────────────
+// Backfill: linka NFs em notas_fiscais com seu boletim correspondente em
+// bol_boletins via match exato de número (notas_fiscais.numero =
+// bol_boletins.nfse_numero). Idempotente — só toca rows com boletim_id NULL.
+router.post('/_link-nfs', async (req, res) => {
+  try {
+    const r = await req.db.prepare(`
+      UPDATE notas_fiscais nf
+      SET boletim_id = b.id
+      FROM bol_boletins b
+      WHERE nf.boletim_id IS NULL
+        AND COALESCE(NULLIF(b.nfse_numero,''), '') <> ''
+        AND nf.numero = b.nfse_numero
+    `).run();
+    const linked = r?.changes || 0;
+
+    // Diagnóstico: NFs ainda órfãs (sem boletim) e boletins emitidos sem NF
+    const orfaos = await req.db.prepare(`
+      SELECT COUNT(*)::int n FROM notas_fiscais
+      WHERE boletim_id IS NULL
+    `).get();
+    const boletinsEmitidosSemNf = await req.db.prepare(`
+      SELECT COUNT(*)::int n FROM bol_boletins b
+      WHERE b.nfse_status = 'EMITIDA'
+        AND NOT EXISTS (SELECT 1 FROM notas_fiscais nf WHERE nf.numero = b.nfse_numero)
+    `).get();
+
+    res.json({
+      ok: true,
+      linked,
+      nfs_sem_boletim:        orfaos?.n || 0,
+      boletins_emitidos_sem_nf: boletinsEmitidosSemNf?.n || 0,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/boletins/:id/nf — devolve a NF de notas_fiscais ligada a este
+// boletim (via boletim_id ou fallback por nfse_numero match).
+router.get('/:id/nf', async (req, res) => {
+  try {
+    const bol = await req.db.prepare('SELECT * FROM bol_boletins WHERE id = ?').get(req.params.id);
+    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+
+    let nf = await req.db.prepare(
+      'SELECT * FROM notas_fiscais WHERE boletim_id = ? LIMIT 1'
+    ).get(bol.id);
+
+    if (!nf && bol.nfse_numero) {
+      nf = await req.db.prepare(
+        'SELECT * FROM notas_fiscais WHERE numero = ? LIMIT 1'
+      ).get(bol.nfse_numero);
+      // Auto-link oportunista se achou via fallback
+      if (nf && !nf.boletim_id) {
+        try {
+          await req.db.prepare('UPDATE notas_fiscais SET boletim_id = ? WHERE id = ?').run(bol.id, nf.id);
+          nf.boletim_id = bol.id;
+        } catch (_) {}
+      }
+    }
+
+    res.json({ ok: true, boletim_id: bol.id, nfse_numero: bol.nfse_numero || null, nf: nf || null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── DEDUPLICAÇÃO DE BOLETINS ───────────────────────────────────
+// Diagnóstico e cleanup de duplicatas (mesmo contrato_id + competencia).
+// O middleware no topo tenta aplicar UNIQUE INDEX automaticamente; se há
+// dups pré-existentes, esses 2 endpoints permitem listar e mergear.
+
+// GET /api/boletins/_duplicatas — lista grupos com mais de 1 boletim
+router.get('/_duplicatas', async (req, res) => {
+  try {
+    const grupos = await req.db.prepare(`
+      SELECT contrato_id, competencia, COUNT(*) AS qtd,
+             ARRAY_AGG(id ORDER BY id) AS ids
+      FROM bol_boletins
+      GROUP BY contrato_id, competencia
+      HAVING COUNT(*) > 1
+      ORDER BY contrato_id, competencia
+    `).all();
+    if (!Array.isArray(grupos) || grupos.length === 0) {
+      return res.json({ ok: true, total: 0, grupos: [] });
+    }
+    // Enriquece com nome do contrato e detalhe de cada boletim
+    for (const g of grupos) {
+      const c = await req.db.prepare('SELECT nome, contratante FROM bol_contratos WHERE id=?').get(g.contrato_id);
+      g.contrato_nome = c?.nome || '';
+      g.contratante   = c?.contratante || '';
+      g.boletins = await req.db.prepare(`
+        SELECT id, status, nfse_status, nfse_numero, valor_total, total_geral,
+               created_at, updated_at
+        FROM bol_boletins WHERE id = ANY(?::int[])
+        ORDER BY id
+      `).all(g.ids);
+    }
+    res.json({ ok: true, total: grupos.length, grupos });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/boletins/_dedup — mergea duplicatas seguindo a regra:
+// "vencedor" do grupo = NFS-e EMITIDA > status='aprovado' > maior valor_total
+// > created_at mais recente. Os perdedores são apagados (FK CASCADE remove
+// dependências em bol_boletim_colaboradores e bol_boletim_glosas; manter os
+// vínculos em bol_boletins_nfs do vencedor — outros são removidos). Sem
+// dry_run=true, executa de fato.
+router.post('/_dedup', async (req, res) => {
+  try {
+    const dryRun = req.query.dry_run === 'true' || req.body?.dry_run === true;
+    const grupos = await req.db.prepare(`
+      SELECT contrato_id, competencia, ARRAY_AGG(id ORDER BY id) AS ids
+      FROM bol_boletins
+      GROUP BY contrato_id, competencia
+      HAVING COUNT(*) > 1
+    `).all();
+
+    if (!Array.isArray(grupos) || grupos.length === 0) {
+      return res.json({ ok: true, dry_run: dryRun, grupos_analisados: 0, removidos: 0, plano: [] });
+    }
+
+    const plano = [];
+    let removidos = 0;
+    for (const g of grupos) {
+      const bols = await req.db.prepare(`
+        SELECT id, status, nfse_status, COALESCE(valor_total, total_geral, 0) AS valor,
+               created_at
+        FROM bol_boletins WHERE id = ANY(?::int[])
+      `).all(g.ids);
+
+      // Score: EMITIDA=4, aprovado=3, rascunho com valor>0=2, demais=1, +
+      // tiebreak por created_at desc.
+      const score = (b) => {
+        if (b.nfse_status === 'EMITIDA') return 4;
+        if (b.status === 'aprovado')      return 3;
+        if ((b.valor || 0) > 0)           return 2;
+        return 1;
+      };
+      bols.sort((a, b) => {
+        const ds = score(b) - score(a);
+        if (ds !== 0) return ds;
+        const dv = (b.valor || 0) - (a.valor || 0);
+        if (dv !== 0) return dv;
+        return new Date(b.created_at) - new Date(a.created_at);
+      });
+      const vencedor = bols[0];
+      const perdedores = bols.slice(1);
+
+      plano.push({
+        contrato_id: g.contrato_id,
+        competencia: g.competencia,
+        manter:  { id: vencedor.id, status: vencedor.status, nfse_status: vencedor.nfse_status, valor: vencedor.valor },
+        remover: perdedores.map(p => ({ id: p.id, status: p.status, nfse_status: p.nfse_status, valor: p.valor })),
+      });
+
+      if (!dryRun) {
+        for (const p of perdedores) {
+          // Reapontar bol_boletins_nfs do perdedor pro vencedor (caso tenha PDFs/NFs gravadas lá)
+          try {
+            await req.db.prepare(
+              `UPDATE bol_boletins_nfs SET boletim_id = ? WHERE boletim_id = ?`
+            ).run(vencedor.id, p.id);
+          } catch (_) {}
+          // Apaga o perdedor (cascade em colaboradores/glosas via FK)
+          await req.db.prepare(`DELETE FROM bol_boletins WHERE id = ?`).run(p.id);
+          removidos++;
+        }
+      }
+    }
+
+    // Tenta aplicar a UNIQUE constraint depois do dedup
+    if (!dryRun) {
+      try {
+        await req.db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bol_uniq_contrato_comp
+                              ON bol_boletins(contrato_id, competencia)`).run();
+        global._warnedBolDup = false;
+      } catch (_) {}
+    }
+
+    res.json({
+      ok: true,
+      dry_run: dryRun,
+      grupos_analisados: grupos.length,
+      removidos,
+      plano,
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

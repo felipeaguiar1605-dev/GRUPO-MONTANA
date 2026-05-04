@@ -657,11 +657,17 @@ router.get('/dashboard', async (req, res) => {
 // NFs são consideradas pagas quando: status_conciliacao='CONCILIADO' E
 //   - data_pagamento BETWEEN from..to (preferencial), OU
 //   - extrato_id → extratos.data_iso BETWEEN from..to (fallback)
+async function ensureNFCaixaCols(db) {
+  // Auto-cura: bancos antigos (mustang, seguranca) podem não ter data_pagamento.
+  // ADD COLUMN IF NOT EXISTS é no-op se já existe (PostgreSQL 9.6+).
+  try { await db.prepare(`ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS data_pagamento TEXT`).run(); } catch (_) {}
+}
 router.get('/dashboard/apuracao-caixa', async (req, res) => {
   try {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from e to obrigatórios (YYYY-MM-DD)' });
 
+    await ensureNFCaixaCols(req.db);
     // Usa COALESCE: prefere data_pagamento; cai em data_iso do extrato vinculado se faltar
     const rowsRaw = await req.db.prepare(`
       SELECT
@@ -3737,7 +3743,8 @@ router.delete('/prefeitura/vincular-nf/:nf_id', async (req, res) => {
 
 
 // ─── FLUXO DE CAIXA PROJETADO ────────────────────────────────────
-router.get('/fluxo-projetado', async (req, res) => {
+// Aceita também o alias /relatorios/fluxo-projetado (frontend usa esse path).
+router.get(['/fluxo-projetado', '/relatorios/fluxo-projetado'], async (req, res) => {
   try {
     const meses = Math.min(Math.max(parseInt(req.query.meses) || 6, 1), 24);
 
@@ -5397,28 +5404,38 @@ router.get('/conciliacao/duplicatas', async (req, res) => {
 
     let dateWhere = '';
     const dateParams = {};
-    if (from) { dateWhere += ' AND a.data_iso >= @from'; dateParams.from = from; }
-    if (to)   { dateWhere += ' AND a.data_iso <= @to';   dateParams.to   = to; }
+    if (from) { dateWhere += ' AND data_iso >= @from'; dateParams.from = from; }
+    if (to)   { dateWhere += ' AND data_iso <= @to';   dateParams.to   = to; }
 
-    // Busca pares de créditos em bancos diferentes com valor idêntico e datas próximas
+    // CTE pré-filtra rows válidos: credito>0 + data_iso em formato ISO YYYY-MM-DD.
+    // Sem isso, mustang/seguranca quebravam por:
+    //  (a) divisão por zero quando credito=0 (PG reordena predicados antes do a.credito>0)
+    //  (b) cast ::timestamp falhando em rows com data_iso='' ou inválido
+    // Tolerância usa multiplicação (tol * credito) — equivalente, sem divisão.
     const _paresRaw = await db.prepare(`
+      WITH cred AS (
+        SELECT id, data, banco, conta, credito, historico, status_conciliacao,
+               data_iso::date AS data_d
+        FROM extratos
+        WHERE credito > 0
+          AND data_iso ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+          ${dateWhere}
+      )
       SELECT
         a.id as id_a, a.data as data_a, a.banco as banco_a, a.conta as conta_a,
         a.credito as credito_a, a.historico as historico_a, a.status_conciliacao as status_a,
         b.id as id_b, b.data as data_b, b.banco as banco_b, b.conta as conta_b,
         b.credito as credito_b, b.historico as historico_b, b.status_conciliacao as status_b,
         ABS(a.credito - b.credito) as diferenca_valor,
-        ABS(EXTRACT(EPOCH FROM (a.data_iso::timestamp - b.data_iso::timestamp))/86400) as diferenca_dias
-      FROM extratos a
-      JOIN extratos b ON (
+        ABS(a.data_d - b.data_d) as diferenca_dias
+      FROM cred a
+      JOIN cred b ON (
         a.id < b.id
         AND (a.banco != b.banco OR a.conta != b.conta)
-        AND ABS(a.credito - b.credito) / a.credito <= @tol
-        AND ABS(EXTRACT(EPOCH FROM (a.data_iso::timestamp - b.data_iso::timestamp))/86400) <= @janela
-        AND a.credito > 0 AND b.credito > 0
+        AND ABS(a.credito - b.credito) <= @tol * a.credito
+        AND ABS(a.data_d - b.data_d) <= @janela
       )
-      WHERE 1=1 ${dateWhere}
-      ORDER BY a.data_iso DESC, a.credito DESC
+      ORDER BY a.data_d DESC, a.credito DESC
       LIMIT 100
     `).all({ ...dateParams, tol: parseFloat(tolerancia_valor), janela });
     const pares = Array.isArray(_paresRaw) ? _paresRaw : [];
@@ -5514,6 +5531,173 @@ router.get('/relatorios/apuracao-mensal', async (req, res) => {
     }
 
     res.json({ data: rows, total: rows.length, fonte });
+  } catch(e) { errRes(res, e); }
+});
+
+// ─── /relatorios/subcontratados — terceiros pagos no período ───────
+// Agrega despesas por fornecedor (excluindo FOLHA e tributos), conta NFs
+// recebidas e calcula cobertura fiscal (qtd pagamentos com NF / total).
+router.get('/relatorios/subcontratados', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    let where = `WHERE COALESCE(fornecedor,'') <> ''
+                   AND UPPER(COALESCE(categoria,'')) NOT IN ('FOLHA','IMPOSTOS','DARF','FGTS','INSS','TRIBUTOS')`;
+    const params = {};
+    if (from) { where += ' AND data_iso >= @from'; params.from = from; }
+    if (to)   { where += ' AND data_iso <= @to';   params.to   = to;   }
+
+    const rowsRaw = await req.db.prepare(`
+      SELECT
+        fornecedor,
+        COALESCE(NULLIF(cnpj_fornecedor,''), '—') AS cnpj_fornecedor,
+        COUNT(*)                                    AS qtd_pagamentos,
+        COUNT(DISTINCT to_char(data_iso::date, 'YYYY-MM')) FILTER (WHERE data_iso ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}') AS meses_ativos,
+        COALESCE(SUM(valor_bruto), 0)               AS total_pago,
+        COUNT(*) FILTER (WHERE COALESCE(nf_numero,'') <> '') AS nfs_recebidas
+      FROM despesas
+      ${where}
+      GROUP BY fornecedor, COALESCE(NULLIF(cnpj_fornecedor,''), '—')
+      ORDER BY total_pago DESC
+      LIMIT 200
+    `).all(params);
+    const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+
+    const data = rows.map(r => ({
+      fornecedor:       r.fornecedor,
+      cnpj_fornecedor:  r.cnpj_fornecedor,
+      qtd_pagamentos:   r.qtd_pagamentos,
+      meses_ativos:     r.meses_ativos || 0,
+      total_pago:       +(+r.total_pago).toFixed(2),
+      nfs_recebidas:    r.nfs_recebidas,
+      cobertura_nf:     r.qtd_pagamentos > 0 ? Math.round((r.nfs_recebidas / r.qtd_pagamentos) * 100) : 0,
+    }));
+    const total_geral = data.reduce((s, r) => s + r.total_pago, 0);
+
+    res.json({ data, total_geral: +total_geral.toFixed(2) });
+  } catch(e) { errRes(res, e); }
+});
+
+// ─── /relatorios/margem-por-posto — receita × custo por posto ──────
+// Receita: soma de bol_itens (qtd × valor_unitario) por posto.
+// Custo: ainda não modelado de forma confiável (depende de salário por
+// colaborador alocado + encargos + rateio overhead). Por ora retorna 0
+// para custo_estimado e o frontend já lida com margem 0.
+router.get('/relatorios/margem-por-posto', async (req, res) => {
+  try {
+    const db = req.db;
+    // Tabelas só existem em empresas com módulo Boletins ativo
+    const has = await db.prepare(`
+      SELECT COUNT(*)::int n FROM information_schema.tables
+      WHERE table_schema = current_schema()
+        AND table_name IN ('bol_postos','bol_itens','bol_contratos')
+    `).get();
+    if (!has || has.n < 3) {
+      return res.json({ postos: [], total_receita: 0, melhor_posto: null, pior_posto: null,
+                        message: 'Módulo Boletins não disponível nesta empresa.' });
+    }
+
+    const rowsRaw = await db.prepare(`
+      SELECT
+        bp.id,
+        bp.descricao_posto AS descricao,
+        bc.nome            AS contrato_ref,
+        COALESCE(SUM(bi.quantidade * bi.valor_unitario), 0) AS receita_total
+      FROM bol_postos bp
+      LEFT JOIN bol_contratos bc ON bc.id = bp.contrato_id
+      LEFT JOIN bol_itens bi     ON bi.posto_id = bp.id
+      GROUP BY bp.id, bp.descricao_posto, bc.nome
+      HAVING COALESCE(SUM(bi.quantidade * bi.valor_unitario), 0) > 0
+      ORDER BY receita_total DESC
+    `).all();
+    const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+
+    const postos = rows.map(r => {
+      const receita = +(+r.receita_total).toFixed(2);
+      const custo   = 0; // TODO: modelar custo por posto (folha + encargos + overhead)
+      const margem  = receita - custo;
+      const pct     = receita > 0 ? +((margem / receita) * 100).toFixed(2) : 0;
+      return {
+        descricao: r.descricao || '—',
+        contrato_ref: r.contrato_ref || '—',
+        receita_total: receita,
+        custo_estimado: custo,
+        margem_valor: margem,
+        margem_pct: pct,
+      };
+    });
+
+    const total_receita = postos.reduce((s, p) => s + p.receita_total, 0);
+    const sorted = [...postos].sort((a,b) => b.margem_pct - a.margem_pct);
+    res.json({
+      postos,
+      total_receita: +total_receita.toFixed(2),
+      melhor_posto: sorted[0] || null,
+      pior_posto:   sorted[sorted.length - 1] || null,
+      _aviso: 'custo_estimado=0 enquanto modelo de custo por posto não é definido (folha+encargos+overhead).',
+    });
+  } catch(e) { errRes(res, e); }
+});
+
+// ─── /relatorios/cobertura-postos — postos × colaboradores alocados ─
+// Lista postos do contrato vigente e marca quantos colaboradores estão
+// alocados em cada um (via bol_boletim_colaboradores) na competência atual.
+router.get('/relatorios/cobertura-postos', async (req, res) => {
+  try {
+    const db = req.db;
+    const has = await db.prepare(`
+      SELECT COUNT(*)::int n FROM information_schema.tables
+      WHERE table_schema = current_schema()
+        AND table_name IN ('bol_postos','bol_contratos','bol_boletins')
+    `).get();
+    if (!has || has.n < 3) {
+      return res.json({ message: 'Módulo Boletins não disponível nesta empresa.', postos: [], resumo: {} });
+    }
+
+    const competencia = (req.query.from || '').slice(0,7) || new Date().toISOString().slice(0,7);
+
+    const hasColTab = await db.prepare(`
+      SELECT COUNT(*)::int n FROM information_schema.tables
+      WHERE table_schema = current_schema() AND table_name = 'bol_boletim_colaboradores'
+    `).get();
+
+    const temColTab = !!(hasColTab && hasColTab.n > 0);
+    const rowsRaw = await db.prepare(`
+      SELECT
+        bp.id,
+        bp.descricao_posto AS descricao,
+        bc.nome            AS contrato_ref,
+        ${temColTab
+          ? `(SELECT COUNT(*) FROM bol_boletim_colaboradores bbc
+                JOIN bol_boletins bb ON bb.id = bbc.boletim_id
+               WHERE bbc.posto_id = bp.id AND bb.competencia = @comp)`
+          : `0`} AS qtd_colaboradores
+      FROM bol_postos bp
+      LEFT JOIN bol_contratos bc ON bc.id = bp.contrato_id
+      ORDER BY bc.nome, bp.descricao_posto
+    `).all(temColTab ? { comp: competencia } : undefined);
+    const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+
+    const postos = rows.map(r => ({
+      descricao:         r.descricao || '—',
+      contrato_ref:      r.contrato_ref || '—',
+      qtd_colaboradores: r.qtd_colaboradores || 0,
+      coberto:           (r.qtd_colaboradores || 0) > 0,
+    }));
+
+    const total_postos     = postos.length;
+    const postos_cobertos  = postos.filter(p => p.coberto).length;
+    const cobertura_pct    = total_postos > 0 ? Math.round((postos_cobertos / total_postos) * 100) : 0;
+
+    res.json({
+      competencia,
+      postos,
+      resumo: {
+        total_postos,
+        postos_cobertos,
+        postos_descobertos: total_postos - postos_cobertos,
+        cobertura_pct,
+      },
+    });
   } catch(e) { errRes(res, e); }
 });
 
