@@ -1332,8 +1332,11 @@ function _renderLinhaContratoPainel(c, idx, mes) {
     // FIX: usa mapa global para evitar problemas de escape no onclick inline
     window._painelBoletins = window._painelBoletins || {};
     if (bol) window._painelBoletins[bol.id] = bol;
+    // Editar: se aprovado, primeiro reabre como rascunho (com confirmação)
+    // e em seguida abre o modal. Se rascunho, abre direto.
     const btnAjustar = bol.nfse_status !== 'EMITIDA'
-      ? `<button onclick="painelAjustar(${bol.id},'${mes}',window._painelBoletins[${bol.id}])" title="Ajustar glosas/acréscimos"
+      ? `<button onclick="painelEditar(${bol.id},'${mes}',window._painelBoletins[${bol.id}])"
+                 title="${bol.status === 'aprovado' ? 'Editar (reabre como rascunho)' : 'Ajustar glosas/acréscimos'}"
            style="padding:4px 8px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">✏️</button>`
       : '';
 
@@ -1417,6 +1420,31 @@ async function painelGerarUm(contrato_id, mes) {
     renderPainelFaturamento();
   } catch (err) {
     toast('Erro: ' + err.message, 'error');
+  }
+}
+
+// Editar boletim — se aprovado, reabre primeiro (com confirmação) e abre
+// o modal de ajuste já com status='rascunho'. Se rascunho, abre direto.
+async function painelEditar(boletim_id, mes, bolObj) {
+  if (!bolObj || bolObj.status !== 'aprovado') {
+    return painelAjustar(boletim_id, mes, bolObj);
+  }
+  if (!confirm('Editar este boletim irá reabri-lo como RASCUNHO.\n\nA aprovação atual será removida e você precisará aprovar de novo após editar. Continuar?')) return;
+
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch(`/api/boletins/${boletim_id}/reabrir`, {
+      method: 'POST',
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    const novo = { ...bolObj, status: 'rascunho' };
+    window._painelBoletins[boletim_id] = novo;
+    toast('↩️ Reaberto — abrindo editor…', 'info');
+    painelAjustar(boletim_id, mes, novo);
+  } catch (err) {
+    toast('Erro ao reabrir: ' + err.message, 'error');
   }
 }
 
