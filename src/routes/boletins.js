@@ -3524,9 +3524,9 @@ router.get('/_duplicatas', async (req, res) => {
       g.boletins = await req.db.prepare(`
         SELECT id, status, nfse_status, nfse_numero, valor_total, total_geral,
                created_at, updated_at
-        FROM bol_boletins WHERE id = ANY(?::int[])
+        FROM bol_boletins WHERE contrato_id=? AND competencia=?
         ORDER BY id
-      `).all([g.ids]);
+      `).all(g.contrato_id, g.competencia);
     }
     res.json({ ok: true, total: grupos.length, grupos });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -3558,8 +3558,9 @@ router.post('/_dedup', async (req, res) => {
       const bols = await req.db.prepare(`
         SELECT id, status, nfse_status, COALESCE(valor_total, total_geral, 0) AS valor,
                created_at
-        FROM bol_boletins WHERE id = ANY(?::int[])
-      `).all([g.ids]);
+        FROM bol_boletins WHERE contrato_id=? AND competencia=?
+        ORDER BY id
+      `).all(g.contrato_id, g.competencia);
 
       const score = (b) => {
         if (b.nfse_status === 'EMITIDA') return 4;
