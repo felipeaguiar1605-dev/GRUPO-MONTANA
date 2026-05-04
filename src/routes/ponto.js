@@ -186,7 +186,7 @@ function _calcDia(porDia, ocorrencias, diaStr, jornadaMin, jornadaConf, hoje) {
 }
 
 // ─── POST /api/ponto/registrar ───────────────────────────────────────────────
-router.post('/registrar', async (req, res) => {
+router.post('/registrar', (req, res) => {
   try {
     const { funcionario_id, tipo, data_hora, observacao } = req.body;
     if (!funcionario_id || !tipo || !data_hora)
@@ -195,7 +195,7 @@ router.post('/registrar', async (req, res) => {
     if (!tiposValidos.includes(tipo))
       return res.status(400).json({ error: `Tipo inválido. Use: ${tiposValidos.join(', ')}` });
     const d = db(req);
-    const result = await d.prepare(`
+    const result = d.prepare(`
       INSERT INTO ponto_registros (funcionario_id, tipo, data_hora, observacao)
       VALUES (?, ?, ?, ?)
     `).run(Number(funcionario_id), tipo, data_hora, observacao || '');
@@ -204,11 +204,11 @@ router.post('/registrar', async (req, res) => {
 });
 
 // ─── PATCH /api/ponto/:id — Edita registro de ponto ─────────────────────────
-router.patch('/:id([0-9]+)', async (req, res) => {
+router.patch('/:id([0-9]+)', (req, res) => {
   try {
     const { tipo, data_hora, observacao } = req.body;
     const d = db(req);
-    const reg = await d.prepare('SELECT * FROM ponto_registros WHERE id = ?').get(Number(req.params.id));
+    const reg = d.prepare('SELECT * FROM ponto_registros WHERE id = ?').get(Number(req.params.id));
     if (!reg) return res.status(404).json({ error: 'Registro não encontrado' });
     const campos = [];
     const vals   = [];
@@ -217,12 +217,12 @@ router.patch('/:id([0-9]+)', async (req, res) => {
     if (observacao !== undefined) { campos.push('observacao = ?'); vals.push(observacao); }
     if (campos.length === 0) return res.status(400).json({ error: 'Nenhum campo para atualizar' });
     vals.push(Number(req.params.id));
-    await d.prepare(`UPDATE ponto_registros SET ${campos.join(', ')} WHERE id = ?`).run(...vals);
+    d.prepare(`UPDATE ponto_registros SET ${campos.join(', ')} WHERE id = ?`).run(...vals);
     // Auditoria
     const usuario = req.user?.login || 'anon';
     const ip = req.ip || '';
     try {
-      await d.prepare(`INSERT INTO audit_log (usuario,acao,tabela,registro_id,detalhe,ip) VALUES (?,?,?,?,?,?)`)
+      d.prepare(`INSERT INTO audit_log (usuario,acao,tabela,registro_id,detalhe,ip) VALUES (?,?,?,?,?,?)`)
        .run(usuario, 'EDITAR', 'ponto_registros', String(req.params.id),
             `Anterior: tipo=${reg.tipo} data_hora=${reg.data_hora}`, ip);
     } catch(_) {}
@@ -242,7 +242,7 @@ function getUserFromReq(req) {
 }
 
 // ─── GET /api/ponto ──────────────────────────────────────────────────────────
-router.get('/', async (req, res) => {
+router.get('/', (req, res) => {
   try {
     const { funcionario_id, from, to, data } = req.query;
     const d = db(req);
@@ -265,12 +265,12 @@ router.get('/', async (req, res) => {
       sql += ' AND f.lotacao = ?'; params.push(usuarioLogado.lotacao);
     }
     sql += ' ORDER BY r.data_hora DESC LIMIT 2000';
-    res.json({ ok: true, data: await d.prepare(sql).all(...params) });
+    res.json({ ok: true, data: d.prepare(sql).all(...params) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── GET /api/ponto/espelho ──────────────────────────────────────────────────
-router.get('/espelho', async (req, res) => {
+router.get('/espelho', (req, res) => {
   try {
     const { funcionario_id, mes } = req.query;
     if (!funcionario_id || !mes)
@@ -285,21 +285,21 @@ router.get('/espelho', async (req, res) => {
     const to       = `${mes}-${String(lastDay).padStart(2, '0')}`;
     const hoje     = new Date().toISOString().substring(0, 10);
 
-    const jornada    = (await d.prepare(`SELECT * FROM ponto_jornadas WHERE funcionario_id = ? LIMIT 1`).get(Number(funcionario_id))) || JORNADA_PADRAO;
+    const jornada    = d.prepare(`SELECT * FROM ponto_jornadas WHERE funcionario_id = ? LIMIT 1`).get(Number(funcionario_id)) || JORNADA_PADRAO;
     const jornadaMin = (jornada.horas_dia || 8) * 60;
 
-    const func = await d.prepare(`
+    const func = d.prepare(`
       SELECT f.*, c.nome AS cargo_nome FROM rh_funcionarios f
       LEFT JOIN rh_cargos c ON c.id = f.cargo_id WHERE f.id = ?
     `).get(Number(funcionario_id));
 
-    const registros = await d.prepare(`
+    const registros = d.prepare(`
       SELECT * FROM ponto_registros
       WHERE funcionario_id = ? AND date(data_hora) >= ? AND date(data_hora) <= ?
       ORDER BY data_hora ASC
     `).all(Number(funcionario_id), from, to);
 
-    const ocorrencias = await d.prepare(`
+    const ocorrencias = d.prepare(`
       SELECT * FROM ponto_ocorrencias
       WHERE funcionario_id = ? AND date_inicio <= ? AND (date_fim >= ? OR date_fim = '' OR date_fim IS NULL)
     `).all(Number(funcionario_id), to, from);
@@ -377,22 +377,22 @@ router.get('/espelho-pdf', async (req, res) => {
     const to      = `${mes}-${String(lastDay).padStart(2, '0')}`;
     const hoje    = new Date().toISOString().substring(0, 10);
 
-    const jornada    = (await d.prepare(`SELECT * FROM ponto_jornadas WHERE funcionario_id = ? LIMIT 1`).get(Number(funcionario_id))) || JORNADA_PADRAO;
+    const jornada    = d.prepare(`SELECT * FROM ponto_jornadas WHERE funcionario_id = ? LIMIT 1`).get(Number(funcionario_id)) || JORNADA_PADRAO;
     const jornadaMin = (jornada.horas_dia || 8) * 60;
 
-    const func = await d.prepare(`
+    const func = d.prepare(`
       SELECT f.*, c.nome AS cargo_nome FROM rh_funcionarios f
       LEFT JOIN rh_cargos c ON c.id = f.cargo_id WHERE f.id = ?
     `).get(Number(funcionario_id));
     if (!func) return res.status(404).json({ error: 'Funcionário não encontrado' });
 
-    const registros = await d.prepare(`
+    const registros = d.prepare(`
       SELECT * FROM ponto_registros
       WHERE funcionario_id = ? AND date(data_hora) >= ? AND date(data_hora) <= ?
       ORDER BY data_hora ASC
     `).all(Number(funcionario_id), from, to);
 
-    const ocorrencias = await d.prepare(`
+    const ocorrencias = d.prepare(`
       SELECT * FROM ponto_ocorrencias
       WHERE funcionario_id = ? AND date_inicio <= ? AND (date_fim >= ? OR date_fim = '' OR date_fim IS NULL)
     `).all(Number(funcionario_id), to, from);
@@ -499,7 +499,7 @@ router.get('/espelho-pdf', async (req, res) => {
 });
 
 // ─── GET /api/ponto/ocorrencias ──────────────────────────────────────────────
-router.get('/ocorrencias', async (req, res) => {
+router.get('/ocorrencias', (req, res) => {
   try {
     const { funcionario_id, from, to } = req.query;
     const d = db(req);
@@ -513,18 +513,18 @@ router.get('/ocorrencias', async (req, res) => {
     if (from) { sql += ' AND o.date_inicio >= ?'; params.push(from); }
     if (to)   { sql += ' AND o.date_inicio <= ?'; params.push(to); }
     sql += ' ORDER BY o.date_inicio DESC';
-    res.json({ ok: true, data: await d.prepare(sql).all(...params) });
+    res.json({ ok: true, data: d.prepare(sql).all(...params) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── POST /api/ponto/ocorrencias ─────────────────────────────────────────────
-router.post('/ocorrencias', async (req, res) => {
+router.post('/ocorrencias', (req, res) => {
   try {
     const { funcionario_id, tipo, date_inicio, date_fim, observacao } = req.body;
     if (!funcionario_id || !tipo || !date_inicio)
       return res.status(400).json({ error: 'Campos obrigatórios: funcionario_id, tipo, date_inicio' });
     const d = db(req);
-    const result = await d.prepare(`
+    const result = d.prepare(`
       INSERT INTO ponto_ocorrencias (funcionario_id, tipo, date_inicio, date_fim, observacao)
       VALUES (?, ?, ?, ?, ?)
     `).run(Number(funcionario_id), tipo, date_inicio, date_fim || '', observacao || '');
@@ -533,27 +533,27 @@ router.post('/ocorrencias', async (req, res) => {
 });
 
 // ─── PATCH /api/ponto/ocorrencias/:id/aprovar — Aprova/reprova ocorrência ────
-router.patch('/ocorrencias/:id/aprovar', async (req, res) => {
+router.patch('/ocorrencias/:id/aprovar', (req, res) => {
   try {
     const d = db(req);
-    const oc = await d.prepare('SELECT id, aprovado FROM ponto_ocorrencias WHERE id = ?').get(Number(req.params.id));
+    const oc = d.prepare('SELECT id, aprovado FROM ponto_ocorrencias WHERE id = ?').get(Number(req.params.id));
     if (!oc) return res.status(404).json({ error: 'Ocorrência não encontrada' });
     const novoStatus = oc.aprovado ? 0 : 1;
-    await d.prepare('UPDATE ponto_ocorrencias SET aprovado = ? WHERE id = ?').run(novoStatus, Number(req.params.id));
+    d.prepare('UPDATE ponto_ocorrencias SET aprovado = ? WHERE id = ?').run(novoStatus, Number(req.params.id));
     res.json({ ok: true, aprovado: novoStatus });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── DELETE /api/ponto/ocorrencias/:id ───────────────────────────────────────
-router.delete('/ocorrencias/:id', async (req, res) => {
+router.delete('/ocorrencias/:id', (req, res) => {
   try {
-    await db(req).prepare('DELETE FROM ponto_ocorrencias WHERE id = ?').run(Number(req.params.id));
+    db(req).prepare('DELETE FROM ponto_ocorrencias WHERE id = ?').run(Number(req.params.id));
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── GET /api/ponto/relatorio-frequencia ─────────────────────────────────────
-router.get('/relatorio-frequencia', async (req, res) => {
+router.get('/relatorio-frequencia', (req, res) => {
   try {
     const { mes } = req.query;
     const d = db(req);
@@ -577,23 +577,20 @@ router.get('/relatorio-frequencia', async (req, res) => {
       sqlFunc += ' AND f.lotacao = ?'; paramsFunc.push(usuarioLogado2.lotacao);
     }
     sqlFunc += ' ORDER BY f.nome';
-    const funcionarios = await d.prepare(sqlFunc).all(...paramsFunc);
+    const funcionarios = d.prepare(sqlFunc).all(...paramsFunc);
 
-    // P0 fix: era .map(func => {...}) com awaits dentro — Promise.all/for-of
-    // necessário para funcionar em PG.
-    const resultado = [];
-    for (const func of funcionarios) {
-      const jornada = (await d.prepare(`SELECT * FROM ponto_jornadas WHERE funcionario_id = ? LIMIT 1`).get(func.id)) || JORNADA_PADRAO;
+    const resultado = funcionarios.map(func => {
+      const jornada = d.prepare(`SELECT * FROM ponto_jornadas WHERE funcionario_id = ? LIMIT 1`).get(func.id) || JORNADA_PADRAO;
       const jornadaMinFunc = (jornada.horas_dia || 8) * 60;
 
-      const registros = await d.prepare(`
+      const registros = d.prepare(`
         SELECT date(data_hora) AS dia, tipo, data_hora
         FROM ponto_registros
         WHERE funcionario_id = ? AND date(data_hora) >= ? AND date(data_hora) <= ?
         ORDER BY data_hora ASC
       `).all(func.id, from, to);
 
-      const ocorrencias = await d.prepare(`
+      const ocorrencias = d.prepare(`
         SELECT tipo, date_inicio, date_fim FROM ponto_ocorrencias
         WHERE funcionario_id = ? AND date_inicio <= ? AND (date_fim >= ? OR date_fim = '' OR date_fim IS NULL)
       `).all(func.id, to, from);
@@ -617,7 +614,7 @@ router.get('/relatorio-frequencia', async (req, res) => {
         if (c.tem_atraso) atrasos++;
       }
 
-      resultado.push({
+      return {
         funcionario_id:   func.id,
         nome:             func.nome,
         cargo:            func.cargo_nome || '',
@@ -631,8 +628,8 @@ router.get('/relatorio-frequencia', async (req, res) => {
         horas_faltantes:  minutosParaHora(mFalt),
         banco_horas:      minutosParaHora(mExtra - mFalt),
         ocorrencias:      ocorrencias.length,
-      });
-    }
+      };
+    });
 
     res.json({ ok: true, mes: mesAtual, data: resultado });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -653,7 +650,7 @@ router.post('/importar', async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Arquivo .xlsx não enviado' });
 
     const d = db(req);
-    const funcionarios = await d.prepare(`SELECT id, nome FROM rh_funcionarios WHERE status='ATIVO'`).all();
+    const funcionarios = d.prepare(`SELECT id, nome FROM rh_funcionarios WHERE status='ATIVO'`).all();
     const funcMap = {};
     funcionarios.forEach(f => { funcMap[f.nome.toLowerCase().trim()] = f.id; funcMap[String(f.id)] = f.id; });
 
@@ -679,6 +676,14 @@ router.post('/importar', async (req, res) => {
       return res.status(400).json({ error: 'Planilha deve ter colunas: Funcionário, Data, Entrada. Saída é opcional.' });
 
     let inseridos = 0, duplicados = 0, erros = [];
+    const inserir = d.prepare(`INSERT OR IGNORE INTO ponto_registros (funcionario_id, tipo, data_hora, observacao) VALUES (?,?,?,?)`);
+    const insert = d.transaction(rows => {
+      rows.forEach(r => {
+        const result = inserir.run(r.fid, r.tipo, r.dh, r.obs);
+        if (result.changes > 0) inseridos++;
+        else duplicados++;
+      });
+    });
     const lote = [];
 
     ws.eachRow((row, rn) => {
@@ -723,22 +728,7 @@ router.post('/importar', async (req, res) => {
       if (normH(intFVal)) lote.push({ fid, tipo: 'intervalo_fim',    dh: `${dataStr}T${normH(intFVal)}`, obs: '' });
     });
 
-    // P0 fix (2026-04-30): db.transaction com fn sync + .run() async em PG
-    // não esperava completar (BEGIN/COMMIT antes dos INSERTs).
-    // Reescrito com fn async + tx.prepare dentro + await em cada run.
-    if (lote.length > 0) {
-      const trans = d.transaction(async (tx) => {
-        const inserir = tx.prepare(
-          `INSERT OR IGNORE INTO ponto_registros (funcionario_id, tipo, data_hora, observacao) VALUES (?,?,?,?)`
-        );
-        for (const r of lote) {
-          const result = await inserir.run(r.fid, r.tipo, r.dh, r.obs);
-          if (result && result.changes > 0) inseridos++;
-          else duplicados++;
-        }
-      });
-      await trans();
-    }
+    if (lote.length > 0) insert(lote);
     res.json({ ok: true, inseridos, duplicados, erros });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -781,17 +771,17 @@ router.get('/export', async (req, res) => {
     h1.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     h1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
 
-    const funcionarios = await d.prepare(`
+    const funcionarios = d.prepare(`
       SELECT f.id, f.nome, f.contrato_ref, f.lotacao, c.nome AS cargo_nome
       FROM rh_funcionarios f LEFT JOIN rh_cargos c ON c.id = f.cargo_id
       WHERE f.status='ATIVO' ORDER BY f.nome
     `).all();
 
     for (const func of funcionarios) {
-      const jornada = (await d.prepare(`SELECT * FROM ponto_jornadas WHERE funcionario_id = ? LIMIT 1`).get(func.id)) || JORNADA_PADRAO;
+      const jornada = d.prepare(`SELECT * FROM ponto_jornadas WHERE funcionario_id = ? LIMIT 1`).get(func.id) || JORNADA_PADRAO;
       const jornadaMinFunc = (jornada.horas_dia || 8) * 60;
-      const registros   = await d.prepare(`SELECT date(data_hora) AS dia,tipo,data_hora FROM ponto_registros WHERE funcionario_id=? AND date(data_hora)>=? AND date(data_hora)<=? ORDER BY data_hora ASC`).all(func.id, from, to);
-      const ocorrencias = await d.prepare(`SELECT tipo,date_inicio,date_fim FROM ponto_ocorrencias WHERE funcionario_id=? AND date_inicio<=? AND (date_fim>=? OR date_fim='' OR date_fim IS NULL)`).all(func.id, to, from);
+      const registros   = d.prepare(`SELECT date(data_hora) AS dia,tipo,data_hora FROM ponto_registros WHERE funcionario_id=? AND date(data_hora)>=? AND date(data_hora)<=? ORDER BY data_hora ASC`).all(func.id, from, to);
+      const ocorrencias = d.prepare(`SELECT tipo,date_inicio,date_fim FROM ponto_ocorrencias WHERE funcionario_id=? AND date_inicio<=? AND (date_fim>=? OR date_fim='' OR date_fim IS NULL)`).all(func.id, to, from);
       const porDia = {};
       for (const r of registros) { if (!porDia[r.dia]) porDia[r.dia]=[]; porDia[r.dia].push(r); }
       let diasUteis=0,diasTrab=0,diasFalta=0,mExtra=0,mFalt=0,atrasos=0;
@@ -818,7 +808,7 @@ router.get('/export', async (req, res) => {
     const h2 = wsReg.getRow(1);
     h2.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     h2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
-    const todosReg = await d.prepare(`SELECT r.*,f.nome AS func_nome FROM ponto_registros r LEFT JOIN rh_funcionarios f ON f.id=r.funcionario_id WHERE date(r.data_hora)>=? AND date(r.data_hora)<=? ORDER BY r.data_hora ASC`).all(from,to);
+    const todosReg = d.prepare(`SELECT r.*,f.nome AS func_nome FROM ponto_registros r LEFT JOIN rh_funcionarios f ON f.id=r.funcionario_id WHERE date(r.data_hora)>=? AND date(r.data_hora)<=? ORDER BY r.data_hora ASC`).all(from,to);
     for (const r of todosReg) {
       const ds = r.data_hora.substring(0,10);
       wsReg.addRow({ nome:r.func_nome||'', data:ds, dsem:NOMES_DIA[new Date(`${ds}T12:00:00`).getDay()], fer:isFeriado(ds)?'Sim':'', tipo:r.tipo, hora:r.data_hora.substring(11,16), obs:r.observacao||'' });
@@ -834,7 +824,7 @@ router.get('/export', async (req, res) => {
     const h3 = wsOc.getRow(1);
     h3.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     h3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
-    const todasOc = await d.prepare(`SELECT o.*,f.nome AS func_nome FROM ponto_ocorrencias o LEFT JOIN rh_funcionarios f ON f.id=o.funcionario_id WHERE o.date_inicio>=? AND o.date_inicio<=? ORDER BY o.date_inicio ASC`).all(from,to);
+    const todasOc = d.prepare(`SELECT o.*,f.nome AS func_nome FROM ponto_ocorrencias o LEFT JOIN rh_funcionarios f ON f.id=o.funcionario_id WHERE o.date_inicio>=? AND o.date_inicio<=? ORDER BY o.date_inicio ASC`).all(from,to);
     for (const o of todasOc) wsOc.addRow({ nome:o.func_nome||'', tipo:o.tipo, inicio:o.date_inicio, fim:o.date_fim||'', obs:o.observacao||'', aprov:o.aprovado?'Sim':'Não' });
 
     res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -845,9 +835,9 @@ router.get('/export', async (req, res) => {
 });
 
 // ─── GET /api/ponto/jornadas ─────────────────────────────────────────────────
-router.get('/jornadas', async (req, res) => {
+router.get('/jornadas', (req, res) => {
   try {
-    const rows = await db(req).prepare(`
+    const rows = db(req).prepare(`
       SELECT j.*, f.nome AS funcionario_nome, c.nome AS cargo_nome
       FROM ponto_jornadas j
       LEFT JOIN rh_funcionarios f ON f.id = j.funcionario_id
@@ -858,10 +848,10 @@ router.get('/jornadas', async (req, res) => {
 });
 
 // ─── POST /api/ponto/jornadas ────────────────────────────────────────────────
-router.post('/jornadas', async (req, res) => {
+router.post('/jornadas', (req, res) => {
   try {
     const { funcionario_id, cargo_id, entrada, saida, intervalo_minutos, dias_semana, horas_dia, horas_semana } = req.body;
-    const result = await db(req).prepare(`
+    const result = db(req).prepare(`
       INSERT INTO ponto_jornadas (funcionario_id,cargo_id,entrada,saida,intervalo_minutos,dias_semana,horas_dia,horas_semana)
       VALUES (?,?,?,?,?,?,?,?)
     `).run(funcionario_id||null, cargo_id||null, entrada||'08:00', saida||'17:00', intervalo_minutos||60, dias_semana||'seg,ter,qua,qui,sex', horas_dia||8, horas_semana||44);
@@ -870,10 +860,10 @@ router.post('/jornadas', async (req, res) => {
 });
 
 // ─── PATCH /api/ponto/jornadas/:id ───────────────────────────────────────────
-router.patch('/jornadas/:id', async (req, res) => {
+router.patch('/jornadas/:id', (req, res) => {
   try {
     const { entrada, saida, intervalo_minutos, dias_semana, horas_dia, horas_semana } = req.body;
-    await db(req).prepare(`
+    db(req).prepare(`
       UPDATE ponto_jornadas SET entrada=?,saida=?,intervalo_minutos=?,dias_semana=?,horas_dia=?,horas_semana=? WHERE id=?
     `).run(entrada||'08:00', saida||'17:00', intervalo_minutos||60, dias_semana||'seg,ter,qua,qui,sex', horas_dia||8, horas_semana||44, Number(req.params.id));
     res.json({ ok: true });
@@ -881,25 +871,25 @@ router.patch('/jornadas/:id', async (req, res) => {
 });
 
 // ─── DELETE /api/ponto/jornadas/:id ──────────────────────────────────────────
-router.delete('/jornadas/:id', async (req, res) => {
+router.delete('/jornadas/:id', (req, res) => {
   try {
-    await db(req).prepare('DELETE FROM ponto_jornadas WHERE id = ?').run(Number(req.params.id));
+    db(req).prepare('DELETE FROM ponto_jornadas WHERE id = ?').run(Number(req.params.id));
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── DELETE /api/ponto/:id ───────────────────────────────────────────────────
-router.delete('/:id([0-9]+)', async (req, res) => {
+router.delete('/:id([0-9]+)', (req, res) => {
   try {
     const d = db(req);
-    const reg = await d.prepare('SELECT * FROM ponto_registros WHERE id = ?').get(Number(req.params.id));
+    const reg = d.prepare('SELECT * FROM ponto_registros WHERE id = ?').get(Number(req.params.id));
     if (reg) {
-      await d.prepare('DELETE FROM ponto_registros WHERE id = ?').run(Number(req.params.id));
+      d.prepare('DELETE FROM ponto_registros WHERE id = ?').run(Number(req.params.id));
       // Auditoria
       const usuario = req.user?.login || 'anon';
       const ip = req.ip || '';
       try {
-        await d.prepare(`INSERT INTO audit_log (usuario,acao,tabela,registro_id,detalhe,ip) VALUES (?,?,?,?,?,?)`)
+        d.prepare(`INSERT INTO audit_log (usuario,acao,tabela,registro_id,detalhe,ip) VALUES (?,?,?,?,?,?)`)
          .run(usuario, 'EXCLUIR', 'ponto_registros', String(req.params.id),
               `tipo=${reg.tipo} data_hora=${reg.data_hora} func_id=${reg.funcionario_id}`, ip);
       } catch(_) {}
@@ -923,24 +913,23 @@ router.get('/export-folha', async (req, res) => {
     const to     = `${mesAtual}-${String(lastDay).padStart(2, '0')}`;
     const hoje   = new Date().toISOString().substring(0, 10);
 
-    const funcionarios = await d.prepare(`
+    const funcionarios = d.prepare(`
       SELECT f.id, f.nome, f.matricula, f.cpf, f.salario_base, f.lotacao, c.nome AS cargo_nome
       FROM rh_funcionarios f LEFT JOIN rh_cargos c ON c.id = f.cargo_id
       WHERE f.status = 'ATIVO' ORDER BY f.nome
     `).all();
 
-    // P0 fix: era .map(func => {...}) com awaits dentro — for-of em PG.
-    const dados = [];
-    for (const func of funcionarios) {
+    // Calcula métricas do ponto para cada funcionário
+    const dados = funcionarios.map(func => {
       const mat = func.matricula || String(func.id).padStart(6, '0');
-      const jornada = (await d.prepare(`SELECT * FROM ponto_jornadas WHERE funcionario_id = ? LIMIT 1`).get(func.id)) || JORNADA_PADRAO;
+      const jornada = d.prepare(`SELECT * FROM ponto_jornadas WHERE funcionario_id = ? LIMIT 1`).get(func.id) || JORNADA_PADRAO;
       const jornadaMin = (jornada.horas_dia || 8) * 60;
-      const registros = await d.prepare(`
+      const registros = d.prepare(`
         SELECT date(data_hora) AS dia, tipo, data_hora FROM ponto_registros
         WHERE funcionario_id = ? AND date(data_hora) >= ? AND date(data_hora) <= ?
         ORDER BY data_hora ASC
       `).all(func.id, from, to);
-      const ocorrencias = await d.prepare(`
+      const ocorrencias = d.prepare(`
         SELECT tipo, date_inicio, date_fim FROM ponto_ocorrencias
         WHERE funcionario_id = ? AND date_inicio <= ? AND (date_fim >= ? OR date_fim = '' OR date_fim IS NULL)
       `).all(func.id, to, from);
@@ -968,7 +957,7 @@ router.get('/export-folha', async (req, res) => {
           mFalt += jornadaMin;
         }
       }
-      dados.push({
+      return {
         matricula: mat,
         nome: func.nome,
         cpf: func.cpf || '',
@@ -986,8 +975,8 @@ router.get('/export-folha', async (req, res) => {
         _extra50_min:  mExtra50,
         _extra100_min: mExtra100,
         _falt_min: mFalt,
-      });
-    }
+      };
+    });
 
     if (formato === 'alterdata') {
       // Layout Alterdata: CSV com separador ;
@@ -1056,7 +1045,7 @@ router.get('/export-folha', async (req, res) => {
 
 // ─── POST /api/ponto/integrar-folha — Cria itens de folha a partir do ponto ──
 // Body: { mes: 'YYYY-MM' }
-router.post('/integrar-folha', async (req, res) => {
+router.post('/integrar-folha', (req, res) => {
   try {
     const { mes } = req.body;
     if (!mes) return res.status(400).json({ error: 'Parâmetro obrigatório: mes (YYYY-MM)' });
@@ -1070,13 +1059,13 @@ router.post('/integrar-folha', async (req, res) => {
     const hoje   = new Date().toISOString().substring(0, 10);
 
     // Busca ou cria folha do mês
-    let folha = await d.prepare(`SELECT id FROM rh_folha WHERE competencia = ?`).get(mes);
+    let folha = d.prepare(`SELECT id FROM rh_folha WHERE competencia = ?`).get(mes);
     if (!folha) {
-      const r = await d.prepare(`INSERT INTO rh_folha (competencia, status) VALUES (?, 'RASCUNHO')`).run(mes);
+      const r = d.prepare(`INSERT INTO rh_folha (competencia, status) VALUES (?, 'RASCUNHO')`).run(mes);
       folha = { id: r.lastInsertRowid };
     }
 
-    const funcionarios = await d.prepare(`
+    const funcionarios = d.prepare(`
       SELECT f.id, f.nome, f.salario_base FROM rh_funcionarios f
       WHERE f.status = 'ATIVO' ORDER BY f.nome
     `).all();
@@ -1086,32 +1075,19 @@ router.post('/integrar-folha', async (req, res) => {
     let totalBruto = 0, totalDesc = 0, totalLiq = 0;
     let atualizados = 0;
 
-    // P0 fix (2026-04-30): db.transaction com fn sync + .run() async em PG
-    // não esperava completar. Reescrito: fn async + tx.prepare dentro + await
-    // em cada run/get.
-    const upsertItem = d.transaction(async (tx) => {
-      // Prepares reutilizáveis dentro da transaction
-      const stmtJornada    = tx.prepare(`SELECT * FROM ponto_jornadas WHERE funcionario_id = ? LIMIT 1`);
-      const stmtRegistros  = tx.prepare(`SELECT date(data_hora) AS dia, tipo, data_hora FROM ponto_registros WHERE funcionario_id = ? AND date(data_hora) >= ? AND date(data_hora) <= ? ORDER BY data_hora ASC`);
-      const stmtOcorrenc   = tx.prepare(`SELECT tipo, date_inicio, date_fim FROM ponto_ocorrencias WHERE funcionario_id = ? AND date_inicio <= ? AND (date_fim >= ? OR date_fim = '' OR date_fim IS NULL)`);
-      const stmtExisting   = tx.prepare(`SELECT id FROM rh_folha_itens WHERE folha_id = ? AND funcionario_id = ?`);
-      const stmtUpdate     = tx.prepare(`
-        UPDATE rh_folha_itens SET salario_base=?,dias_trabalhados=?,horas_extras=?,valor_he=?,
-        faltas=?,inss=?,irrf=?,outros_descontos=?,total_bruto=?,total_descontos=?,total_liquido=?
-        WHERE id=?
-      `);
-      const stmtInsert     = tx.prepare(`
-        INSERT INTO rh_folha_itens (folha_id,funcionario_id,salario_base,dias_trabalhados,horas_extras,
-        valor_he,faltas,inss,irrf,outros_descontos,total_bruto,total_descontos,total_liquido)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-      `);
-      const stmtFolhaTot   = tx.prepare(`UPDATE rh_folha SET total_bruto=?,total_descontos=?,total_liquido=?,status='RASCUNHO' WHERE id=?`);
-
+    const upsertItem = d.transaction(() => {
       for (const func of funcionarios) {
-        const jornada    = (await stmtJornada.get(func.id)) || JORNADA_PADRAO;
+        const jornada    = d.prepare(`SELECT * FROM ponto_jornadas WHERE funcionario_id = ? LIMIT 1`).get(func.id) || JORNADA_PADRAO;
         const jornadaMin = (jornada.horas_dia || 8) * 60;
-        const registros  = await stmtRegistros.all(func.id, from, to);
-        const ocorrencias = await stmtOcorrenc.all(func.id, to, from);
+        const registros  = d.prepare(`
+          SELECT date(data_hora) AS dia, tipo, data_hora FROM ponto_registros
+          WHERE funcionario_id = ? AND date(data_hora) >= ? AND date(data_hora) <= ?
+          ORDER BY data_hora ASC
+        `).all(func.id, from, to);
+        const ocorrencias = d.prepare(`
+          SELECT tipo, date_inicio, date_fim FROM ponto_ocorrencias
+          WHERE funcionario_id = ? AND date_inicio <= ? AND (date_fim >= ? OR date_fim = '' OR date_fim IS NULL)
+        `).all(func.id, to, from);
         const porDia = {};
         for (const r of registros) { if (!porDia[r.dia]) porDia[r.dia]=[]; porDia[r.dia].push(r); }
 
@@ -1149,20 +1125,29 @@ router.post('/integrar-folha', async (req, res) => {
         totalLiq   += liquido;
 
         // Upsert item de folha
-        const existing = await stmtExisting.get(folha.id, func.id);
+        const existing = d.prepare(`SELECT id FROM rh_folha_itens WHERE folha_id = ? AND funcionario_id = ?`).get(folha.id, func.id);
         if (existing) {
-          await stmtUpdate.run(func.salario_base||0, diasTrab, (mExtra50+mExtra100)/60, valorHe50+valorHe100,
-                               descFaltas, inss, irrf, 0, bruto, descontos, liquido, existing.id);
+          d.prepare(`
+            UPDATE rh_folha_itens SET salario_base=?,dias_trabalhados=?,horas_extras=?,valor_he=?,
+            faltas=?,inss=?,irrf=?,outros_descontos=?,total_bruto=?,total_descontos=?,total_liquido=?
+            WHERE id=?
+          `).run(func.salario_base||0, diasTrab, (mExtra50+mExtra100)/60, valorHe50+valorHe100,
+                 descFaltas, inss, irrf, 0, bruto, descontos, liquido, existing.id);
         } else {
-          await stmtInsert.run(folha.id, func.id, func.salario_base||0, diasTrab, (mExtra50+mExtra100)/60,
-                               valorHe50+valorHe100, descFaltas, inss, irrf, 0, bruto, descontos, liquido);
+          d.prepare(`
+            INSERT INTO rh_folha_itens (folha_id,funcionario_id,salario_base,dias_trabalhados,horas_extras,
+            valor_he,faltas,inss,irrf,outros_descontos,total_bruto,total_descontos,total_liquido)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+          `).run(folha.id, func.id, func.salario_base||0, diasTrab, (mExtra50+mExtra100)/60,
+                 valorHe50+valorHe100, descFaltas, inss, irrf, 0, bruto, descontos, liquido);
         }
         atualizados++;
       }
       // Atualiza totais da folha
-      await stmtFolhaTot.run(totalBruto, totalDesc, totalLiq, folha.id);
+      d.prepare(`UPDATE rh_folha SET total_bruto=?,total_descontos=?,total_liquido=?,status='RASCUNHO' WHERE id=?`)
+       .run(totalBruto, totalDesc, totalLiq, folha.id);
     });
-    await upsertItem();
+    upsertItem();
     res.json({ ok: true, folha_id: folha.id, competencia: mes, funcionarios: atualizados,
                total_bruto: totalBruto, total_liquido: totalLiq });
   } catch (e) { res.status(500).json({ error: e.message }); }

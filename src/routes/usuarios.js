@@ -88,7 +88,7 @@ async function seedAdmin(db) {
     // Migra usuário financeiro também
     const senhaFin = process.env.FINANCEIRO_SENHA || 'fin2026';
     const hashFin = bcrypt.hashSync(senhaFin, 10);
-    await db.prepare(`
+    db.prepare(`
       INSERT OR IGNORE INTO usuarios (usuario, nome, email, senha_hash, role, criado_por)
       VALUES ('financeiro', 'Financeiro', '', ?, 'financeiro', 'sistema')
     `).run(hashFin);
@@ -97,9 +97,9 @@ async function seedAdmin(db) {
 
 // ─── GET /api/usuarios — lista usuários (admin only) ─────────────
 
-router.get('/', soAdmin, async (req, res) => {
-  await ensureTable(req.db);
-  const rows = await req.db.prepare(`
+router.get('/', soAdmin, (req, res) => {
+  ensureTable(req.db);
+  const rows = req.db.prepare(`
     SELECT id, usuario, usuario AS login, nome, email, role, ativo, lotacao, criado_por, created_at, updated_at
     FROM usuarios ORDER BY id
   `).all();
@@ -108,7 +108,7 @@ router.get('/', soAdmin, async (req, res) => {
 
 // ─── POST /api/usuarios — criar usuário (admin only) ─────────────
 
-router.post('/', soAdmin, async (req, res) => {
+router.post('/', soAdmin, (req, res) => {
   const { usuario, nome, email = '', senha, role } = req.body;
   if (!usuario || !nome || !senha || !role) {
     return res.status(400).json({ error: 'usuario, nome, senha e role são obrigatórios' });
@@ -120,12 +120,12 @@ router.post('/', soAdmin, async (req, res) => {
     return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres' });
   }
 
-  await ensureTable(req.db);
-  const existe = await req.db.prepare('SELECT id FROM usuarios WHERE usuario = ?').get(usuario);
+  ensureTable(req.db);
+  const existe = req.db.prepare('SELECT id FROM usuarios WHERE usuario = ?').get(usuario);
   if (existe) return res.status(409).json({ error: 'Usuário já existe' });
 
   const hash = bcrypt.hashSync(senha, 10);
-  const result = await req.db.prepare(`
+  const result = req.db.prepare(`
     INSERT INTO usuarios (usuario, nome, email, senha_hash, role, criado_por)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(usuario, nome, email, hash, role, req.usuario.usuario);
@@ -135,12 +135,12 @@ router.post('/', soAdmin, async (req, res) => {
 
 // ─── PATCH /api/usuarios/:id — editar (admin only) ───────────────
 
-router.patch('/:id', soAdmin, async (req, res) => {
+router.patch('/:id', soAdmin, (req, res) => {
   const { id } = req.params;
   const { nome, email, senha, role, ativo, lotacao } = req.body;
 
-  await ensureTable(req.db);
-  const user = await req.db.prepare('SELECT * FROM usuarios WHERE id = ?').get(id);
+  ensureTable(req.db);
+  const user = req.db.prepare('SELECT * FROM usuarios WHERE id = ?').get(id);
   if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
 
   // Impede desativar o próprio admin logado
@@ -158,7 +158,7 @@ router.patch('/:id', soAdmin, async (req, res) => {
     senhaHash = bcrypt.hashSync(senha, 10);
   }
 
-  await req.db.prepare(`
+  req.db.prepare(`
     UPDATE usuarios SET
       nome       = COALESCE(?, nome),
       email      = COALESCE(?, email),
@@ -177,8 +177,8 @@ router.patch('/:id', soAdmin, async (req, res) => {
 
 router.delete('/:id', soAdmin, async (req, res) => {
   const { id } = req.params;
-  await ensureTable(req.db);
-  const user = await req.db.prepare('SELECT * FROM usuarios WHERE id = ?').get(id);
+  ensureTable(req.db);
+  const user = req.db.prepare('SELECT * FROM usuarios WHERE id = ?').get(id);
   if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
   if (user.usuario === req.usuario.usuario) {
     return res.status(400).json({ error: 'Você não pode remover sua própria conta' });
@@ -189,28 +189,25 @@ router.delete('/:id', soAdmin, async (req, res) => {
 
 // ─── POST /api/usuarios/:id/reset-senha — resetar para padrão ────
 
-router.post('/:id/reset-senha', soAdmin, async (req, res) => {
+router.post('/:id/reset-senha', soAdmin, (req, res) => {
   const { id } = req.params;
-  await ensureTable(req.db);
-  const user = await req.db.prepare('SELECT id FROM usuarios WHERE id=?').get(id);
+  ensureTable(req.db);
+  const user = req.db.prepare('SELECT id FROM usuarios WHERE id=?').get(id);
   if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
   const hash = bcrypt.hashSync('Montana@2026', 10);
-  await req.db.prepare('UPDATE usuarios SET senha_hash=?, updated_at=NOW() WHERE id=?').run(hash, id);
+  req.db.prepare('UPDATE usuarios SET senha_hash=?, updated_at=NOW() WHERE id=?').run(hash, id);
   res.json({ ok: true });
 });
 
 // ─── POST /api/usuarios/criar-funcionarios — bulk creation ────────
 
-router.post('/criar-funcionarios', soAdmin, async (req, res) => {
-  await ensureTable(req.db);
-  // P0 fix (2026-04-29): sqlite_master nao existe em PG -> information_schema.tables
-  const temFuncionarios = await req.db.prepare(
-    `SELECT 1 AS x FROM information_schema.tables
-     WHERE table_schema = current_schema() AND table_name = 'rh_funcionarios'`
-  ).get();
+router.post('/criar-funcionarios', soAdmin, (req, res) => {
+  ensureTable(req.db);
+  // Check if rh_funcionarios exists
+  const temFuncionarios = req.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='rh_funcionarios'").get();
   if (!temFuncionarios) return res.status(400).json({ error: 'Tabela rh_funcionarios não encontrada' });
 
-  const funcionarios = await req.db.prepare("SELECT id, nome, cargo FROM rh_funcionarios WHERE ativo=1 ORDER BY nome").all();
+  const funcionarios = req.db.prepare("SELECT id, nome, cargo FROM rh_funcionarios WHERE ativo=1 ORDER BY nome").all();
 
   function normalizar(str) {
     return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -221,28 +218,26 @@ router.post('/criar-funcionarios', soAdmin, async (req, res) => {
     return `${normalizar(partes[0])}.${normalizar(partes[partes.length-1])}`;
   }
 
+  const empresa = req.company;
   const senhaHash = bcrypt.hashSync('Montana@2026', 10);
   let criados = 0, existentes = 0;
 
-  const insertSql = `
+  const inserir = req.db.prepare(`
     INSERT INTO usuarios (usuario, nome, senha_hash, role, lotacao, ativo, criado_por)
     VALUES (?, ?, ?, 'rh', '', 1, 'sistema')
-  `;
+  `);
 
   for (const func of funcionarios) {
     let login = gerarLogin(func.nome);
     let sufixo = 1, loginFinal = login;
-    // P0 fix: await no SELECT de unicidade
-    while (await req.db.prepare('SELECT id FROM usuarios WHERE usuario=?').get(loginFinal)) {
+    while (req.db.prepare('SELECT id FROM usuarios WHERE usuario=?').get(loginFinal)) {
       loginFinal = `${login}${sufixo++}`;
     }
     try {
-      await req.db.prepare(insertSql).run(loginFinal, func.nome, senhaHash);
+      inserir.run(loginFinal, func.nome, senhaHash);
       criados++;
     } catch(e) {
-      // PG: '23505' = unique_violation; SQLite legado: 'UNIQUE'
-      if (e.code === '23505' || (e.message && e.message.includes('UNIQUE'))) existentes++;
-      else throw e;
+      if (e.message.includes('UNIQUE')) existentes++;
     }
   }
 

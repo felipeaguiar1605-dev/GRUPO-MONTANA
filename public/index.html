@@ -93,18 +93,12 @@
     <button onclick="clearGlobalPeriod()" style="margin-left:8px">Limpar</button>
   </div>
   <!-- Busca Global -->
-  <div style="position:relative;margin-left:auto;display:flex;align-items:center;gap:6px">
-    <input id="busca-global-input" type="text" placeholder="🔍 Buscar NF, extrato, contrato… (Ctrl+/)"
+  <div style="position:relative;margin-left:auto">
+    <input id="busca-global-input" type="text" placeholder="🔍 Buscar NF, extrato, contrato…"
       oninput="buscaGlobalDebounce()" onkeydown="if(event.key==='Escape')fecharBuscaGlobal()"
       style="padding:6px 12px 6px 10px;font-size:11px;border:1px solid #475569;border-radius:20px;background:#334155;color:#e2e8f0;width:240px;outline:none"
       autocomplete="off">
-    <div id="busca-global-result" style="display:none;position:absolute;top:calc(100% + 6px);right:50px;width:480px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.15);z-index:9999;max-height:420px;overflow-y:auto"></div>
-    <!-- P1-7: histórico de toasts persistente -->
-    <button onclick="uxAbrirHistoricoToasts()" title="Histórico de notificações" style="position:relative;background:#334155;border:1px solid #475569;color:#e2e8f0;padding:4px 8px;border-radius:6px;cursor:pointer;font-size:11px">
-      🔔 <span id="ux-toast-hist-badge" style="background:#dc2626;color:#fff;border-radius:10px;padding:0 5px;font-size:9px;font-weight:700;margin-left:2px">0</span>
-    </button>
-    <!-- P2-11: ajuda de atalhos -->
-    <button onclick="uxMostrarShortcuts()" title="Atalhos de teclado (Shift+?)" style="background:#334155;border:1px solid #475569;color:#e2e8f0;padding:4px 8px;border-radius:6px;cursor:pointer;font-size:11px">⌨️</button>
+    <div id="busca-global-result" style="display:none;position:absolute;top:calc(100% + 6px);right:0;width:480px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.15);z-index:9999;max-height:420px;overflow-y:auto"></div>
   </div>
 </div>
 
@@ -135,22 +129,24 @@
       <span class="ng-icon">💼</span><span class="ng-label">Financeiro</span><span class="ng-chevron">▾</span>
     </div>
     <div class="nav-group-items" style="display:none">
-      <!-- Reordenado em 2026-04-30 — fluxo: Contratos → Boletins → NFs → Conta Vinculada → Extratos -->
-      <!-- P1-2: sub-abas críticas agora visíveis no menu (indentadas) — antes estavam só dentro das telas pai, usuários não as encontravam -->
+      <div class="tab" data-tab="ext" onclick="navGo('ext',this)">🏦 Extratos</div>
+      <div class="tab" data-tab="nfs" onclick="navGo('nfs',this)">🧾 Notas Fiscais</div>
+      <!-- Modelos NF virou sub-aba de Notas Fiscais (2026-04). Tab oculta mas rota mantida. -->
+      <div class="tab" data-tab="nf-modelos" onclick="navGo('nf-modelos',this);setTimeout(()=>window.nfModelosInit&&window.nfModelosInit(),50)" style="display:none">🧰 Modelos NF</div>
       <div class="tab" data-tab="cont" onclick="navGo('cont',this)">📋 Contratos</div>
-      <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)" style="padding-left:32px;font-size:11px;color:#94a3b8" title="Sub-aba de Contratos">💰 Adimplência por Contrato</div>
-      <div class="tab" data-tab="faturamento-prev" onclick="navGo('faturamento-prev',this)" style="padding-left:32px;font-size:11px;color:#94a3b8" title="Sub-aba de Contratos">📅 Faturamento Previsto</div>
+      <!-- Adimplência por Contrato virou sub-aba de Contratos (2026-04). Tab oculta mas rota mantida. -->
+      <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)" style="display:none">💰 Adimplência por Contrato</div>
+      <!-- Faturamento Previsto: sub-aba de Contratos (2026-04). Tab oculta. -->
+      <div class="tab" data-tab="faturamento-prev" onclick="navGo('faturamento-prev',this)" style="display:none">📅 Faturamento Previsto</div>
       <div class="tab" data-tab="faturamento" onclick="navGo('faturamento',this)">📊 Faturamento</div>
       <div class="tab" data-tab="boletins" onclick="navGo('boletins',this)">📄 Boletins</div>
-      <div class="tab" data-tab="nfs" onclick="navGo('nfs',this)">🧾 Notas Fiscais</div>
-      <!-- Modelos NF: sub-aba técnica, mantida oculta no menu (acessível dentro de Notas Fiscais) -->
-      <div class="tab" data-tab="nf-modelos" onclick="navGo('nf-modelos',this);setTimeout(()=>window.nfModelosInit&&window.nfModelosInit(),50)" style="display:none">🧰 Modelos NF</div>
-      <div class="tab" data-tab="conta-vinculada" onclick="navGo('conta-vinculada',this)">🏦 Conta Vinculada</div>
-      <div class="tab" data-tab="ext" onclick="navGo('ext',this)">🏦 Extratos</div>
-      <div class="tab" data-tab="conciliacao3v" onclick="navGo('conciliacao3v',this)">🔗 Conciliação</div>
-      <div class="tab" data-tab="concilia-robusta" onclick="navGo('concilia-robusta',this);setTimeout(()=>crInit&&crInit(),50)" style="padding-left:32px;font-size:11px;color:#94a3b8" title="Sub-aba de Conciliação">🧩 Conciliação IA / Pendentes</div>
       <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
-      <div class="tab" data-tab="pag" onclick="navGo('pag',this);setTimeout(()=>compListar&&compListar(),50)" style="padding-left:32px;font-size:11px;color:#94a3b8" title="Sub-aba de Despesas">🧾 Comprovantes de Pagamento</div>
+      <!-- Comprovantes de Pagamento virou sub-aba de Despesas (2026-04). Tab oculta mas rota mantida. -->
+      <div class="tab" data-tab="pag" onclick="navGo('pag',this);setTimeout(()=>compListar&&compListar(),50)" style="display:none">🧾 Comprovantes de Pagamento</div>
+      <div class="tab" data-tab="conta-vinculada" onclick="navGo('conta-vinculada',this)">🏦 Conta Vinculada</div>
+      <div class="tab" data-tab="conciliacao3v" onclick="navGo('conciliacao3v',this)">🔗 Conciliação</div>
+      <!-- Conciliação IA virou sub-aba de Conciliação (2026-04). Tab oculta mas rota mantida. -->
+      <div class="tab" data-tab="concilia-robusta" onclick="navGo('concilia-robusta',this);setTimeout(()=>crInit&&crInit(),50)" style="display:none">🧩 Conciliação IA</div>
       <div class="tab" data-tab="import" onclick="navGo('import',this)">📥 Importar</div>
     </div>
   </div>
@@ -285,21 +281,6 @@
 </div>
 
 <div id="pg-dash" class="pg active">
-  <!-- P2-20: Painel "Fechar este mês" — pendências operacionais agregadas -->
-  <div id="dash-fechamento" style="background:linear-gradient(135deg,#1e3a8a,#1d4ed8);color:#fff;border-radius:10px;padding:14px 18px;margin-bottom:12px;display:none">
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
-      <div>
-        <div style="font-size:11px;opacity:.8;letter-spacing:.5px;text-transform:uppercase">Fechamento mensal</div>
-        <h3 style="margin:2px 0 0;font-size:18px;font-weight:800" id="dash-fech-titulo">Fechar competência atual</h3>
-      </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button onclick="abrirPrevias()" class="btn btn-sm" style="background:rgba(255,255,255,.2);color:#fff;border-color:rgba(255,255,255,.4)">📋 Prévias</button>
-        <button onclick="navGo('cont',document.querySelector('[data-tab=cont]'))" class="btn btn-sm" style="background:rgba(255,255,255,.2);color:#fff;border-color:rgba(255,255,255,.4)">📋 Contratos</button>
-      </div>
-    </div>
-    <div id="dash-fech-itens" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:14px"></div>
-  </div>
-
   <!-- Alerta: créditos sem NF correspondente -->
   <div id="dash-alerta-sem-nf" style="display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 16px;margin-bottom:10px;display:flex;align-items:center;gap:10px;cursor:pointer" onclick="navGo('ext',document.querySelector('[data-tab=ext]'))">
     <span style="font-size:16px">⚠️</span>
@@ -2210,8 +2191,6 @@
       <p style="font-size:11px;color:#94a3b8">Gestão de contratos de vigilância e geração automática de boletins mensais em PDF</p>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button onclick="abrirPrevias()" style="padding:8px 18px;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap" title="Fluxo Prévia → Aprovação → Emissão NFs">📋 Prévias / Emissão</button>
-      <button onclick="abrirAditivos()" style="padding:8px 18px;background:#0891b2;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap" title="Reajustes, prorrogações, apostilamentos e reequilíbrios">📑 Aditivos</button>
       <button onclick="abrirPainelFaturamento()" style="padding:8px 18px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">📊 Painel de Faturamento</button>
       <button onclick="abrirGerarBoletim()" style="padding:8px 18px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">📄 Novo Boletim / Emitir NF</button>
       <button onclick="abrirImportarTemplate()" style="padding:8px 18px;background:#d97706;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap" title="Importar contrato com postos+itens pré-cadastrados">📥 Importar Template</button>
@@ -2321,7 +2300,7 @@
     </div>
   </div>
   <div class="kpis" id="c3v-kpis" style="grid-template-columns:repeat(4,1fr)"></div>
-  <div id="c3v-resumo" style="margin-top:12px"><div class="muted" style="text-align:center;padding:40px"><span class="loading-dot" style="display:inline-block;width:14px;height:14px;border:2px solid #cbd5e1;border-top-color:#1d4ed8;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px"></span>Carregando conciliação…</div></div>
+  <div id="c3v-resumo" style="margin-top:12px"><div class="muted" style="text-align:center;padding:40px">Clique em Atualizar para carregar a conciliação</div></div>
 
   <!-- Créditos Pendentes / Não Identificados -->
   <div style="margin-top:20px;border-top:2px solid #e2e8f0;padding-top:16px">
@@ -2353,7 +2332,7 @@
       <button onclick="crLoad()" style="padding:6px 14px;font-size:11px;font-weight:700;background:#059669;color:#fff;border:none;border-radius:6px;cursor:pointer">🔄 Atualizar</button>
       <button onclick="crReidentificar()" style="padding:6px 10px;font-size:11px;font-weight:700;background:#7c3aed;color:#fff;border:none;border-radius:6px;cursor:pointer" title="Re-executa identificação de pagador nos extratos">🔎 Re-identificar</button>
       <button onclick="crReconciliar()" style="padding:6px 10px;font-size:11px;font-weight:700;background:#0ea5e9;color:#fff;border:none;border-radius:6px;cursor:pointer" title="Re-executa match NF↔extrato">🧮 Reconciliar</button>
-      <button onclick="crAbrirAliases()" style="padding:6px 10px;font-size:11px;font-weight:700;background:#f59e0b;color:#fff;border:none;border-radius:6px;cursor:pointer" title="Gerenciar apelidos de tomadores (várias unidades administrativas com CNPJs diferentes que pertencem ao mesmo contrato)">⚙️ Apelidos de tomadores <span data-uxhelp="pagador_alias"></span></button>
+      <button onclick="crAbrirAliases()" style="padding:6px 10px;font-size:11px;font-weight:700;background:#f59e0b;color:#fff;border:none;border-radius:6px;cursor:pointer" title="Gerenciar pagador_alias">⚙️ Aliases</button>
     </div>
   </div>
 
@@ -2361,7 +2340,7 @@
   <div class="kpis" id="cr-kpis" style="grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px"></div>
 
   <!-- Grupos por pagador -->
-  <div id="cr-grupos"><div class="muted" style="text-align:center;padding:40px"><span class="loading-dot" style="display:inline-block;width:14px;height:14px;border:2px solid #cbd5e1;border-top-color:#1d4ed8;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px"></span>Carregando conciliação IA…</div></div>
+  <div id="cr-grupos"><div class="muted" style="text-align:center;padding:40px">Clique em Atualizar para carregar</div></div>
 
   <!-- Modal sugestões (aparece ao clicar em extrato) -->
   <div id="cr-modal-sug" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:1000;align-items:center;justify-content:center;padding:20px">
@@ -3857,8 +3836,6 @@
 <script src="/app.js"></script>
 <script src="/app-extras.js"></script>
 <script src="/app-boletins.js"></script>
-<script src="/app-boletins-previa.js"></script>
-<script src="/app-boletins-aditivos.js"></script>
 <script src="/app-compras-supervisor.js"></script>
 <script src="/app-ia.js"></script>
 <script src="/app-bb.js"></script>
@@ -3870,9 +3847,5 @@
 <script src="/app-ciclo.js"></script>
 <script src="/app-caixa-livre.js"></script>
 <script src="/app-nf-modelos.js"></script>
-<!-- P1/P2 UX helpers: tooltips, histórico de toasts, custom confirm/alert, atalhos -->
-<script src="/app-ux-helpers.js"></script>
-<script src="/app-postos-equipe.js"></script>
-<script src="/app-postos-equipe.js"></script>
 </body>
 </html>

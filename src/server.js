@@ -168,9 +168,6 @@ app.get('/api/diagnostico/ultimo', (req, res) => {
 // ─── Módulo Usuários (gestão de acesso) ─────────────────────────
 app.use('/api/usuarios',     require('./routes/usuarios').router);
 
-// ─── Postos & Equipes (visão operacional) ───────────────────────
-app.use('/api/postos-equipe', require('./routes/postos-equipe'));
-
 // ─── Módulo Alertas WhatsApp ─────────────────────────────────────
 try {
   app.use('/api/whatsapp', require('./routes/whatsapp'));
@@ -270,7 +267,7 @@ try {
         }
         // Tentar enviar WhatsApp também
         try {
-          const wppCfg = await db.prepare("SELECT chave,valor FROM configuracoes WHERE chave LIKE 'whatsapp_%'").all();
+          const wppCfg = db.prepare("SELECT chave,valor FROM configuracoes WHERE chave LIKE 'whatsapp_%'").all();
           if (wppCfg.length > 0 && globalThis.fetch) {
             globalThis.fetch(`http://127.0.0.1:${PORT}/api/whatsapp/enviar-alertas`, {
               method: 'POST',
@@ -301,7 +298,7 @@ try {
       try {
         // Verifica se a empresa tem BB configurado antes de chamar
         const db  = getDb(key);
-        const cfg = (await db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'bb_%'`).all())
+        const cfg = db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'bb_%'`).all()
           .reduce((acc, r) => { acc[r.chave.replace('bb_', '')] = r.valor; return acc; }, {});
         if (!cfg.client_id || !cfg.client_secret || !cfg.app_key || !cfg.agencia || !cfg.conta) continue;
 

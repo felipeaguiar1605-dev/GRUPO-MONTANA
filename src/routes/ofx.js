@@ -7,11 +7,6 @@ const express = require('express');
 const multer  = require('multer');
 const companyMw = require('../companyMiddleware');
 
-// Validador semântico — pré-classifica lançamentos antes de inserir
-// Reduz volume de PENDENTE pós-importação em ~60%
-let ofxValidator = null;
-try { ofxValidator = require('../jobs/ofx-import-validator'); } catch(_) {}
-
 const router = express.Router();
 router.use(companyMw);
 
@@ -28,12 +23,12 @@ const upload = multer({
 });
 
 // ── Garante coluna ofx_fitid na tabela extratos ───────────────────
-async function ensureFitidColumn(db) {
+function ensureFitidColumn(db) {
   try {
-    await db.exec(`ALTER TABLE extratos ADD COLUMN ofx_fitid TEXT DEFAULT ''`);
+    db.exec(`ALTER TABLE extratos ADD COLUMN ofx_fitid TEXT DEFAULT ''`);
   } catch (_e) { /* coluna já existe */ }
   try {
-    await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_extratos_fitid ON extratos(ofx_fitid) WHERE ofx_fitid IS NOT NULL AND ofx_fitid != ''`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_extratos_fitid ON extratos(ofx_fitid) WHERE ofx_fitid IS NOT NULL AND ofx_fitid != ''`);
   } catch (_e) {}
 }
 
@@ -119,7 +114,7 @@ router.post('/importar', async (req, res) => {
 
     try {
       const db = req.db;
-      await ensureFitidColumn(db);
+      ensureFitidColumn(db);
 
       // Detectar encoding: OFX do BB costuma usar ISO-8859-1
       let texto;
@@ -142,81 +137,41 @@ router.post('/importar', async (req, res) => {
       const contaMatch = texto.match(/<ACCTID>\s*([^\r\n<]+)/i);
       const conta = contaMatch ? contaMatch[1].trim() : '';
 
-      const transacoesRaw = parsearOFX(texto);
-      if (transacoesRaw.length === 0) {
+      const transacoes = parsearOFX(texto);
+      if (transacoes.length === 0) {
         return res.status(422).json({ error: 'Nenhuma transação encontrada no arquivo OFX. Verifique o formato.' });
       }
 
-      // Pré-processa com validador semântico:
-      //   - inverte sinal de "Pix Recebido" em débito
-      //   - marca SALDO/INTRAGRUPO/PROGIRO/RETIRADA_SOCIO automaticamente
-      //   - alerta sobre duplicatas no batch
-      let transacoes = transacoesRaw;
-      let validatorWarnings = [];
-      let validatorStats = {};
-      if (ofxValidator) {
-        try {
-          const lancamentos = transacoesRaw.map(t => ({
-            data_iso: t.dataIso,
-            debito: t.debito || 0,
-            credito: t.credito || 0,
-            historico: t.historico,
-            conta // a mesma pra todos do batch
-          }));
-          const r = ofxValidator.preprocess(lancamentos);
-          validatorWarnings = r.warnings || [];
-          validatorStats = r.stats || {};
-          // mescla _auto_classificado + _suspect_duplicate de volta nas transações
-          transacoes = transacoesRaw.map((t, i) => ({
-            ...t,
-            credito: r.lancamentos[i].credito,
-            debito: r.lancamentos[i].debito,
-            historico: r.lancamentos[i].historico,
-            _auto_status: r.lancamentos[i].status_conciliacao || null,
-            _suspect_dup: r.lancamentos[i]._suspect_duplicate
-          }));
-        } catch (e) {
-          console.warn('[OFX] validator falhou:', e.message);
-        }
-      }
+      const stmtInsert = db.prepare(`
+        INSERT INTO extratos
+          (mes, data, data_iso, tipo, historico, debito, credito,
+           status_conciliacao, banco, conta, ofx_fitid,
+           created_at, updated_at)
+        VALUES
+          (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito,
+           'PENDENTE', @banco, @conta, @ofx_fitid,
+           NOW(), NOW())
+      `);
+
+      // Verifica quantas já existem (para contar duplicatas)
+      const checkFitid = db.prepare(`SELECT 1 FROM extratos WHERE ofx_fitid=? AND ofx_fitid!='' LIMIT 1`);
 
       let importados = 0;
       let duplicatas = 0;
-      let auto_classificados = 0;
 
-      // P0 fix (2026-04-30): stmts movidos para dentro da tx + await em todas
-      // as chamadas. ON CONFLICT DO NOTHING substituiu try/catch (que aborta
-      // a tx em PG por causa de UNIQUE).
-      const importarTudo = db.transaction(async (tx) => {
-        // Insert agora aceita @status_conciliacao (em vez de hardcode 'PENDENTE')
-        const stmtInsert = tx.prepare(`
-          INSERT INTO extratos
-            (mes, data, data_iso, tipo, historico, debito, credito,
-             status_conciliacao, banco, conta, ofx_fitid,
-             created_at, updated_at)
-          VALUES
-            (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito,
-             @status_conciliacao, @banco, @conta, @ofx_fitid,
-             NOW(), NOW())
-          ON CONFLICT DO NOTHING
-        `);
-        const checkFitid = tx.prepare(`SELECT 1 FROM extratos WHERE ofx_fitid=? AND ofx_fitid!='' LIMIT 1`);
-
+      const importarTudo = db.transaction(async () => {
         for (const t of transacoes) {
           // Verifica duplicata via fitid
-          const existe = await checkFitid.get(t.fitid);
+          const existe = checkFitid.get(t.fitid);
           if (existe) { duplicatas++; continue; }
 
           const mes  = derivarMes(t.dataIso);
+          // data no formato DD/MM/YYYY para compatibilidade com os extratos existentes
           const partes = t.dataIso.split('-');
           const data   = partes.length === 3 ? `${partes[2]}/${partes[1]}/${partes[0]}` : t.dataIso;
           const tipo   = t.credito ? 'C' : 'D';
 
-          // Status pré-classificado pelo validator (SALDO/INTRAGRUPO/PROGIRO/etc.) ou PENDENTE
-          const statusConc = t._auto_status || 'PENDENTE';
-          if (t._auto_status) auto_classificados++;
-
-          const r = await stmtInsert.run({
+          const r = stmtInsert.run({
             mes,
             data,
             data_iso: t.dataIso,
@@ -224,13 +179,12 @@ router.post('/importar', async (req, res) => {
             historico: t.historico,
             debito:    t.debito   ?? null,
             credito:   t.credito  ?? null,
-            status_conciliacao: statusConc,
             banco,
             conta,
             ofx_fitid: t.fitid
           });
 
-          if (r && r.changes > 0) importados++;
+          if (r.changes > 0) importados++;
           else duplicatas++;
         }
       });
@@ -249,14 +203,9 @@ router.post('/importar', async (req, res) => {
         ok: true,
         importados,
         duplicatas,
-        auto_classificados,
         total: transacoes.length,
         banco,
-        conta: conta || undefined,
-        validator: {
-          stats: validatorStats,
-          warnings: validatorWarnings
-        }
+        conta: conta || undefined
       });
 
     } catch (e) {

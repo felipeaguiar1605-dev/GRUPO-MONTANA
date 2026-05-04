@@ -163,31 +163,6 @@ router.get('/', async (req, res) => {
       }
     } catch (_) {}
 
-    // P0 fix (2026-04-30): aging_resumo era IIFE sync com db.prepare().get()
-    // que retorna Promise em PG. Calculado antes do payload com await.
-    let agingResumo = null;
-    try {
-      const hoje = new Date().toISOString().slice(0, 10);
-      const ano  = competencia.slice(0, 4);
-      agingResumo = await db.prepare(`
-        SELECT
-          COUNT(*) total_nfs,
-          COALESCE(SUM(valor_bruto), 0) total_valor,
-          COALESCE(SUM(CASE WHEN (?::date - data_emissao::date) <= 30
-                       THEN valor_bruto END), 0) val_0_30,
-          COALESCE(SUM(CASE WHEN (?::date - data_emissao::date) BETWEEN 31 AND 60
-                       THEN valor_bruto END), 0) val_31_60,
-          COALESCE(SUM(CASE WHEN (?::date - data_emissao::date) BETWEEN 61 AND 90
-                       THEN valor_bruto END), 0) val_61_90,
-          COALESCE(SUM(CASE WHEN (?::date - data_emissao::date) > 90
-                       THEN valor_bruto END), 0) val_90plus
-        FROM notas_fiscais
-        WHERE status_conciliacao = 'PENDENTE'
-          AND data_emissao >= ? || '-01-01'
-          AND data_emissao != ''
-      `).get(hoje, hoje, hoje, hoje, ano);
-    } catch (_) { agingResumo = null; }
-
     // ───────── MONTA PAYLOAD ─────────
     const payload = {
       empresa: req.company?.nome || req.companyKey,
@@ -242,7 +217,29 @@ router.get('/', async (req, res) => {
       },
 
       // Aging de recebíveis — NFs PENDENTE por faixa (ano corrente)
-      aging_resumo: agingResumo,
+      aging_resumo: (() => {
+        try {
+          const hoje = new Date().toISOString().slice(0, 10);
+          const ano  = competencia.slice(0, 4);
+          return db.prepare(`
+            SELECT
+              COUNT(*) total_nfs,
+              COALESCE(SUM(valor_bruto), 0) total_valor,
+              COALESCE(SUM(CASE WHEN (?::date - data_emissao::date) <= 30
+                           THEN valor_bruto END), 0) val_0_30,
+              COALESCE(SUM(CASE WHEN (?::date - data_emissao::date) BETWEEN 31 AND 60
+                           THEN valor_bruto END), 0) val_31_60,
+              COALESCE(SUM(CASE WHEN (?::date - data_emissao::date) BETWEEN 61 AND 90
+                           THEN valor_bruto END), 0) val_61_90,
+              COALESCE(SUM(CASE WHEN (?::date - data_emissao::date) > 90
+                           THEN valor_bruto END), 0) val_90plus
+            FROM notas_fiscais
+            WHERE status_conciliacao = 'PENDENTE'
+              AND data_emissao >= ? || '-01-01'
+              AND data_emissao != ''
+          `).get(hoje, hoje, hoje, hoje, ano);
+        } catch (_) { return null; }
+      })(),
     };
 
     res.json(payload);

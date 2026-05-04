@@ -1,8 +1,6 @@
 /**
  * Montana Multi-Empresa — Módulo de Boletins de Medição
  * CRUD de contratos, postos, itens + geração de PDFs
- *
- * P2 (2026-04-30): + endpoints de template, aditivos, prévia/aprovação/emissão
  */
 const express = require('express');
 const PDFDocument = require('pdfkit');
@@ -10,7 +8,6 @@ const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
 const companyMw = require('../companyMiddleware');
-const tplEngine = require('../lib/templateRenderer');
 
 const router = express.Router();
 router.use(companyMw);
@@ -41,11 +38,20 @@ router.use(async (req, res, next) => {
     try { await db.prepare(`ALTER TABLE bol_boletins ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
   }
 
-  // NOTA (2026-05): N boletins por (contrato, competência) é caso de uso
-  // legítimo (NFs complementares, aditivos, glosa retroativa). Anteriormente
-  // havia CREATE UNIQUE INDEX aqui — removido. _duplicatas e _dedup
-  // continuam disponíveis como ferramenta manual quando o usuário sabe
-  // que algum grupo é duplicata real.
+  // Garantia de unicidade (1 boletim por contrato/competência). Se já existem
+  // duplicatas, o CREATE UNIQUE INDEX falha com 23505 — logamos uma vez e
+  // seguimos. O usuário pode listar via GET /_duplicatas e mergear via
+  // POST /_dedup. Após a limpeza, esse próprio middleware aplica o índice
+  // na próxima request.
+  try {
+    await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bol_uniq_contrato_comp
+                      ON bol_boletins(contrato_id, competencia)`).run();
+  } catch (e) {
+    if (!global._warnedBolDup) {
+      console.warn('[boletins] UNIQUE(contrato_id, competencia) não pôde ser aplicado — provável duplicata existente. Use GET /api/boletins/_duplicatas + POST /api/boletins/_dedup. Detalhe:', e.message);
+      global._warnedBolDup = true;
+    }
+  }
 
   // Cenário 1: vínculo NF↔boletim. Garante coluna boletim_id em notas_fiscais
   // e índice. Idempotente. (também é garantido em /emitir-nfse e webiss.js)
@@ -169,13 +175,12 @@ router.post('/contratos', async (req, res) => {
 
 router.put('/contratos/:id', async (req, res) => {
   const b = req.body;
-  // P2 (2026-04-30): + template_discriminacao
+  // FIX2: inclui contrato_ref, orgao (CNPJ tomador), insc_municipal
   await req.db.prepare(`
     UPDATE bol_contratos SET nome=?, contratante=?, numero_contrato=?, processo=?, pregao=?,
       descricao_servico=?, escala=?, empresa_razao=?, empresa_cnpj=?, empresa_endereco=?,
       empresa_email=?, empresa_telefone=?,
       contrato_ref=?, orgao=?, insc_municipal=?,
-      template_discriminacao=?,
       updated_at=NOW()
     WHERE id=?
   `).run(
@@ -183,7 +188,6 @@ router.put('/contratos/:id', async (req, res) => {
     b.descricao_servico||'', b.escala||'12x36', b.empresa_razao||'',
     b.empresa_cnpj||'', b.empresa_endereco||'', b.empresa_email||'', b.empresa_telefone||'',
     b.contrato_ref||'', b.orgao||'', b.insc_municipal||'',
-    b.template_discriminacao||null,
     req.params.id
   );
   res.json({ ok: true });
@@ -459,6 +463,19 @@ router.post('/gerar', async (req, res) => {
     const contrato = await req.db.prepare('SELECT * FROM bol_contratos WHERE id = ?').get(contrato_id);
     if (!contrato) return res.status(404).json({ error: 'Contrato não encontrado' });
 
+    // Anti-duplicação: 1 boletim por (contrato, competência). Mantém paridade
+    // com /gerar-boletim que já fazia esse check. Antes esse endpoint criava
+    // boletins novos sem verificar — gerando duplicatas no DB.
+    const dupExist = await req.db.prepare(
+      'SELECT id FROM bol_boletins WHERE contrato_id = ? AND competencia = ?'
+    ).get(contrato_id, competencia);
+    if (dupExist) {
+      return res.status(409).json({
+        error: `Já existe boletim para esse contrato/competência (id=${dupExist.id}). Reabra/edite o existente em vez de gerar outro.`,
+        boletim_id: dupExist.id,
+      });
+    }
+
     const postos = await req.db.prepare('SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem').all(contrato_id);
     for (const p of postos) {
       p.itens = await req.db.prepare('SELECT * FROM bol_itens WHERE posto_id = ? ORDER BY ordem').all(p.id);
@@ -544,14 +561,9 @@ router.post('/gerar-boletim', async (req, res) => {
     }
     const db = req.db;
 
-    // Por padrão retorna o existente (evita duplicação acidental).
-    // Para criar deliberadamente um segundo boletim no mesmo (contrato, competência),
-    // passe { force_new: true } no body — caso de NF complementar, aditivo, etc.
-    const forceNew = req.body?.force_new === true;
-    if (!forceNew) {
-      const existente = await db.prepare('SELECT * FROM bol_boletins WHERE contrato_id=? AND competencia=? ORDER BY id DESC LIMIT 1').get(contrato_id, competencia);
-      if (existente) return res.json({ data: existente, novo: false });
-    }
+    // Verificar se já existe
+    const existente = await db.prepare('SELECT * FROM bol_boletins WHERE contrato_id=? AND competencia=?').get(contrato_id, competencia);
+    if (existente) return res.json({ data: existente, novo: false });
 
     // Buscar contrato de boletim para calcular valor base
     const bc = await db.prepare('SELECT * FROM bol_contratos WHERE id=?').get(contrato_id);
@@ -801,7 +813,7 @@ router.post('/:id/emitir-nfse', async (req, res) => {
               'PENDENTE',
               nfseNum,
               bol.discriminacao || '',
-              bol.id,
+              bol.id, // FIX: vincula a NF ao boletim que a originou (cenário 1)
           );
           console.log(`[boletins] Auto-sync NF ${nfseNum} → notas_fiscais (boletim_id=${bol.id})`);
         }
@@ -1643,7 +1655,7 @@ router.get('/painel-faturamento', async (req, res) => {
       const dupRow = await db.prepare(
         'SELECT COUNT(*)::int AS n FROM bol_boletins WHERE contrato_id = ? AND competencia = ?'
       ).get(bc.id, mes);
-      const dup_count = dupRow ? (dupRow.n - 1) : 0;
+      const dup_count = dupRow ? (dupRow.n - 1) : 0; // qtd duplicatas além do mostrado
 
       const [ano, mesNum] = mes.split('-');
       const mesNome = MESES_NOME_COMPLETO[parseInt(mesNum)] || mes;
@@ -1659,7 +1671,7 @@ router.get('/painel-faturamento', async (req, res) => {
         insc_municipal:    bc.insc_municipal || '',
         cnpj_tomador_contrato: bc.cnpj_tomador_contrato || '',
         mes_nome:          `${mesNome}/${ano}`,
-        dup_count,
+        dup_count, // qtd duplicatas além do exibido (frontend avisa se > 0)
         boletim: boletim ? {
           id:          boletim.id,
           status:      boletim.status,
@@ -2150,1123 +2162,6 @@ router.delete('/glosas/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ═════════════════════════════════════════════════════════════════════════════
-//   P2 (2026-04-30) — FLUXO PRÉVIA → APROVAÇÃO → EMISSÃO → BOLETIM FINAL
-// ═════════════════════════════════════════════════════════════════════════════
-
-// ─── TEMPLATE: preview de discriminação ───────────────────────────
-// GET /boletins/contratos/:id/template-preview?competencia=YYYY-MM&posto_id=N
-// Renderiza o template_discriminacao do contrato com contexto montado.
-router.get('/contratos/:id/template-preview', async (req, res) => {
-  try {
-    const contrato = await req.db.prepare('SELECT * FROM bol_contratos WHERE id = ?').get(req.params.id);
-    if (!contrato) return res.status(404).json({ error: 'Contrato não encontrado' });
-
-    const { competencia, posto_id, valor_total } = req.query;
-    if (!competencia) return res.status(400).json({ error: 'competencia (YYYY-MM) obrigatória' });
-
-    let posto = null;
-    if (posto_id) {
-      posto = await req.db.prepare('SELECT * FROM bol_postos WHERE id = ? AND contrato_id = ?')
-        .get(Number(posto_id), Number(req.params.id));
-    }
-
-    const template = contrato.template_discriminacao || tplEngine.sugerirTemplateDefault(contrato);
-    const ctx = tplEngine.buildContext({
-      contrato, posto, competencia,
-      valor_total: Number(valor_total || 0),
-    });
-    const renderizado = tplEngine.render(template, ctx);
-    const inspect = tplEngine.inspect(template);
-
-    res.json({
-      ok: true,
-      template,
-      template_default_sugerido: contrato.template_discriminacao ? null : tplEngine.sugerirTemplateDefault(contrato),
-      renderizado,
-      contexto: ctx,
-      variaveis_usadas: inspect.vars,
-      variaveis_desconhecidas: inspect.desconhecidas,
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// GET /boletins/templates/variaveis — lista todas variáveis disponíveis (helper UI)
-router.get('/templates/variaveis', async (req, res) => {
-  res.json({
-    variaveis: [
-      { var: '{COMPETENCIA}',       desc: 'YYYY-MM', exemplo: '2026-04' },
-      { var: '{MES_NOME}',          desc: 'Nome do mês em maiúsculo', exemplo: 'ABRIL' },
-      { var: '{ANO}',               desc: 'Ano com 4 dígitos', exemplo: '2026' },
-      { var: '{PERIODO_INICIO}',    desc: 'Primeiro dia do mês (ISO)', exemplo: '2026-04-01' },
-      { var: '{PERIODO_FIM}',       desc: 'Último dia do mês (ISO)', exemplo: '2026-04-30' },
-      { var: '{PERIODO_INICIO_BR}', desc: 'Primeiro dia (DD/MM/YYYY)', exemplo: '01/04/2026' },
-      { var: '{PERIODO_FIM_BR}',    desc: 'Último dia (DD/MM/YYYY)',    exemplo: '30/04/2026' },
-      { var: '{POSTO_NOME}',        desc: 'Nome do campus/posto',       exemplo: 'CAMPUS PALMAS' },
-      { var: '{POSTO_MUNICIPIO}',   desc: 'Município do posto',         exemplo: 'PALMAS/TO' },
-      { var: '{POSTO_DESCRICAO}',   desc: 'Descrição do serviço no posto', exemplo: 'Vigilância 12x36' },
-      { var: '{CONTRATO_NUMERO}',   desc: 'Número do contrato',         exemplo: '02/2024' },
-      { var: '{CONTRATO_NOME}',     desc: 'Nome do contrato no sistema', exemplo: 'DETRAN-TO Limpeza' },
-      { var: '{CONTRATANTE}',       desc: 'Razão social do tomador',    exemplo: 'DEPARTAMENTO ESTADUAL DE TRANSITO' },
-      { var: '{PROCESSO}',          desc: 'Número do processo',         exemplo: '23101.004080/2022-53' },
-      { var: '{PREGAO}',            desc: 'Número do pregão',           exemplo: '10/2022' },
-      { var: '{VALOR_TOTAL}',       desc: 'Valor total (formato 1234.56)', exemplo: '5039.00' },
-      { var: '{VALOR_TOTAL_BR}',    desc: 'Valor formatado BR (1.234,56)', exemplo: '5.039,00' },
-      { var: '{EMPRESA_RAZAO}',     desc: 'Razão social da emissora',   exemplo: 'MONTANA SEGURANÇA PRIVADA LTDA' },
-      { var: '{EMPRESA_CNPJ}',      desc: 'CNPJ da emissora',           exemplo: '19.200.109/0001-09' },
-    ],
-    sintaxe_fallback: '{VAR|fallback}',
-    sintaxe_fallback_exemplo: '{POSTO_DESCRICAO|VIGILÂNCIA}'
-  });
-});
-
-// ─── ADITIVOS — CRUD ──────────────────────────────────────────────
-
-// GET /boletins/aditivos?contrato_id=N
-router.get('/aditivos', async (req, res) => {
-  try {
-    const where = req.query.contrato_id ? 'WHERE contrato_id = ?' : '';
-    const params = req.query.contrato_id ? [Number(req.query.contrato_id)] : [];
-    const rows = await req.db.prepare(`
-      SELECT a.*, c.nome AS contrato_nome, c.numero_contrato
-      FROM bol_aditivos a
-      JOIN bol_contratos c ON c.id = a.contrato_id
-      ${where}
-      ORDER BY a.contrato_id, a.vigencia_de DESC
-    `).all(...params);
-    res.json({ ok: true, data: rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// GET /boletins/aditivos/:id
-router.get('/aditivos/:id', async (req, res) => {
-  try {
-    const r = await req.db.prepare('SELECT * FROM bol_aditivos WHERE id = ?').get(req.params.id);
-    if (!r) return res.status(404).json({ error: 'Aditivo não encontrado' });
-    res.json(r);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// POST /boletins/aditivos
-// Body: { contrato_id, tipo, data_assinatura, vigencia_de, vigencia_ate, fator, base_legal, observacao }
-router.post('/aditivos', async (req, res) => {
-  try {
-    const b = req.body || {};
-    if (!b.contrato_id) return res.status(400).json({ error: 'contrato_id obrigatório' });
-    if (!b.tipo)         return res.status(400).json({ error: 'tipo obrigatório (reajuste|prorrogacao|apostilamento|reequilibrio)' });
-    if (!b.vigencia_de)  return res.status(400).json({ error: 'vigencia_de obrigatória' });
-
-    const tipos = ['reajuste','prorrogacao','apostilamento','reequilibrio'];
-    if (!tipos.includes(b.tipo)) {
-      return res.status(400).json({ error: `tipo inválido. Use: ${tipos.join(', ')}` });
-    }
-
-    const fator = Number(b.fator || 1.0);
-    if (b.tipo === 'reajuste' && (fator <= 0 || fator > 5)) {
-      return res.status(400).json({ error: 'fator de reajuste suspeito (precisa estar entre 0 e 5, ex: 1.0825 para +8.25%)' });
-    }
-
-    const r = await req.db.prepare(`
-      INSERT INTO bol_aditivos
-        (contrato_id, tipo, data_assinatura, vigencia_de, vigencia_ate,
-         fator, base_legal, observacao, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'rascunho')
-    `).run(
-      Number(b.contrato_id), b.tipo,
-      b.data_assinatura || null,
-      b.vigencia_de, b.vigencia_ate || null,
-      fator,
-      b.base_legal || '', b.observacao || ''
-    );
-    res.json({ ok: true, id: r.lastInsertRowid, status: 'rascunho' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// PATCH /boletins/aditivos/:id
-router.patch('/aditivos/:id', async (req, res) => {
-  try {
-    const cur = await req.db.prepare('SELECT * FROM bol_aditivos WHERE id = ?').get(req.params.id);
-    if (!cur) return res.status(404).json({ error: 'Aditivo não encontrado' });
-    if (cur.status === 'aplicado') {
-      return res.status(409).json({ error: 'Aditivo já aplicado — não pode editar. Cadastre um aditivo de reequilíbrio para corrigir.' });
-    }
-
-    const b = req.body || {};
-    await req.db.prepare(`
-      UPDATE bol_aditivos SET
-        tipo            = COALESCE(?, tipo),
-        data_assinatura = COALESCE(?, data_assinatura),
-        vigencia_de     = COALESCE(?, vigencia_de),
-        vigencia_ate    = COALESCE(?, vigencia_ate),
-        fator           = COALESCE(?, fator),
-        base_legal      = COALESCE(?, base_legal),
-        observacao      = COALESCE(?, observacao),
-        updated_at      = NOW()
-      WHERE id = ?
-    `).run(
-      b.tipo || null, b.data_assinatura || null, b.vigencia_de || null,
-      b.vigencia_ate || null, b.fator !== undefined ? Number(b.fator) : null,
-      b.base_legal || null, b.observacao || null,
-      req.params.id
-    );
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// PATCH /boletins/aditivos/:id/validar — humano confere e valida (Q3 semi-automático)
-router.patch('/aditivos/:id/validar', async (req, res) => {
-  try {
-    const cur = await req.db.prepare('SELECT * FROM bol_aditivos WHERE id = ?').get(req.params.id);
-    if (!cur) return res.status(404).json({ error: 'Aditivo não encontrado' });
-    if (cur.status !== 'rascunho') {
-      return res.status(409).json({ error: `aditivo já está ${cur.status}` });
-    }
-
-    const usuario = req.user?.usuario || 'sistema';
-    await req.db.prepare(`
-      UPDATE bol_aditivos
-      SET status = 'validado', validado_por = ?, validado_em = NOW(), updated_at = NOW()
-      WHERE id = ?
-    `).run(usuario, req.params.id);
-
-    res.json({ ok: true, status: 'validado' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// PATCH /boletins/aditivos/:id/cancelar
-// Body: { motivo: 'descrição do motivo' } — P0-7 fix: obrigatório pra audit
-router.patch('/aditivos/:id/cancelar', async (req, res) => {
-  try {
-    const motivo = (req.body?.motivo || '').trim();
-    if (!motivo || motivo.length < 5) {
-      return res.status(400).json({ error: 'Motivo obrigatório (mínimo 5 caracteres) para audit.' });
-    }
-    const cur = await req.db.prepare('SELECT * FROM bol_aditivos WHERE id = ?').get(req.params.id);
-    if (!cur) return res.status(404).json({ error: 'Aditivo não encontrado' });
-    const usuario = req.user?.usuario || 'sistema';
-    const carimbo = `[${new Date().toISOString().slice(0,16)} ${usuario}] CANCELADO: ${motivo}`;
-    await req.db.prepare(`
-      UPDATE bol_aditivos SET
-        status = 'cancelado',
-        observacao = CASE WHEN observacao IS NULL OR observacao = '' THEN ? ELSE observacao || E'\\n' || ? END,
-        updated_at = NOW()
-      WHERE id = ?
-    `).run(carimbo, carimbo, req.params.id);
-    res.json({ ok: true, status: 'cancelado', motivo_registrado: motivo });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// DELETE /boletins/aditivos/:id (apenas rascunho)
-router.delete('/aditivos/:id', async (req, res) => {
-  try {
-    const cur = await req.db.prepare('SELECT status FROM bol_aditivos WHERE id = ?').get(req.params.id);
-    if (!cur) return res.status(404).json({ error: 'Aditivo não encontrado' });
-    if (cur.status !== 'rascunho') {
-      return res.status(409).json({ error: 'Só é permitido excluir aditivos em rascunho. Use cancelar para os outros estados.' });
-    }
-    await req.db.prepare('DELETE FROM bol_aditivos WHERE id = ?').run(req.params.id);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// GET /boletins/aditivos/:id/preview-impacto?competencia=YYYY-MM
-// Mostra qual seria o impacto do aditivo na próxima prévia
-router.get('/aditivos/:id/preview-impacto', async (req, res) => {
-  try {
-    const adit = await req.db.prepare(`
-      SELECT a.*, c.nome AS contrato_nome, c.numero_contrato
-      FROM bol_aditivos a
-      JOIN bol_contratos c ON c.id = a.contrato_id
-      WHERE a.id = ?
-    `).get(req.params.id);
-    if (!adit) return res.status(404).json({ error: 'Aditivo não encontrado' });
-
-    const comp = req.query.competencia || new Date().toISOString().slice(0,7);
-
-    // Pega último boletim do contrato pra projetar valor
-    const refBoletim = await req.db.prepare(`
-      SELECT competencia, total_geral FROM bol_boletins
-      WHERE contrato_id = ? ORDER BY competencia DESC LIMIT 1
-    `).get(adit.contrato_id);
-
-    const fator = Number(adit.fator || 1.0);
-    const valorBase = Number(refBoletim?.total_geral || 0);
-    const valorAjustado = adit.tipo === 'reajuste' ? valorBase * fator : valorBase;
-
-    res.json({
-      ok: true,
-      aditivo: adit,
-      preview: {
-        competencia: comp,
-        valor_base_referencia: valorBase,
-        ref_boletim_competencia: refBoletim?.competencia,
-        fator_aplicado: fator,
-        valor_apos_aditivo: valorAjustado,
-        diferenca: valorAjustado - valorBase,
-        diferenca_pct: valorBase > 0 ? +((valorAjustado - valorBase) / valorBase * 100).toFixed(2) : 0,
-      },
-      observacao: adit.tipo === 'reajuste'
-        ? `Reajuste de ${((fator - 1) * 100).toFixed(2)}% será aplicado à próxima prévia em ${comp}`
-        : `Aditivo do tipo ${adit.tipo} não altera valor diretamente (verifique itens)`
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ─── PRÉVIA — gera/atualiza boletim em estado 'previa' ─────────────
-// POST /boletins/previa
-// Body: { competencia: 'YYYY-MM', empresa?: 'seguranca' (opcional, usa req.companyKey),
-//         contrato_id?: N (filtra um contrato), apply: false (default dry-run) }
-//
-// Lógica:
-//   1. Para cada bol_contrato ATIVO (ou só o filtrado):
-//      a. Para cada bol_posto do contrato (ou linha única se sem posto):
-//         - Calcula valor base via SUM(bol_itens) ou fallback SUM(NFs)
-//         - Aplica aditivos validados/aplicados (fator multiplicativo)
-//         - Renderiza template_discriminacao (ou default sugerido)
-//      b. UPSERT em bol_boletins (contrato_id, posto_id, competencia)
-//         status='previa', expira_em=+7 d.u.
-//      c. Cria/atualiza linhas em bol_boletins_nfs_planejadas
-//
-// Retorna: { previas: [...], total_geral, total_nfs_planejadas }
-router.post('/previa', async (req, res) => {
-  try {
-    const { competencia, contrato_id, apply = false } = req.body || {};
-    if (!competencia || !/^\d{4}-\d{2}$/.test(competencia)) {
-      return res.status(400).json({ error: 'competencia (YYYY-MM) obrigatória' });
-    }
-
-    const db = req.db;
-    const usuario = req.user?.usuario || 'sistema';
-
-    // Calcular expiração: hoje + 7 dias úteis (pula sáb/dom)
-    function add7Du() {
-      const d = new Date();
-      let added = 0;
-      while (added < 7) {
-        d.setDate(d.getDate() + 1);
-        const dow = d.getDay();
-        if (dow !== 0 && dow !== 6) added++;
-      }
-      return d.toISOString().slice(0, 10);
-    }
-    const expiraEm = add7Du();
-
-    // Período ISO
-    const { inicio: periodoInicio, fim: periodoFim } = tplEngine.periodoDoMes(competencia);
-
-    // Buscar contratos ativos
-    let contratos;
-    if (contrato_id) {
-      contratos = await db.prepare('SELECT * FROM bol_contratos WHERE id = ? AND ativo = 1').all(Number(contrato_id));
-    } else {
-      contratos = await db.prepare('SELECT * FROM bol_contratos WHERE ativo = 1 ORDER BY id').all();
-    }
-
-    const previas = [];
-    let totalNfsPlanejadas = 0;
-
-    for (const c of contratos) {
-      // Pega postos do contrato
-      const postos = await db.prepare('SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem, id').all(c.id);
-      // Se não tem posto cadastrado, gera 1 boletim consolidado (posto_id=NULL)
-      const linhas = postos.length > 0 ? postos : [null];
-
-      for (const posto of linhas) {
-        // Calcular valor base
-        let valorBase = 0;
-        let origemValor = 'sem_ref';
-        let qtdNfs = 0;
-
-        if (posto) {
-          // Soma dos itens do posto (quando há cadastro estruturado)
-          const sumItens = await db.prepare(`
-            SELECT COALESCE(SUM(quantidade * valor_unitario), 0) AS total, COUNT(*) AS qtd
-            FROM bol_itens WHERE posto_id = ?
-          `).get(posto.id);
-          if (sumItens && Number(sumItens.total) > 0) {
-            valorBase = Number(sumItens.total);
-            origemValor = `sum_itens(${sumItens.qtd})`;
-          }
-        }
-
-        // Fallback: SUM das NFs do mês alvo via numero_contrato
-        if (!valorBase && c.numero_contrato && c.numero_contrato !== 'undefined') {
-          const sumNfs = await db.prepare(`
-            SELECT COALESCE(SUM(valor_bruto), 0) AS total, COUNT(*) AS qtd
-            FROM notas_fiscais
-            WHERE contrato_ref ILIKE @pat AND data_emissao LIKE @ym
-              AND COALESCE(status_conciliacao, '') NOT IN ('CANCELADA')
-          `).get({ pat: `%${c.numero_contrato}%`, ym: `${competencia}-%` });
-          if (sumNfs && Number(sumNfs.total) > 0) {
-            valorBase = Number(sumNfs.total);
-            origemValor = `sum_nfs(${sumNfs.qtd})`;
-            qtdNfs = sumNfs.qtd;
-          }
-        }
-
-        // Aplica aditivos
-        const aditResult = await aplicarAditivos(db, c.id, competencia, valorBase);
-        const valorFinal = aditResult.valor_final;
-
-        // Renderiza template
-        const template = c.template_discriminacao || tplEngine.sugerirTemplateDefault(c);
-        const ctx = tplEngine.buildContext({
-          contrato: c, posto, competencia, valor_total: valorFinal,
-        });
-        const discriminacaoRender = tplEngine.render(template, ctx);
-
-        previas.push({
-          contrato_id: c.id,
-          contrato_numero: c.numero_contrato,
-          contrato_nome: c.nome,
-          posto_id: posto?.id || null,
-          posto_nome: posto?.campus_nome || null,
-          posto_municipio: posto?.municipio || null,
-          competencia,
-          periodo_inicio: periodoInicio,
-          periodo_fim: periodoFim,
-          valor_base: valorBase,
-          origem_valor: origemValor,
-          qtd_nfs_referencia: qtdNfs,
-          aditivos_aplicados: aditResult.aditivos_aplicados,
-          valor_final: valorFinal,
-          template_renderizado: discriminacaoRender,
-          template_origem: c.template_discriminacao ? 'cadastrado' : 'default_sugerido',
-          expira_em: expiraEm,
-        });
-      }
-    }
-
-    if (!apply) {
-      return res.json({
-        ok: true,
-        modo: 'dry-run',
-        competencia,
-        total_previas: previas.length,
-        previas,
-      });
-    }
-
-    // APPLY: UPSERT em bol_boletins + NFs planejadas
-    let criados = 0, atualizados = 0;
-    const trans = db.transaction(async (tx) => {
-      const upsertBoletim = tx.prepare(`
-        INSERT INTO bol_boletins
-          (contrato_id, posto_id, competencia, data_emissao, periodo_inicio, periodo_fim,
-           status, total_geral, valor_base, glosas, acrescimos, nfse_status,
-           expira_em, template_renderizado)
-        VALUES
-          (@cid, @pid, @comp, @demit, @ini, @fim, 'previa', @tot, 0, 0, 0, 'PENDENTE',
-           @exp, @tpl)
-        ON CONFLICT (contrato_id, COALESCE(posto_id, 0), competencia) DO UPDATE SET
-          total_geral          = EXCLUDED.total_geral,
-          template_renderizado = EXCLUDED.template_renderizado,
-          expira_em            = EXCLUDED.expira_em,
-          status               = CASE WHEN bol_boletins.status IN ('previa', 'gerado', 'sem_nf') THEN 'previa' ELSE bol_boletins.status END,
-          updated_at           = NOW()
-        RETURNING id, (xmax = 0) AS inserted
-      `);
-      const insertNfPlanejada = tx.prepare(`
-        INSERT INTO bol_boletins_nfs_planejadas
-          (boletim_id, ordem, posto_id, descricao_template, valor, status)
-        VALUES (?, 1, ?, ?, ?, 'pendente')
-        ON CONFLICT DO NOTHING
-      `);
-      for (const p of previas) {
-        const r = await upsertBoletim.run({
-          cid: p.contrato_id, pid: p.posto_id, comp: p.competencia,
-          demit: p.periodo_fim, ini: p.periodo_inicio, fim: p.periodo_fim,
-          tot: p.valor_final, exp: p.expira_em, tpl: p.template_renderizado,
-        });
-        const boletimId = r.lastInsertRowid;
-        if (boletimId) {
-          // Garante 1 NF planejada por boletim (modelo 1:1 boletim:NF para DETRAN/UFT)
-          // Se já existia e tem nfse_numero, não toca (preserva)
-          const existing = await tx.prepare(`
-            SELECT id, nfse_numero FROM bol_boletins_nfs_planejadas
-            WHERE boletim_id = ? ORDER BY ordem LIMIT 1
-          `).get(boletimId);
-          if (!existing) {
-            await insertNfPlanejada.run(boletimId, p.posto_id, p.template_renderizado, p.valor_final);
-            totalNfsPlanejadas++;
-          } else if (!existing.nfse_numero) {
-            // Atualiza valor + descrição se ainda não emitiu
-            await tx.prepare(`
-              UPDATE bol_boletins_nfs_planejadas
-              SET valor = ?, descricao_template = ?, updated_at = NOW()
-              WHERE id = ?
-            `).run(p.valor_final, p.template_renderizado, existing.id);
-          }
-          if (r.changes > 0) criados++; else atualizados++;
-        }
-      }
-    });
-    await trans();
-
-    res.json({
-      ok: true,
-      modo: 'apply',
-      competencia,
-      criados,
-      atualizados,
-      total_previas: previas.length,
-      total_nfs_planejadas: totalNfsPlanejadas,
-      expira_em: expiraEm,
-    });
-  } catch (e) {
-    console.error('[POST /boletins/previa] erro:', e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── PRÉVIAS — listar / aprovar / cancelar ─────────────────────────
-
-// GET /boletins/previas?competencia=YYYY-MM&status=previa,aprovado
-// Lista boletins com NFs planejadas, filtrável por status (suporta CSV)
-router.get('/previas', async (req, res) => {
-  try {
-    const { competencia, status, contrato_id } = req.query;
-    const where = ['1=1'];
-    const params = [];
-    if (competencia) { where.push('bb.competencia = ?'); params.push(competencia); }
-    if (status) {
-      const list = String(status).split(',').map(s => s.trim()).filter(Boolean);
-      where.push(`bb.status IN (${list.map(() => '?').join(',')})`);
-      params.push(...list);
-    }
-    if (contrato_id) { where.push('bb.contrato_id = ?'); params.push(Number(contrato_id)); }
-
-    const rows = await req.db.prepare(`
-      SELECT bb.*, bc.nome AS contrato_nome, bc.numero_contrato,
-             bp.campus_nome AS posto_nome, bp.municipio AS posto_municipio
-      FROM bol_boletins bb
-      JOIN bol_contratos bc ON bc.id = bb.contrato_id
-      LEFT JOIN bol_postos bp ON bp.id = bb.posto_id
-      WHERE ${where.join(' AND ')}
-      ORDER BY bb.competencia DESC, bc.nome, bp.ordem NULLS FIRST
-    `).all(...params);
-
-    // Anexa NFs planejadas
-    for (const r of rows) {
-      r.nfs_planejadas = await req.db.prepare(`
-        SELECT * FROM bol_boletins_nfs_planejadas WHERE boletim_id = ? ORDER BY ordem, id
-      `).all(r.id);
-    }
-
-    res.json({ ok: true, total: rows.length, data: rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// PATCH /boletins/:id/aprovar — financeiro aprova prévia para emissão
-// Body opcional: { observacao }
-router.patch('/:id([0-9]+)/aprovar', async (req, res) => {
-  try {
-    const cur = await req.db.prepare(`
-      SELECT bb.*, bc.nome AS contrato_nome FROM bol_boletins bb
-      JOIN bol_contratos bc ON bc.id = bb.contrato_id
-      WHERE bb.id = ?
-    `).get(req.params.id);
-    if (!cur) return res.status(404).json({ error: 'Boletim não encontrado' });
-
-    if (cur.status !== 'previa') {
-      return res.status(409).json({
-        error: `Boletim está com status '${cur.status}'. Só prévias podem ser aprovadas.`
-      });
-    }
-    if (cur.expira_em && new Date(cur.expira_em) < new Date()) {
-      return res.status(409).json({
-        error: `Prévia expirada em ${cur.expira_em}. Gere uma nova prévia.`
-      });
-    }
-    if (Number(cur.total_geral || 0) <= 0) {
-      return res.status(409).json({
-        error: 'Não é possível aprovar prévia com valor zero. Verifique itens, NFs ou aditivos.'
-      });
-    }
-
-    // Permissão: role 'financeiro' ou 'admin'
-    const role = req.user?.role;
-    if (role && !['financeiro', 'admin'].includes(role)) {
-      return res.status(403).json({ error: 'Apenas usuários financeiro ou admin podem aprovar prévias.' });
-    }
-    const usuario = req.user?.usuario || 'sistema';
-
-    await req.db.prepare(`
-      UPDATE bol_boletins
-      SET status = 'aprovado_para_emissao',
-          aprovado_por = ?,
-          aprovado_em = NOW(),
-          updated_at = NOW()
-      WHERE id = ?
-    `).run(usuario, req.params.id);
-
-    // Marca aditivos do contrato como 'aplicado' (Q3 fluxo semi-automático)
-    await req.db.prepare(`
-      UPDATE bol_aditivos SET status = 'aplicado', updated_at = NOW()
-      WHERE contrato_id = ? AND status = 'validado'
-        AND vigencia_de <= ? AND (vigencia_ate IS NULL OR vigencia_ate >= ?)
-    `).run(Number(cur.contrato_id), cur.periodo_inicio, cur.periodo_inicio);
-
-    res.json({
-      ok: true,
-      id: Number(req.params.id),
-      novo_status: 'aprovado_para_emissao',
-      aprovado_por: usuario,
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// POST /boletins/aprovar-em-lote
-// Body: { ids: [1,2,3...], motivo?: '' }
-// Aprova múltiplos boletins em prévia em uma única transação.
-// P0-1 fix UX: bulk action — antes era 1 clique por boletim (134 cliques pra 67 boletins).
-router.post('/aprovar-em-lote', async (req, res) => {
-  try {
-    const { ids, motivo } = req.body || {};
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ error: 'ids (array) obrigatório' });
-    }
-    const role = req.user?.role;
-    if (role && !['financeiro', 'admin'].includes(role)) {
-      return res.status(403).json({ error: 'Apenas financeiro ou admin podem aprovar prévias.' });
-    }
-    const usuario = req.user?.usuario || 'sistema';
-
-    const resultados = { aprovados: 0, ignorados: 0, erros: [] };
-    const trans = req.db.transaction(async (tx) => {
-      for (const id of ids) {
-        const cur = await tx.prepare('SELECT * FROM bol_boletins WHERE id = ?').get(Number(id));
-        if (!cur) {
-          resultados.erros.push({ id, motivo: 'não encontrado' });
-          continue;
-        }
-        if (cur.status !== 'previa') {
-          resultados.ignorados++;
-          continue;
-        }
-        if (cur.expira_em && new Date(cur.expira_em) < new Date()) {
-          resultados.erros.push({ id, motivo: `expirada em ${cur.expira_em}` });
-          continue;
-        }
-        if (Number(cur.total_geral || 0) <= 0) {
-          resultados.erros.push({ id, motivo: 'valor zero' });
-          continue;
-        }
-        await tx.prepare(`
-          UPDATE bol_boletins
-          SET status = 'aprovado_para_emissao',
-              aprovado_por = ?, aprovado_em = NOW(),
-              obs = COALESCE(NULLIF(?, ''), obs),
-              updated_at = NOW()
-          WHERE id = ?
-        `).run(usuario, motivo || '', Number(id));
-        // Marca aditivos validados como aplicados
-        await tx.prepare(`
-          UPDATE bol_aditivos SET status = 'aplicado', updated_at = NOW()
-          WHERE contrato_id = ? AND status = 'validado'
-            AND vigencia_de <= ? AND (vigencia_ate IS NULL OR vigencia_ate >= ?)
-        `).run(Number(cur.contrato_id), cur.periodo_inicio, cur.periodo_inicio);
-        resultados.aprovados++;
-      }
-    });
-    await trans();
-
-    res.json({ ok: true, ...resultados, total_processados: ids.length });
-  } catch (e) {
-    console.error('[POST /boletins/aprovar-em-lote] erro:', e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// POST /boletins/emitir-lote
-// Body: { ids: [1,2,3...] }
-// Dispara emissão de múltiplos boletins em sequência (não paralelo, pra
-// não sobrecarregar WebISS). Cada job individual é registrado em _emissaoJobs.
-// Retorna { jobs: [{id, total_nfs}], sse_url_geral: '...' }
-router.post('/emitir-lote', async (req, res) => {
-  try {
-    const { ids } = req.body || {};
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ error: 'ids (array) obrigatório' });
-    }
-    const role = req.user?.role;
-    if (role && !['financeiro', 'admin'].includes(role)) {
-      return res.status(403).json({ error: 'Apenas financeiro ou admin podem emitir.' });
-    }
-    const usuario = req.user?.usuario || 'sistema';
-
-    // Valida cada um
-    const aceitos = [];
-    const recusados = [];
-    for (const id of ids) {
-      const cur = await req.db.prepare('SELECT id, status FROM bol_boletins WHERE id = ?').get(Number(id));
-      if (!cur) { recusados.push({ id, motivo: 'não encontrado' }); continue; }
-      if (cur.status !== 'aprovado_para_emissao') { recusados.push({ id, motivo: `status ${cur.status}` }); continue; }
-      if (_emissaoJobs.has(Number(id))) { recusados.push({ id, motivo: 'emissão já em andamento' }); continue; }
-      aceitos.push(Number(id));
-    }
-
-    if (aceitos.length === 0) {
-      return res.status(409).json({ error: 'Nenhum boletim apto pra emissão', recusados });
-    }
-
-    // Pra cada aceito, dispara processarEmissao em sequência (sem paralelismo,
-    // pra não sobrecarregar WebISS). O usuário acompanha por boletim individual.
-    const dbRef = req.db;
-    const companyKey = req.companyKey;
-
-    // Marca todos como 'emitindo' e enfileira
-    for (const id of aceitos) {
-      const nfs = await dbRef.prepare(`
-        SELECT * FROM bol_boletins_nfs_planejadas
-        WHERE boletim_id = ? AND status = 'pendente'
-        ORDER BY ordem, id
-      `).all(id);
-      if (nfs.length === 0) continue;
-      _emissaoJobs.set(id, {
-        listeners: new Set(), started_at: new Date(), by: usuario,
-        total: nfs.length, processed: 0, sucesso: 0, erros: 0,
-      });
-      await dbRef.prepare(`UPDATE bol_boletins SET status = 'emitindo', updated_at = NOW() WHERE id = ?`).run(id);
-
-      // Dispara em background (cada boletim independente — o WebISS não suporta paralelismo
-      // efetivo por causa de mTLS + fila interna deles)
-      setImmediate(() => processarEmissao(dbRef, companyKey, id, nfs, usuario)
-        .catch(err => {
-          console.error(`[boletins/emitir-lote job=${id}] erro fatal:`, err.message);
-          _emissaoEmit(id, { type: 'fatal', erro: err.message });
-        }));
-    }
-
-    res.json({
-      ok: true,
-      total_aceitos: aceitos.length,
-      total_recusados: recusados.length,
-      aceitos,
-      recusados,
-      sse_urls: aceitos.map(id => `/api/boletins/${id}/emissao-status`),
-    });
-  } catch (e) {
-    console.error('[POST /boletins/emitir-lote] erro:', e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// PATCH /boletins/:id/cancelar-previa — desfaz prévia (volta a 'cancelado')
-// Body: { motivo: 'descrição do motivo' } — P0-7 fix: obrigatório pra audit fiscal
-router.patch('/:id([0-9]+)/cancelar-previa', async (req, res) => {
-  try {
-    const motivo = (req.body?.motivo || '').trim();
-    if (!motivo || motivo.length < 5) {
-      return res.status(400).json({ error: 'Motivo obrigatório (mínimo 5 caracteres) para audit fiscal.' });
-    }
-
-    const cur = await req.db.prepare('SELECT * FROM bol_boletins WHERE id = ?').get(req.params.id);
-    if (!cur) return res.status(404).json({ error: 'Boletim não encontrado' });
-    if (!['previa', 'aprovado_para_emissao'].includes(cur.status)) {
-      return res.status(409).json({ error: `Não pode cancelar prévia em status '${cur.status}'` });
-    }
-    // Se já tem NF emitida em algum item planejado, bloqueia
-    const temEmitida = await req.db.prepare(`
-      SELECT COUNT(*) AS n FROM bol_boletins_nfs_planejadas
-      WHERE boletim_id = ? AND status = 'emitida'
-    `).get(req.params.id);
-    if (temEmitida.n > 0) {
-      return res.status(409).json({
-        error: `Boletim tem ${temEmitida.n} NF(s) já emitidas. Cancele as NFs no WebISS antes.`
-      });
-    }
-
-    const usuario = req.user?.usuario || 'sistema';
-    const carimbo = `[${new Date().toISOString().slice(0,16)} ${usuario}] ${motivo}`;
-
-    await req.db.prepare(`
-      UPDATE bol_boletins SET
-        status = 'cancelado',
-        obs = CASE WHEN obs IS NULL OR obs = '' THEN ? ELSE obs || E'\\n' || ? END,
-        updated_at = NOW()
-      WHERE id = ?
-    `).run(carimbo, carimbo, req.params.id);
-    res.json({ ok: true, novo_status: 'cancelado', motivo_registrado: motivo });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// PATCH /boletins/nfs-planejadas/:id — edita override Q7 antes da emissão
-// Body: { descricao_override?, valor? }
-router.patch('/nfs-planejadas/:id([0-9]+)', async (req, res) => {
-  try {
-    const cur = await req.db.prepare(`
-      SELECT np.*, bb.status AS boletim_status FROM bol_boletins_nfs_planejadas np
-      JOIN bol_boletins bb ON bb.id = np.boletim_id
-      WHERE np.id = ?
-    `).get(req.params.id);
-    if (!cur) return res.status(404).json({ error: 'NF planejada não encontrada' });
-
-    if (cur.status === 'emitida') {
-      return res.status(409).json({ error: 'NF já emitida, não pode mais ser editada' });
-    }
-    if (!['previa', 'aprovado_para_emissao'].includes(cur.boletim_status)) {
-      return res.status(409).json({ error: `Boletim está '${cur.boletim_status}', não permite edição` });
-    }
-
-    const b = req.body || {};
-    await req.db.prepare(`
-      UPDATE bol_boletins_nfs_planejadas SET
-        descricao_override = COALESCE(?, descricao_override),
-        valor              = COALESCE(?, valor),
-        updated_at         = NOW()
-      WHERE id = ?
-    `).run(
-      b.descricao_override !== undefined ? b.descricao_override : null,
-      b.valor !== undefined ? Number(b.valor) : null,
-      req.params.id
-    );
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// DELETE /boletins/nfs-planejadas/:id — exclui uma NF da prévia (antes de aprovar)
-router.delete('/nfs-planejadas/:id([0-9]+)', async (req, res) => {
-  try {
-    const cur = await req.db.prepare(`
-      SELECT np.status, bb.status AS boletim_status
-      FROM bol_boletins_nfs_planejadas np
-      JOIN bol_boletins bb ON bb.id = np.boletim_id
-      WHERE np.id = ?
-    `).get(req.params.id);
-    if (!cur) return res.status(404).json({ error: 'NF planejada não encontrada' });
-    if (cur.status === 'emitida') return res.status(409).json({ error: 'NF já emitida, não pode ser removida' });
-    if (cur.boletim_status === 'aprovado_para_emissao') {
-      return res.status(409).json({ error: 'Boletim já aprovado, não permite remover NFs. Cancele a prévia primeiro.' });
-    }
-    await req.db.prepare('DELETE FROM bol_boletins_nfs_planejadas WHERE id = ?').run(req.params.id);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ─── EMISSÃO ASSÍNCRONA NFS-e (Fase 5) ─────────────────────────────
-// Modelo: cliente faz POST → resposta imediata com job_id, depois
-//         conecta em GET /:id/emissao-status (SSE) para acompanhar.
-
-// Estado in-memory dos jobs de emissão (vive por execução do node).
-// Se pm2 reiniciar, jobs ativos perdem state — clientes reconectam e
-// veem status final lido do banco (bol_boletins_nfs_planejadas.status).
-const _emissaoJobs = new Map(); // boletim_id → { listeners: Set<res>, started_at, by }
-
-function _emissaoEmit(boletimId, evt) {
-  const job = _emissaoJobs.get(boletimId);
-  if (!job) return;
-  const payload = `event: ${evt.type}\ndata: ${JSON.stringify(evt)}\n\n`;
-  for (const res of job.listeners) {
-    try { res.write(payload); } catch (_) {}
-  }
-}
-
-// POST /boletins/:id/emitir-nfs — dispara emissão em background
-// Body opcional: { force_retry: false } (re-tenta NFs com status 'erro')
-router.post('/:id([0-9]+)/emitir-nfs', async (req, res) => {
-  try {
-    const boletimId = Number(req.params.id);
-    const cur = await req.db.prepare(`
-      SELECT bb.*, bc.nome AS contrato_nome, bc.numero_contrato
-      FROM bol_boletins bb
-      JOIN bol_contratos bc ON bc.id = bb.contrato_id
-      WHERE bb.id = ?
-    `).get(boletimId);
-    if (!cur) return res.status(404).json({ error: 'Boletim não encontrado' });
-
-    if (cur.status !== 'aprovado_para_emissao') {
-      return res.status(409).json({
-        error: `Boletim está '${cur.status}'. Apenas 'aprovado_para_emissao' pode emitir.`
-      });
-    }
-
-    if (_emissaoJobs.has(boletimId)) {
-      return res.status(409).json({ error: 'Emissão já em andamento para este boletim. Use o endpoint de status.' });
-    }
-
-    const forceRetry = !!(req.body && req.body.force_retry);
-    const where = forceRetry ? `status IN ('pendente', 'erro')` : `status = 'pendente'`;
-    const nfsParaEmitir = await req.db.prepare(`
-      SELECT * FROM bol_boletins_nfs_planejadas
-      WHERE boletim_id = ? AND ${where}
-      ORDER BY ordem, id
-    `).all(boletimId);
-
-    if (nfsParaEmitir.length === 0) {
-      return res.status(409).json({ error: 'Nenhuma NF pendente para emitir neste boletim.' });
-    }
-
-    const usuario = req.user?.usuario || 'sistema';
-    _emissaoJobs.set(boletimId, {
-      listeners: new Set(),
-      started_at: new Date(),
-      by: usuario,
-      total: nfsParaEmitir.length,
-      processed: 0,
-      sucesso: 0,
-      erros: 0,
-    });
-
-    // Marca status do boletim
-    await req.db.prepare(`UPDATE bol_boletins SET status = 'emitindo', updated_at = NOW() WHERE id = ?`).run(boletimId);
-
-    // Resposta imediata
-    res.json({
-      ok: true,
-      job_id: boletimId,
-      total_nfs: nfsParaEmitir.length,
-      sse_url: `/api/boletins/${boletimId}/emissao-status`,
-    });
-
-    // Processa em background (não bloqueia resposta)
-    setImmediate(() => processarEmissao(req.db, req.companyKey, boletimId, nfsParaEmitir, usuario)
-      .catch(err => {
-        console.error(`[boletins/emitir-nfs job=${boletimId}] erro fatal:`, err.message);
-        _emissaoEmit(boletimId, { type: 'fatal', erro: err.message });
-      }));
-  } catch (e) {
-    console.error('[POST /boletins/:id/emitir-nfs] erro:', e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Processa emissão NF-a-NF, emitindo eventos SSE
-async function processarEmissao(db, companyKey, boletimId, nfsParaEmitir, usuario) {
-  // Carrega WebISS dinamicamente (evita ciclo de dependência)
-  // Em produção, /webiss/emitir está em src/routes/webiss.js — chamamos via HTTP local.
-  // Aqui usamos a rota interna via fetch local pra reaproveitar a lógica de assinatura A1.
-  const http = require('http');
-  const PORT = process.env.PORT || 3002;
-
-  for (const nfp of nfsParaEmitir) {
-    _emissaoEmit(boletimId, { type: 'progress', status: 'emitindo', nf_planejada_id: nfp.id, ordem: nfp.ordem });
-
-    await db.prepare(`
-      UPDATE bol_boletins_nfs_planejadas
-      SET status = 'emitindo', tentativas = tentativas + 1, updated_at = NOW()
-      WHERE id = ?
-    `).run(nfp.id);
-
-    try {
-      // Carrega contexto: contrato + posto + tomador
-      const boletim = await db.prepare(`
-        SELECT bb.*, bc.nome AS contrato_nome, bc.numero_contrato, bc.contratante,
-               bc.empresa_razao, bc.empresa_cnpj, bc.processo, bc.pregao, bc.orgao
-        FROM bol_boletins bb JOIN bol_contratos bc ON bc.id = bb.contrato_id
-        WHERE bb.id = ?
-      `).get(boletimId);
-
-      // RPS sequencial — usa nfp.id para ter idempotência se WebISS retornar timeout
-      const rpsNumero = nfp.rps_numero || `${boletimId}-${nfp.id}`;
-      const descricao = nfp.descricao_override || nfp.descricao_template || '';
-      const valor = Number(nfp.valor || 0);
-
-      // Body para /webiss/emitir
-      const body = {
-        rps: {
-          numero: rpsNumero,
-          serie: nfp.rps_serie || 'NFSE',
-          tipo: 1,
-          dataEmissao: new Date().toISOString().slice(0, 10),
-          competencia: boletim.competencia + '-01',
-          servico: {
-            valorServicos: valor,
-            valorDeducoes: 0,
-            issRetido: true,                 // padrão Montana: ISS retido pelo tomador
-            valorIss: +(valor * 0.05).toFixed(2),
-            aliquota: 5.0,
-            itemLista: '07.10',              // Limpeza/Vigilância — códigos ABRASF
-            codTributacao: '07.10',
-            discriminacao: descricao,
-            exigibilidadeIss: 1,
-          },
-          tomador: {
-            cnpj: boletim.orgao || '',
-            razaoSocial: boletim.contratante || '',
-          },
-        },
-      };
-
-      // Chama /webiss/emitir via HTTP local
-      const resp = await new Promise((resolve, reject) => {
-        const data = JSON.stringify(body);
-        const reqLocal = http.request({
-          hostname: '127.0.0.1', port: PORT, path: '/api/webiss/emitir',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(data),
-            'X-Empresa': companyKey,
-            'X-Internal-Bypass-Auth': 'montana-internal-' + (process.env.JWT_SECRET || 'montana'),
-          },
-        }, r => {
-          let buf = '';
-          r.on('data', c => buf += c);
-          r.on('end', () => {
-            try { resolve({ status: r.statusCode, json: JSON.parse(buf) }); }
-            catch { resolve({ status: r.statusCode, json: { erro: buf } }); }
-          });
-        });
-        reqLocal.on('error', reject);
-        reqLocal.write(data);
-        reqLocal.end();
-      });
-
-      if (resp.status >= 200 && resp.status < 300 && resp.json?.ok && resp.json?.nfse?.numero) {
-        const nfse = resp.json.nfse;
-        await db.prepare(`
-          UPDATE bol_boletins_nfs_planejadas SET
-            status = 'emitida',
-            nfse_numero = ?,
-            nfse_data_emissao = NOW(),
-            rps_numero = ?,
-            emitida_em = NOW(),
-            emitida_por = ?,
-            erro_mensagem = NULL,
-            updated_at = NOW()
-          WHERE id = ?
-        `).run(nfse.numero, rpsNumero, usuario, nfp.id);
-
-        const job = _emissaoJobs.get(boletimId);
-        if (job) job.sucesso++;
-        _emissaoEmit(boletimId, {
-          type: 'progress', status: 'emitida',
-          nf_planejada_id: nfp.id, nfse_numero: nfse.numero, valor,
-        });
-      } else {
-        const erroMsg = resp.json?.error || resp.json?.erro || JSON.stringify(resp.json?.erros || resp.json).slice(0, 500);
-        await db.prepare(`
-          UPDATE bol_boletins_nfs_planejadas SET
-            status = 'erro', erro_mensagem = ?, updated_at = NOW()
-          WHERE id = ?
-        `).run(erroMsg, nfp.id);
-        const job = _emissaoJobs.get(boletimId);
-        if (job) job.erros++;
-        _emissaoEmit(boletimId, { type: 'progress', status: 'erro', nf_planejada_id: nfp.id, erro: erroMsg });
-      }
-    } catch (e) {
-      await db.prepare(`
-        UPDATE bol_boletins_nfs_planejadas SET status = 'erro', erro_mensagem = ?, updated_at = NOW()
-        WHERE id = ?
-      `).run(e.message, nfp.id);
-      const job = _emissaoJobs.get(boletimId);
-      if (job) job.erros++;
-      _emissaoEmit(boletimId, { type: 'progress', status: 'erro', nf_planejada_id: nfp.id, erro: e.message });
-    }
-
-    const job = _emissaoJobs.get(boletimId);
-    if (job) job.processed++;
-  }
-
-  // Conclusão: atualiza status do boletim
-  const stats = await db.prepare(`
-    SELECT
-      COUNT(*) AS total,
-      COUNT(*) FILTER (WHERE status = 'emitida')   AS emitidas,
-      COUNT(*) FILTER (WHERE status = 'erro')      AS erros,
-      COUNT(*) FILTER (WHERE status = 'pendente')  AS pendentes
-    FROM bol_boletins_nfs_planejadas WHERE boletim_id = ?
-  `).get(boletimId);
-
-  let novoStatus = 'emitido';
-  if (stats.erros > 0 && stats.emitidas === 0) novoStatus = 'erro_emissao';
-  else if (stats.erros > 0) novoStatus = 'emitido';   // parcial = considera emitido (com erros)
-  else if (stats.pendentes > 0) novoStatus = 'aprovado_para_emissao'; // ainda tem pendente
-
-  await db.prepare(`UPDATE bol_boletins SET status = ?, updated_at = NOW() WHERE id = ?`).run(novoStatus, boletimId);
-
-  _emissaoEmit(boletimId, { type: 'done', status_boletim: novoStatus, ...stats });
-
-  // Cleanup do job (mantém por 60s pra clientes lentos terem tempo de receber)
-  setTimeout(() => {
-    const job = _emissaoJobs.get(boletimId);
-    if (job) {
-      for (const r of job.listeners) try { r.end(); } catch (_) {}
-      _emissaoJobs.delete(boletimId);
-    }
-  }, 60000);
-}
-
-// GET /boletins/:id/emissao-status — SSE stream do progresso
-router.get('/:id([0-9]+)/emissao-status', async (req, res) => {
-  const boletimId = Number(req.params.id);
-
-  res.set({
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'X-Accel-Buffering': 'no',  // Nginx: desabilita buffer
-  });
-  res.flushHeaders?.();
-
-  // Estado inicial
-  const boletim = await req.db.prepare('SELECT status FROM bol_boletins WHERE id = ?').get(boletimId);
-  const stats = await req.db.prepare(`
-    SELECT
-      COUNT(*) AS total,
-      COUNT(*) FILTER (WHERE status = 'emitida')  AS emitidas,
-      COUNT(*) FILTER (WHERE status = 'erro')     AS erros,
-      COUNT(*) FILTER (WHERE status = 'pendente') AS pendentes,
-      COUNT(*) FILTER (WHERE status = 'emitindo') AS emitindo
-    FROM bol_boletins_nfs_planejadas WHERE boletim_id = ?
-  `).get(boletimId);
-  res.write(`event: snapshot\ndata: ${JSON.stringify({ status_boletim: boletim?.status, ...stats })}\n\n`);
-
-  // Se já tá tudo concluído, encerra
-  if (!_emissaoJobs.has(boletimId)) {
-    res.write(`event: done\ndata: ${JSON.stringify({ reason: 'no-active-job', ...stats })}\n\n`);
-    return res.end();
-  }
-
-  // Adiciona listener
-  const job = _emissaoJobs.get(boletimId);
-  job.listeners.add(res);
-
-  // Cleanup ao desconectar
-  req.on('close', () => {
-    job.listeners.delete(res);
-  });
-});
-
-// ─── HELPER: aplica aditivos sobre um valor base ──────────────────
-// Exportado pra usar em /boletins/previa (Fase 3)
-async function aplicarAditivos(db, contratoId, competencia, valorBase) {
-  // Pega aditivos VALIDADOS ou APLICADOS cuja vigência cobre a competência
-  const compInicio = `${competencia}-01`;
-  const aditivos = await db.prepare(`
-    SELECT * FROM bol_aditivos
-    WHERE contrato_id = ?
-      AND status IN ('validado', 'aplicado')
-      AND vigencia_de <= ?
-      AND (vigencia_ate IS NULL OR vigencia_ate >= ?)
-    ORDER BY vigencia_de
-  `).all(Number(contratoId), compInicio, compInicio);
-
-  let valor = Number(valorBase || 0);
-  const aplicados = [];
-  for (const a of aditivos) {
-    if (a.tipo === 'reajuste') {
-      const novo = valor * Number(a.fator || 1.0);
-      aplicados.push({
-        aditivo_id: a.id, tipo: a.tipo, fator: Number(a.fator),
-        antes: valor, depois: novo, base_legal: a.base_legal,
-      });
-      valor = novo;
-    } else {
-      aplicados.push({
-        aditivo_id: a.id, tipo: a.tipo, fator: 1.0,
-        antes: valor, depois: valor, base_legal: a.base_legal,
-        observacao: 'Tipo não-multiplicativo, valor preservado',
-      });
-    }
-  }
-  return { valor_final: valor, aditivos_aplicados: aplicados };
-}
-
-// Expor pro módulo (Fase 3 vai usar)
-router.aplicarAditivos = aplicarAditivos;
-
 // ─── AUTO-CRIAÇÃO REVERSA (cenário 4) ──────────────────────────
 // Quando uma NF foi importada (via WebISS batch, XML manual, etc.) mas não
 // existe boletim correspondente, cria um boletim "fantasma" com status
@@ -3278,6 +2173,8 @@ router.aplicarAditivos = aplicarAditivos;
 //   2) Fallback por razão social: bol_contratos.contratante LIKE '%' || nf.tomador
 //   Se nada bater, a NF fica sem boletim — usuário tem que criar/editar contrato.
 
+// Helper: cria boletins fantasma pras NFs órfãs com contrato resolvível.
+// Retorna { criados, sem_contrato, ja_existem }.
 async function autoCriarBoletinsFantasmas(db) {
   const orfas = await db.prepare(`
     SELECT id, numero, competencia, tomador, cnpj_tomador, valor_bruto,
@@ -3292,12 +2189,14 @@ async function autoCriarBoletinsFantasmas(db) {
   let criados = 0, semContrato = 0, jaExistem = 0, linkados = 0;
 
   for (const nf of (orfas || [])) {
+    // Normaliza competência pra YYYY-MM (campo pode vir 'YYYY-MM-DD' ou 'YYYY-MM')
     let comp = (nf.competencia || '').slice(0, 7);
     if (!/^\d{4}-\d{2}$/.test(comp) && nf.data_emissao) {
       comp = String(nf.data_emissao).slice(0, 7);
     }
-    if (!/^\d{4}-\d{2}$/.test(comp)) continue;
+    if (!/^\d{4}-\d{2}$/.test(comp)) continue; // sem competência confiável
 
+    // Tenta resolver contrato por CNPJ primeiro
     const cnpjLimpo = String(nf.cnpj_tomador || '').replace(/\D/g, '');
     let contrato = null;
     if (cnpjLimpo) {
@@ -3307,6 +2206,7 @@ async function autoCriarBoletinsFantasmas(db) {
         LIMIT 1
       `).get(cnpjLimpo);
     }
+    // Fallback por razão social
     if (!contrato && nf.tomador) {
       contrato = await db.prepare(`
         SELECT id FROM bol_contratos
@@ -3318,12 +2218,15 @@ async function autoCriarBoletinsFantasmas(db) {
 
     if (!contrato) { semContrato++; continue; }
 
+    // Já existe boletim deste contrato/competência?
     const existente = await db.prepare(
       'SELECT id, nfse_numero FROM bol_boletins WHERE contrato_id = ? AND competencia = ?'
     ).get(contrato.id, comp);
 
     if (existente) {
       jaExistem++;
+      // Linka esta NF ao boletim existente (mesmo se nfse_numero diferente —
+      // pode ser uma NF complementar pro mesmo período).
       try {
         await db.prepare('UPDATE notas_fiscais SET boletim_id = ? WHERE id = ?')
                 .run(existente.id, nf.id);
@@ -3332,6 +2235,7 @@ async function autoCriarBoletinsFantasmas(db) {
       continue;
     }
 
+    // Cria boletim fantasma — flag via discriminacao com prefixo
     try {
       const ins = await db.prepare(`
         INSERT INTO bol_boletins
@@ -3356,6 +2260,7 @@ async function autoCriarBoletinsFantasmas(db) {
         criados++;
       }
     } catch (e) {
+      // UNIQUE violado (race) ou outro erro — segue
       console.warn('[boletins] auto-create fantasma falhou pra NF', nf.numero, ':', e.message);
     }
   }
@@ -3363,6 +2268,7 @@ async function autoCriarBoletinsFantasmas(db) {
   return { criados, sem_contrato: semContrato, ja_existem: jaExistem, linkados_existentes: linkados };
 }
 
+// POST /api/boletins/_criar-fantasmas — cria boletins fantasma pras NFs órfãs
 router.post('/_criar-fantasmas', async (req, res) => {
   try {
     const stats = await autoCriarBoletinsFantasmas(req.db);
@@ -3370,6 +2276,7 @@ router.post('/_criar-fantasmas', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Expose helper para webiss.js + outros importadores chamarem
 router._autoCriarBoletinsFantasmas = autoCriarBoletinsFantasmas;
 
 // ─── DIAGNÓSTICO + MIGRAÇÃO LEGADO → PAINEL (cenário 3) ─────────
@@ -3452,6 +2359,7 @@ router.post('/_link-nfs', async (req, res) => {
     `).run();
     const linked = r?.changes || 0;
 
+    // Diagnóstico: NFs ainda órfãs (sem boletim) e boletins emitidos sem NF
     const orfaos = await req.db.prepare(`
       SELECT COUNT(*)::int n FROM notas_fiscais
       WHERE boletim_id IS NULL
@@ -3486,6 +2394,7 @@ router.get('/:id/nf', async (req, res) => {
       nf = await req.db.prepare(
         'SELECT * FROM notas_fiscais WHERE numero = ? LIMIT 1'
       ).get(bol.nfse_numero);
+      // Auto-link oportunista se achou via fallback
       if (nf && !nf.boletim_id) {
         try {
           await req.db.prepare('UPDATE notas_fiscais SET boletim_id = ? WHERE id = ?').run(bol.id, nf.id);
@@ -3517,6 +2426,7 @@ router.get('/_duplicatas', async (req, res) => {
     if (!Array.isArray(grupos) || grupos.length === 0) {
       return res.json({ ok: true, total: 0, grupos: [] });
     }
+    // Enriquece com nome do contrato e detalhe de cada boletim
     for (const g of grupos) {
       const c = await req.db.prepare('SELECT nome, contratante FROM bol_contratos WHERE id=?').get(g.contrato_id);
       g.contrato_nome = c?.nome || '';
@@ -3561,6 +2471,8 @@ router.post('/_dedup', async (req, res) => {
         FROM bol_boletins WHERE id = ANY(?::int[])
       `).all(g.ids);
 
+      // Score: EMITIDA=4, aprovado=3, rascunho com valor>0=2, demais=1, +
+      // tiebreak por created_at desc.
       const score = (b) => {
         if (b.nfse_status === 'EMITIDA') return 4;
         if (b.status === 'aprovado')      return 3;
@@ -3586,17 +2498,20 @@ router.post('/_dedup', async (req, res) => {
 
       if (!dryRun) {
         for (const p of perdedores) {
+          // Reapontar bol_boletins_nfs do perdedor pro vencedor (caso tenha PDFs/NFs gravadas lá)
           try {
             await req.db.prepare(
               `UPDATE bol_boletins_nfs SET boletim_id = ? WHERE boletim_id = ?`
             ).run(vencedor.id, p.id);
           } catch (_) {}
+          // Apaga o perdedor (cascade em colaboradores/glosas via FK)
           await req.db.prepare(`DELETE FROM bol_boletins WHERE id = ?`).run(p.id);
           removidos++;
         }
       }
     }
 
+    // Tenta aplicar a UNIQUE constraint depois do dedup
     if (!dryRun) {
       try {
         await req.db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bol_uniq_contrato_comp

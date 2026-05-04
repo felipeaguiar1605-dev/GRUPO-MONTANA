@@ -68,31 +68,12 @@ function renderBolLista() {
   `;
 
   if (_bolContratos.length === 0) {
-    // P0-2: empty state explicado em detalhes — antes era ambíguo
     tableHtml += `<tr><td colspan="6">
-      <div style="text-align:center;padding:30px 20px;max-width:640px;margin:0 auto">
+      <div style="text-align:center;padding:30px 20px">
         <div style="font-size:32px;margin-bottom:8px">📋</div>
-        <div style="font-weight:700;color:#334155;margin-bottom:4px;font-size:14px">Nenhum contrato cadastrado no módulo de Boletins</div>
-        <div style="font-size:11px;color:#64748b;margin-bottom:16px">
-          O módulo de Boletins é separado do módulo de Contratos Financeiros, mas pode ser populado a partir dele.
-        </div>
-
-        <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;text-align:left;margin-bottom:16px;font-size:11px;color:#78350f">
-          <strong>ℹ️ O que esse botão faz?</strong>
-          <ul style="margin:6px 0 0;padding-left:20px;line-height:1.6">
-            <li>Lê todos os contratos da aba <strong>📋 Contratos</strong> (status ATIVO)</li>
-            <li>Cria <strong>1 entrada nova aqui</strong> para cada um, copiando: nome, número, contratante, valor</li>
-            <li><strong>Não deleta nada</strong> — só adiciona registros novos.</li>
-            <li>É <strong>idempotente</strong>: rodar 2x não duplica.</li>
-            <li>Depois você ajusta postos/itens manualmente (estrutura específica do boletim).</li>
-          </ul>
-        </div>
-
-        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-          <button onclick="bolInicializarDeContratos()" class="btn btn-primary btn-sm">🚀 Importar dos Contratos Financeiros</button>
-          <button onclick="abrirImportarTemplate()" class="btn btn-sm" style="background:#d97706;color:#fff;border-color:#d97706">📥 Importar Template (.json)</button>
-        </div>
-        <div style="font-size:10px;color:#94a3b8;margin-top:10px">Ou cadastre um contrato manualmente clicando em "+ Novo contrato" (acima).</div>
+        <div style="font-weight:700;color:#334155;margin-bottom:4px">Nenhum contrato de boletim cadastrado</div>
+        <div style="font-size:12px;color:#94a3b8;margin-bottom:16px">Cadastre manualmente ou inicialize a partir dos contratos financeiros existentes</div>
+        <button onclick="bolInicializarDeContratos()" style="padding:8px 20px;font-size:12px;font-weight:700;background:#7c2d12;color:#fff;border:none;border-radius:6px;cursor:pointer">🚀 Inicializar a partir dos Contratos Financeiros</button>
       </div>
     </td></tr>`;
   }
@@ -438,58 +419,56 @@ function bolEditarContrato(id) {
   document.getElementById('modal-editar-contrato-bol')?.remove();
   const overlay = document.createElement('div');
   overlay.id = 'modal-editar-contrato-bol';
-  // align-items:flex-start + padding-top:5vh => modal sempre fica no topo,
-  // mesmo se o conteúdo for grande. Evita ficar deslocado/cortado.
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:5vh 20px';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;overflow-y:auto;padding:20px';
 
   const fld = (lbl, key, hint) => `
-    <div style="margin-bottom:7px">
-      <label style="font-size:10px;font-weight:700;color:#475569;display:block;margin-bottom:2px">${lbl}${hint?`<span style="font-weight:400;color:#94a3b8;font-size:9px"> — ${hint}</span>`:''}</label>
+    <div style="margin-bottom:10px">
+      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:3px">${lbl}${hint?`<span style="font-weight:400;color:#94a3b8"> — ${hint}</span>`:''}</label>
       <input id="bec-${key}" value="${(c[key]||'').replace(/"/g,'&quot;')}"
-        style="width:100%;padding:5px 9px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;box-sizing:border-box">
+        style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
     </div>`;
 
   overlay.innerHTML = `
-    <div style="background:#fff;border-radius:12px;padding:18px 20px;width:min(480px, 92vw);min-width:300px;box-shadow:0 20px 60px rgba(0,0,0,.35);font-size:12px">
-      <h3 style="margin:0 0 12px;font-size:14px;font-weight:800;color:#1e293b">✏️ Editar Contrato de Boletim</h3>
+    <div style="background:#fff;border-radius:14px;padding:28px;width:560px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.35)">
+      <h3 style="margin:0 0 18px;font-size:16px;font-weight:800;color:#1e293b">✏️ Editar Contrato de Boletim</h3>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
         ${fld('Nome','nome')}
         ${fld('Nº Contrato','numero_contrato')}
       </div>
-      ${fld('Contratante','contratante')}
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">
+      ${fld('Contratante (Razão Social do Órgão)','contratante')}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
         ${fld('Processo','processo')}
         ${fld('Pregão','pregao')}
       </div>
       ${fld('Descrição do Serviço','descricao_servico')}
       ${fld('Escala','escala')}
 
-      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:7px;padding:9px 10px;margin:8px 0">
-        <div style="font-size:10px;font-weight:800;color:#1d4ed8;margin-bottom:5px">🔗 Vinculação Financeira (NFS-e)</div>
-        ${fld('Referência do Contrato Financeiro','contrato_ref','numContrato — ex: UFT 16/2025')}
-        ${fld('CNPJ do Tomador','insc_municipal','CNPJ do órgão')}
-        ${fld('Órgão (auto)','orgao','vazio = preenchido pelo contrato_ref')}
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;margin:12px 0">
+        <div style="font-size:11px;font-weight:800;color:#1d4ed8;margin-bottom:8px">🔗 Vinculação Financeira (necessário para emissão NFS-e)</div>
+        ${fld('Referência do Contrato Financeiro','contrato_ref','numContrato exato da tabela contratos — ex: UFT 16/2025')}
+        ${fld('CNPJ do Tomador','insc_municipal','CNPJ do órgão contratante — 18 caracteres c/ máscara')}
+        ${fld('Orgão/Campo auxiliar','orgao','deixe vazio — preenchido automaticamente se contrato_ref estiver correto')}
       </div>
 
-      <div style="background:#f8fafc;border-radius:7px;padding:9px 10px;margin:8px 0">
-        <div style="font-size:10px;font-weight:700;color:#475569;margin-bottom:5px">Dados da Empresa Emitente</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">
+      <div style="background:#f8fafc;border-radius:8px;padding:12px;margin:12px 0">
+        <div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:8px">Dados da Empresa Emitente</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
           ${fld('Razão Social','empresa_razao')}
           ${fld('CNPJ','empresa_cnpj')}
         </div>
         ${fld('Endereço','empresa_endereco')}
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
           ${fld('E-mail','empresa_email')}
           ${fld('Telefone','empresa_telefone')}
         </div>
       </div>
 
-      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px">
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
         <button onclick="document.getElementById('modal-editar-contrato-bol').remove()"
-          style="padding:6px 14px;background:#f1f5f9;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-weight:600">Cancelar</button>
+          style="padding:8px 18px;background:#f1f5f9;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">Cancelar</button>
         <button id="bec-salvar-btn" onclick="_bolSalvarContrato(${id})"
-          style="padding:6px 14px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-weight:700">💾 Salvar</button>
+          style="padding:8px 18px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">💾 Salvar</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -1266,17 +1245,17 @@ async function renderPainelFaturamento() {
     Clique em ✏️ Editar no contrato e preencha <strong>contrato_ref</strong> ou <strong>CNPJ do Tomador</strong>.
   </div>` : ''}
 
-  <!-- Múltiplos boletins por contrato/competência (caso Detran: 1 NF por evento) -->
+  <!-- Aviso duplicatas (mesmo contrato/competência) -->
   ${stats.duplicatas > 0 ? `
-  <div style="background:#eff6ff;border:1px solid #3b82f6;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#1e40af;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+  <div style="background:#fee2e2;border:1px solid #dc2626;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#991b1b;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <div>
-      ℹ️ <strong>${stats.duplicatas} boletim(ns) extra(s)</strong> neste mês —
-      contratos com mais de um boletim na mesma competência (ex: 1 NF por evento).
-      O painel mostra o boletim "principal" (NFS-e emitida → aprovado → maior valor); os demais aparecem no badge da linha.
+      🛑 <strong>${stats.duplicatas} boletim(ns) duplicado(s)</strong> detectado(s) neste mês —
+      mais de um boletim para o mesmo contrato/competência. O painel mostra o mais "vivo"
+      (NFS-e emitida → aprovado → maior valor); os demais ficam ocultos.
     </div>
     <div style="display:flex;gap:6px">
-      <button onclick="painelListarDuplicatas()" style="padding:6px 12px;background:#fff;color:#1e40af;border:1px solid #3b82f6;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">📋 Listar todos</button>
-      <button onclick="if(confirm('LIMPAR boletins extras (mantém só o mais vivo).\\n\\n⚠ Use com cuidado: se forem boletins LEGÍTIMOS (NFs distintas no mesmo contrato/mês como Detran), você vai PERDÊ-LOS.\\n\\nNFS-e emitida nunca é apagada. Continuar?'))painelDeduplicar()" style="padding:6px 12px;background:#fff;color:#991b1b;border:1px solid #dc2626;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer" title="CUIDADO: apaga os extras. Só use se forem duplicatas reais.">🧹 Mesclar (cuidado)</button>
+      <button onclick="painelListarDuplicatas()" style="padding:6px 12px;background:#fff;color:#991b1b;border:1px solid #dc2626;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">📋 Listar</button>
+      <button onclick="painelDeduplicar()" style="padding:6px 12px;background:#dc2626;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🧹 Limpar duplicatas</button>
     </div>
   </div>` : ''}
 
@@ -1392,18 +1371,7 @@ function _renderLinhaContratoPainel(c, idx, mes) {
     const btnPreview = `<button onclick="previewBoletimPDF(${bol.id}, ${c.contrato_id}, '${mes}')" title="Visualizar PDF do boletim"
            style="padding:4px 8px;background:#0ea5e9;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">👁️ PDF</button>`;
 
-    // + Novo: cria um SEGUNDO boletim no mesmo (contrato, competência).
-    // Caso de uso: Detran emite N NFs por mês, cada uma vira um boletim.
-    const btnNovoExtra = `<button onclick="painelNovoBoletim(${c.contrato_id},'${mes}')" title="Criar OUTRO boletim no mesmo mês (NF complementar / 1 NF por evento)"
-           style="padding:4px 8px;background:#fff;color:#0f766e;border:1px solid #14b8a6;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">➕ Novo</button>`;
-
-    // Badge mostrando boletins adicionais neste contrato/competência
-    const badgeExtras = (c.dup_count > 0)
-      ? `<span onclick="painelListarDuplicatas('${mes}',${c.contrato_id})" title="Clique para listar todos os boletins deste contrato no mês"
-              style="display:inline-block;padding:3px 8px;background:#dbeafe;color:#1e40af;border-radius:10px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid #93c5fd">+${c.dup_count} extra(s)</span>`
-      : '';
-
-    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;align-items:center">${badgeExtras}${btnPreview}${btnAjustar}${btnAprovar}${btnEmitir}${btnReabrir}${btnPacote}${btnNovoExtra}</div>`;
+    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${btnPreview}${btnAjustar}${btnAprovar}${btnEmitir}${btnReabrir}${btnPacote}</div>`;
   }
 
   const valorBase   = brl(c.valor_mensal_bruto);
@@ -1461,6 +1429,22 @@ async function painelGerarUm(contrato_id, mes) {
   }
 }
 
+async function painelAprovar(boletim_id, mes) {
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch(`/api/boletins/${boletim_id}/aprovar`, {
+      method: 'POST',
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    toast('✅ Boletim aprovado', 'success');
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+  }
+}
+
 // Editar boletim — se aprovado, reabre primeiro (com confirmação) e abre
 // o modal de ajuste já com status='rascunho'. Se rascunho, abre direto.
 async function painelEditar(boletim_id, mes, bolObj) {
@@ -1477,6 +1461,7 @@ async function painelEditar(boletim_id, mes, bolObj) {
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error);
+    // Atualiza objeto em memória pra refletir o novo status no modal
     const novo = { ...bolObj, status: 'rascunho' };
     window._painelBoletins[boletim_id] = novo;
     toast('↩️ Reaberto — abrindo editor…', 'info');
@@ -1535,6 +1520,7 @@ async function painelListarDuplicatas() {
   }
 }
 
+// Executa o dedup (merge) — mantém o mais "vivo" e remove os duplicados
 async function painelDeduplicar() {
   if (!confirm('Limpar boletins duplicados?\n\nA regra é: mantém o boletim com NFS-e emitida; senão o aprovado mais recente; senão o de maior valor. Os outros são DELETADOS (vínculos a colaboradores/glosas vão junto).\n\nNFS-e emitida nunca é apagada.')) return;
   const token = localStorage.getItem('montana_jwt') || '';
@@ -1571,6 +1557,7 @@ async function painelManutencao() {
   const token = localStorage.getItem('montana_jwt') || '';
   const headers = { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
 
+  // Modal de progresso
   document.getElementById('modal-manutencao')?.remove();
   const overlay = document.createElement('div');
   overlay.id = 'modal-manutencao';
@@ -1592,12 +1579,14 @@ async function painelManutencao() {
   const append = (msg) => { log.innerHTML += '\n' + msg; log.scrollTop = log.scrollHeight; };
   log.innerHTML = '';
 
+  // Helper: chama endpoint, captura erro, loga
   async function step(label, method, url, body) {
     append(`▶ ${label}…`);
     try {
       const r = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      // Mostra os campos relevantes da resposta
       const pares = Object.entries(d).filter(([k]) => !['ok','plano','grupos'].includes(k))
                               .map(([k,v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`);
       append(`  ✅ ${pares.join(' · ')}`);
@@ -1618,28 +1607,6 @@ async function painelManutencao() {
   document.getElementById('manut-fechar').style.display = 'inline-block';
 }
 
-// Cria outro boletim no mesmo (contrato, competência). Usado quando o
-// contrato emite múltiplas NFs no mês (ex: Detran — 1 NF por evento).
-// Backend aceita force_new=true em /gerar-boletim pra bypass do retorno
-// do "existente". Cada chamada cria um boletim novo em rascunho.
-async function painelNovoBoletim(contrato_id, mes) {
-  if (!confirm('Criar OUTRO boletim para este contrato em ' + mes + '?\n\nUse para casos como Detran, onde 1 contrato emite várias NFs no mesmo mês (1 boletim por NF/evento).\n\nO novo boletim começa como RASCUNHO — você ajusta valores e aprova depois.')) return;
-  const token = localStorage.getItem('montana_jwt') || '';
-  try {
-    const r = await fetch('/api/boletins/gerar-boletim', {
-      method: 'POST',
-      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contrato_id, competencia: mes, force_new: true }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error);
-    toast('➕ Novo boletim criado (id=' + d.data.id + ') — ajuste e aprove', 'success');
-    renderPainelFaturamento();
-  } catch (err) {
-    toast('Erro ao criar: ' + err.message, 'error');
-  }
-}
-
 async function painelReabrir(boletim_id, mes) {
   if (!confirm('Reabrir este boletim como RASCUNHO?\n\nIsso permite editar/refazer. A NFS-e ainda não pode ter sido emitida.')) return;
   const token = localStorage.getItem('montana_jwt') || '';
@@ -1651,22 +1618,6 @@ async function painelReabrir(boletim_id, mes) {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error);
     toast('↩️ Boletim reaberto como rascunho', 'success');
-    renderPainelFaturamento();
-  } catch (err) {
-    toast('Erro: ' + err.message, 'error');
-  }
-}
-
-async function painelAprovar(boletim_id, mes) {
-  const token = localStorage.getItem('montana_jwt') || '';
-  try {
-    const r = await fetch(`/api/boletins/${boletim_id}/aprovar`, {
-      method: 'POST',
-      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error);
-    toast('✅ Boletim aprovado', 'success');
     renderPainelFaturamento();
   } catch (err) {
     toast('Erro: ' + err.message, 'error');
