@@ -1266,17 +1266,17 @@ async function renderPainelFaturamento() {
     Clique em ✏️ Editar no contrato e preencha <strong>contrato_ref</strong> ou <strong>CNPJ do Tomador</strong>.
   </div>` : ''}
 
-  <!-- Aviso duplicatas (mesmo contrato/competência) -->
+  <!-- Múltiplos boletins por contrato/competência (caso Detran: 1 NF por evento) -->
   ${stats.duplicatas > 0 ? `
-  <div style="background:#fee2e2;border:1px solid #dc2626;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#991b1b;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+  <div style="background:#eff6ff;border:1px solid #3b82f6;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#1e40af;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <div>
-      🛑 <strong>${stats.duplicatas} boletim(ns) duplicado(s)</strong> detectado(s) neste mês —
-      mais de um boletim para o mesmo contrato/competência. O painel mostra o mais "vivo"
-      (NFS-e emitida → aprovado → maior valor); os demais ficam ocultos.
+      ℹ️ <strong>${stats.duplicatas} boletim(ns) extra(s)</strong> neste mês —
+      contratos com mais de um boletim na mesma competência (ex: 1 NF por evento).
+      O painel mostra o boletim "principal" (NFS-e emitida → aprovado → maior valor); os demais aparecem no badge da linha.
     </div>
     <div style="display:flex;gap:6px">
-      <button onclick="painelListarDuplicatas()" style="padding:6px 12px;background:#fff;color:#991b1b;border:1px solid #dc2626;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">📋 Listar</button>
-      <button onclick="painelDeduplicar()" style="padding:6px 12px;background:#dc2626;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🧹 Limpar duplicatas</button>
+      <button onclick="painelListarDuplicatas()" style="padding:6px 12px;background:#fff;color:#1e40af;border:1px solid #3b82f6;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">📋 Listar todos</button>
+      <button onclick="if(confirm('LIMPAR boletins extras (mantém só o mais vivo).\\n\\n⚠ Use com cuidado: se forem boletins LEGÍTIMOS (NFs distintas no mesmo contrato/mês como Detran), você vai PERDÊ-LOS.\\n\\nNFS-e emitida nunca é apagada. Continuar?'))painelDeduplicar()" style="padding:6px 12px;background:#fff;color:#991b1b;border:1px solid #dc2626;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer" title="CUIDADO: apaga os extras. Só use se forem duplicatas reais.">🧹 Mesclar (cuidado)</button>
     </div>
   </div>` : ''}
 
@@ -1392,7 +1392,18 @@ function _renderLinhaContratoPainel(c, idx, mes) {
     const btnPreview = `<button onclick="previewBoletimPDF(${bol.id}, ${c.contrato_id}, '${mes}')" title="Visualizar PDF do boletim"
            style="padding:4px 8px;background:#0ea5e9;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">👁️ PDF</button>`;
 
-    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${btnPreview}${btnAjustar}${btnAprovar}${btnEmitir}${btnReabrir}${btnPacote}</div>`;
+    // + Novo: cria um SEGUNDO boletim no mesmo (contrato, competência).
+    // Caso de uso: Detran emite N NFs por mês, cada uma vira um boletim.
+    const btnNovoExtra = `<button onclick="painelNovoBoletim(${c.contrato_id},'${mes}')" title="Criar OUTRO boletim no mesmo mês (NF complementar / 1 NF por evento)"
+           style="padding:4px 8px;background:#fff;color:#0f766e;border:1px solid #14b8a6;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">➕ Novo</button>`;
+
+    // Badge mostrando boletins adicionais neste contrato/competência
+    const badgeExtras = (c.dup_count > 0)
+      ? `<span onclick="painelListarDuplicatas('${mes}',${c.contrato_id})" title="Clique para listar todos os boletins deste contrato no mês"
+              style="display:inline-block;padding:3px 8px;background:#dbeafe;color:#1e40af;border-radius:10px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid #93c5fd">+${c.dup_count} extra(s)</span>`
+      : '';
+
+    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;align-items:center">${badgeExtras}${btnPreview}${btnAjustar}${btnAprovar}${btnEmitir}${btnReabrir}${btnPacote}${btnNovoExtra}</div>`;
   }
 
   const valorBase   = brl(c.valor_mensal_bruto);
@@ -1605,6 +1616,28 @@ async function painelManutencao() {
 
   append('\n✓ Manutenção concluída.');
   document.getElementById('manut-fechar').style.display = 'inline-block';
+}
+
+// Cria outro boletim no mesmo (contrato, competência). Usado quando o
+// contrato emite múltiplas NFs no mês (ex: Detran — 1 NF por evento).
+// Backend aceita force_new=true em /gerar-boletim pra bypass do retorno
+// do "existente". Cada chamada cria um boletim novo em rascunho.
+async function painelNovoBoletim(contrato_id, mes) {
+  if (!confirm('Criar OUTRO boletim para este contrato em ' + mes + '?\n\nUse para casos como Detran, onde 1 contrato emite várias NFs no mesmo mês (1 boletim por NF/evento).\n\nO novo boletim começa como RASCUNHO — você ajusta valores e aprova depois.')) return;
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch('/api/boletins/gerar-boletim', {
+      method: 'POST',
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contrato_id, competencia: mes, force_new: true }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    toast('➕ Novo boletim criado (id=' + d.data.id + ') — ajuste e aprove', 'success');
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro ao criar: ' + err.message, 'error');
+  }
 }
 
 async function painelReabrir(boletim_id, mes) {

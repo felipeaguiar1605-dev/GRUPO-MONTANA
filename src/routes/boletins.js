@@ -41,20 +41,11 @@ router.use(async (req, res, next) => {
     try { await db.prepare(`ALTER TABLE bol_boletins ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
   }
 
-  // Garantia de unicidade (1 boletim por contrato/competência). Se já existem
-  // duplicatas, o CREATE UNIQUE INDEX falha com 23505 — logamos uma vez e
-  // seguimos. O usuário pode listar via GET /_duplicatas e mergear via
-  // POST /_dedup. Após a limpeza, esse próprio middleware aplica o índice
-  // na próxima request.
-  try {
-    await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bol_uniq_contrato_comp
-                      ON bol_boletins(contrato_id, competencia)`).run();
-  } catch (e) {
-    if (!global._warnedBolDup) {
-      console.warn('[boletins] UNIQUE(contrato_id, competencia) não pôde ser aplicado — provável duplicata existente. Use GET /api/boletins/_duplicatas + POST /api/boletins/_dedup. Detalhe:', e.message);
-      global._warnedBolDup = true;
-    }
-  }
+  // NOTA (2026-05): N boletins por (contrato, competência) é caso de uso
+  // legítimo (NFs complementares, aditivos, glosa retroativa). Anteriormente
+  // havia CREATE UNIQUE INDEX aqui — removido. _duplicatas e _dedup
+  // continuam disponíveis como ferramenta manual quando o usuário sabe
+  // que algum grupo é duplicata real.
 
   // Cenário 1: vínculo NF↔boletim. Garante coluna boletim_id em notas_fiscais
   // e índice. Idempotente. (também é garantido em /emitir-nfse e webiss.js)
@@ -468,19 +459,6 @@ router.post('/gerar', async (req, res) => {
     const contrato = await req.db.prepare('SELECT * FROM bol_contratos WHERE id = ?').get(contrato_id);
     if (!contrato) return res.status(404).json({ error: 'Contrato não encontrado' });
 
-    // Anti-duplicação: 1 boletim por (contrato, competência). Mantém paridade
-    // com /gerar-boletim que já fazia esse check. Antes esse endpoint criava
-    // boletins novos sem verificar — gerando duplicatas no DB.
-    const dupExist = await req.db.prepare(
-      'SELECT id FROM bol_boletins WHERE contrato_id = ? AND competencia = ?'
-    ).get(contrato_id, competencia);
-    if (dupExist) {
-      return res.status(409).json({
-        error: `Já existe boletim para esse contrato/competência (id=${dupExist.id}). Reabra/edite o existente em vez de gerar outro.`,
-        boletim_id: dupExist.id,
-      });
-    }
-
     const postos = await req.db.prepare('SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem').all(contrato_id);
     for (const p of postos) {
       p.itens = await req.db.prepare('SELECT * FROM bol_itens WHERE posto_id = ? ORDER BY ordem').all(p.id);
@@ -566,9 +544,14 @@ router.post('/gerar-boletim', async (req, res) => {
     }
     const db = req.db;
 
-    // Verificar se já existe
-    const existente = await db.prepare('SELECT * FROM bol_boletins WHERE contrato_id=? AND competencia=?').get(contrato_id, competencia);
-    if (existente) return res.json({ data: existente, novo: false });
+    // Por padrão retorna o existente (evita duplicação acidental).
+    // Para criar deliberadamente um segundo boletim no mesmo (contrato, competência),
+    // passe { force_new: true } no body — caso de NF complementar, aditivo, etc.
+    const forceNew = req.body?.force_new === true;
+    if (!forceNew) {
+      const existente = await db.prepare('SELECT * FROM bol_boletins WHERE contrato_id=? AND competencia=? ORDER BY id DESC LIMIT 1').get(contrato_id, competencia);
+      if (existente) return res.json({ data: existente, novo: false });
+    }
 
     // Buscar contrato de boletim para calcular valor base
     const bc = await db.prepare('SELECT * FROM bol_contratos WHERE id=?').get(contrato_id);
