@@ -173,7 +173,7 @@ async function classifyEmpresa(key, opts) {
           AND ABS(COALESCE(b.debito,0) - COALESCE(a.debito,0)) < 1
           AND ABS(COALESCE(b.credito,0) - COALESCE(a.credito,0)) < 1
           AND COALESCE(a.debito,0) + COALESCE(a.credito,0) > 1000
-          AND b.conta != ''  -- evita duplicata de conta vazia
+          AND b.conta != ''
       )
       AND (a.status_conciliacao IS NULL OR a.status_conciliacao NOT IN ('DUPLICATA','SALDO','CONCILIADO_AUTO'))
       ${dateFilter}
