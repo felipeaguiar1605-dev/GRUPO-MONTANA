@@ -607,6 +607,139 @@ router.patch('/:id/ajustar', async (req, res) => {
 
 // ─── EMITIR NFS-e VIA WEBISS ───────────────────────────────────
 
+// ─── PREVIEW NFS-e ────────────────────────────────────────────
+// GET /api/boletins/:id/preview-nfse
+// Retorna o payload que SERIA enviado ao WebISS (sem emitir nada)
+// + diagnóstico de campos faltantes
+router.get('/:id/preview-nfse', async (req, res) => {
+  const db = req.db;
+  const companyKey = req.companyKey;
+
+  try {
+    const bol = await db.prepare(`
+      SELECT b.*,
+             COALESCE(b.valor_total, b.total_geral, 0) AS valor_efetivo,
+             bc.contrato_ref, bc.contratante as bc_contratante,
+             bc.orgao as bc_orgao, bc.descricao_servico as bc_descricao,
+             bc.insc_municipal as insc_contratante,
+             bc.numero_contrato,
+             COALESCE(
+               (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+               (SELECT c2.orgao FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1)
+             ) AS cnpj_tomador_contrato,
+             COALESCE(
+               (SELECT c1.numContrato FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+               (SELECT c2.numContrato FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1)
+             ) AS num_contrato_encontrado
+      FROM bol_boletins b
+      JOIN bol_contratos bc ON b.contrato_id = bc.id
+      WHERE b.id=?`).get(req.params.id);
+
+    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+
+    const today = new Date().toISOString().substring(0, 10);
+    const competenciaData = bol.competencia.length === 7
+      ? `${bol.competencia}-01`
+      : bol.competencia;
+
+    const aliqISS = 0.02;
+    const valorISS = Math.round(bol.valor_efetivo * aliqISS * 100) / 100;
+
+    const tomadorCnpj  = (bol.insc_contratante || bol.cnpj_tomador_contrato || '').replace(/\D/g, '');
+    const tomadorRazao = bol.bc_contratante || bol.bc_orgao || 'TOMADOR NÃO CONFIGURADO';
+
+    const rpsNum = bol.rps_numero || String(bol.id).padStart(10, '0');
+
+    // Configurações da prestadora
+    const inscPrestadora = process.env[`WEBISS_INSC_${companyKey.toUpperCase()}`] || '';
+    const certPath = path.join(__dirname, '..', '..', 'certificados', `${companyKey}.pfx`);
+    const certExiste = fs.existsSync(certPath);
+    const certSenha = process.env[`WEBISS_CERT_SENHA_${companyKey.toUpperCase()}`];
+
+    const rpsBody = {
+      rps: {
+        numero:       rpsNum,
+        serie:        'A',
+        tipo:         1,
+        dataEmissao:  today,
+        competencia:  competenciaData,
+        servico: {
+          valorServicos:     bol.valor_efetivo,
+          valorDeducoes:     0,
+          valorPis:          0,
+          valorCofins:       0,
+          valorInss:         0,
+          valorIr:           0,
+          valorCsll:         0,
+          issRetido:         false,
+          valorIss:          valorISS,
+          aliquota:          aliqISS,
+          itemLista:         '07.17',
+          codTributacao:     '070700',
+          discriminacao:     (bol.discriminacao || 'PRESTAÇÃO DE SERVIÇOS').substring(0, 2000),
+          exigibilidadeIss:  1,
+        },
+        tomador: {
+          cnpj:        tomadorCnpj || null,
+          razaoSocial: tomadorRazao,
+          email:       '',
+        },
+      },
+    };
+
+    // Validações / pendências
+    const pendencias = [];
+    if (bol.nfse_status === 'EMITIDA') pendencias.push(`NFS-e ${bol.nfse_numero} já foi emitida`);
+    if (bol.status !== 'aprovado')     pendencias.push(`Status do boletim deve ser "aprovado" (atual: "${bol.status}")`);
+    if (!bol.valor_efetivo || bol.valor_efetivo <= 0) pendencias.push('Valor do boletim é zero ou negativo');
+    if (!tomadorCnpj)                  pendencias.push('CNPJ do tomador NÃO configurado (insc_municipal ou contrato_ref)');
+    if (!inscPrestadora)               pendencias.push(`WEBISS_INSC_${companyKey.toUpperCase()} não configurado no .env`);
+    if (!certExiste)                   pendencias.push(`Certificado A1 não encontrado: ${certPath}`);
+    if (!certSenha)                    pendencias.push(`WEBISS_CERT_SENHA_${companyKey.toUpperCase()} não configurado no .env`);
+
+    res.json({
+      ok: pendencias.length === 0,
+      pendencias,
+      boletim: {
+        id: bol.id,
+        contrato_id: bol.contrato_id,
+        posto_id: bol.posto_id,
+        competencia: bol.competencia,
+        status: bol.status,
+        nfse_status: bol.nfse_status,
+        nfse_numero: bol.nfse_numero,
+        valor_total: bol.valor_efetivo,
+      },
+      contrato: {
+        nome: bol.bc_contratante,
+        contrato_ref: bol.contrato_ref,
+        numero_contrato: bol.numero_contrato,
+        num_contrato_encontrado: bol.num_contrato_encontrado,
+        cnpj_tomador_resolvido: tomadorCnpj,
+        razao_tomador_resolvida: tomadorRazao,
+      },
+      prestadora: {
+        empresa: companyKey,
+        inscricao_municipal: inscPrestadora || '(NÃO CONFIGURADA)',
+        certificado_path: certPath,
+        certificado_existe: certExiste,
+        senha_certificado: certSenha ? '(configurada)' : '(NÃO CONFIGURADA)',
+      },
+      tributario: {
+        item_lista_servicos: '07.17',
+        codigo_tributacao_municipio: '070700',
+        aliquota_iss: aliqISS,
+        valor_iss: valorISS,
+        iss_retido: false,
+        exigibilidade_iss: 1,
+      },
+      payload_webiss: rpsBody,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/:id/emitir-nfse', async (req, res) => {
   const db = req.db;
   const company = req.company;
@@ -1265,14 +1398,21 @@ router.get('/:id/preview-pdf', async (req, res) => {
     const contrato = await req.db.prepare(`SELECT * FROM bol_contratos WHERE id = ?`).get(boletim.contrato_id);
     if (!contrato) return res.status(404).json({ error: 'Contrato do boletim não encontrado' });
 
-    const postos = await req.db.prepare(`SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem`).all(boletim.contrato_id);
+    // Se o boletim tem posto_id (modelo multi-boletim: 1 posto por boletim),
+    // carrega APENAS esse posto. Caso contrário, agrega todos os postos do
+    // contrato (modelo legado: 1 boletim = todos os postos).
+    let postos;
+    if (boletim.posto_id) {
+      postos = await req.db.prepare(`SELECT * FROM bol_postos WHERE id = ?`).all(boletim.posto_id);
+    } else {
+      postos = await req.db.prepare(`SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem`).all(boletim.contrato_id);
+    }
     for (const p of postos) {
       p.itens = await req.db.prepare(`SELECT * FROM bol_itens WHERE posto_id = ? ORDER BY ordem`).all(p.id);
     }
-    if (!postos.length) return res.status(400).json({ error: 'Contrato sem postos cadastrados' });
+    if (!postos.length) return res.status(400).json({ error: 'Boletim sem posto cadastrado' });
 
-    // Para preview, junta TODOS os items de TODOS os postos num "posto agregado"
-    // (mesmo formato do PDF SEDUC original — 1 boletim por contrato com todas as funções).
+    // Posto consolidado (1 posto direto OU agregado dos N postos do contrato)
     const postoAggregado = {
       campus_nome: postos.map(p => p.campus_nome || p.label_resumo).join(' · '),
       municipio: postos[0]?.municipio || '',
@@ -1645,6 +1785,12 @@ router.get('/painel-faturamento', async (req, res) => {
       ).get(bc.id, mes);
       const dup_count = dupRow ? (dupRow.n - 1) : 0;
 
+      // Quantos postos cadastrados — habilita botão "Gerar por postos" no frontend
+      const postosRow = await db.prepare(
+        'SELECT COUNT(*)::int AS n FROM bol_postos WHERE contrato_id = ?'
+      ).get(bc.id);
+      const qtd_postos = postosRow?.n || 0;
+
       const [ano, mesNum] = mes.split('-');
       const mesNome = MESES_NOME_COMPLETO[parseInt(mesNum)] || mes;
 
@@ -1660,6 +1806,7 @@ router.get('/painel-faturamento', async (req, res) => {
         cnpj_tomador_contrato: bc.cnpj_tomador_contrato || '',
         mes_nome:          `${mesNome}/${ano}`,
         dup_count,
+        qtd_postos,
         boletim: boletim ? {
           id:          boletim.id,
           status:      boletim.status,
@@ -3507,10 +3654,10 @@ router.get('/:id/nf', async (req, res) => {
 router.get('/_duplicatas', async (req, res) => {
   try {
     const grupos = await req.db.prepare(`
-      SELECT contrato_id, competencia, COUNT(*) AS qtd,
-             ARRAY_AGG(id ORDER BY id) AS ids
+      SELECT contrato_id, competencia, COALESCE(posto_id, 0) AS posto_id,
+             COUNT(*) AS qtd, ARRAY_AGG(id ORDER BY id) AS ids
       FROM bol_boletins
-      GROUP BY contrato_id, competencia
+      GROUP BY contrato_id, competencia, COALESCE(posto_id, 0)
       HAVING COUNT(*) > 1
       ORDER BY contrato_id, competencia
     `).all();
@@ -3524,9 +3671,10 @@ router.get('/_duplicatas', async (req, res) => {
       g.boletins = await req.db.prepare(`
         SELECT id, status, nfse_status, nfse_numero, valor_total, total_geral,
                created_at, updated_at
-        FROM bol_boletins WHERE contrato_id=? AND competencia=?
+        FROM bol_boletins
+        WHERE contrato_id=? AND competencia=? AND COALESCE(posto_id, 0)=?
         ORDER BY id
-      `).all(g.contrato_id, g.competencia);
+      `).all(g.contrato_id, g.competencia, g.posto_id);
     }
     res.json({ ok: true, total: grupos.length, grupos });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -3542,9 +3690,10 @@ router.post('/_dedup', async (req, res) => {
   try {
     const dryRun = req.query.dry_run === 'true' || req.body?.dry_run === true;
     const grupos = await req.db.prepare(`
-      SELECT contrato_id, competencia, ARRAY_AGG(id ORDER BY id) AS ids
+      SELECT contrato_id, competencia, COALESCE(posto_id, 0) AS posto_id,
+             ARRAY_AGG(id ORDER BY id) AS ids
       FROM bol_boletins
-      GROUP BY contrato_id, competencia
+      GROUP BY contrato_id, competencia, COALESCE(posto_id, 0)
       HAVING COUNT(*) > 1
     `).all();
 
@@ -3558,9 +3707,10 @@ router.post('/_dedup', async (req, res) => {
       const bols = await req.db.prepare(`
         SELECT id, status, nfse_status, COALESCE(valor_total, total_geral, 0) AS valor,
                created_at
-        FROM bol_boletins WHERE contrato_id=? AND competencia=?
+        FROM bol_boletins
+        WHERE contrato_id=? AND competencia=? AND COALESCE(posto_id, 0)=?
         ORDER BY id
-      `).all(g.contrato_id, g.competencia);
+      `).all(g.contrato_id, g.competencia, g.posto_id);
 
       const score = (b) => {
         if (b.nfse_status === 'EMITIDA') return 4;
@@ -3838,7 +3988,11 @@ router.post('/_gerar-por-postos', async (req, res) => {
 
         const valor = Number(p.valor_total) || 0;
         const labelPosto = p.descricao_posto || p.campus_nome || '';
-        const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServico.toUpperCase()} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. POSTO: ${labelPosto.toUpperCase()}.`;
+        // Evita "PRESTAÇÃO DE SERVIÇOS DE PRESTAÇÃO DE SERVIÇOS..." quando
+        // descricao_servico já começa com "PRESTAÇÃO DE SERVIÇOS"
+        const tipoUpper = tipoServico.toUpperCase().trim();
+        const prefixo = tipoUpper.startsWith('PRESTAÇÃO DE SERVIÇOS') ? '' : 'PRESTAÇÃO DE SERVIÇOS DE ';
+        const discriminacao = `${prefixo}${tipoUpper} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. POSTO: ${labelPosto.toUpperCase()}.`;
 
         const ins = await db.prepare(`INSERT INTO bol_boletins
           (contrato_id, posto_id, competencia, data_emissao,

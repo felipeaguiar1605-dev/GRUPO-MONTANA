@@ -1339,8 +1339,13 @@ function _renderLinhaContratoPainel(c, idx, mes) {
   if (!bol) {
     statusBadge = `<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700">SEM BOLETIM</span>`;
     nfseBadge   = `<span style="color:#94a3b8;font-size:10px">—</span>`;
-    acoes = `<button onclick="painelGerarUm(${c.contrato_id},'${mes}')"
+    const btnGerarUm = `<button onclick="painelGerarUm(${c.contrato_id},'${mes}')"
       style="padding:4px 10px;background:#0f172a;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">Gerar</button>`;
+    const btnPorPostosSem = (c.qtd_postos > 1)
+      ? `<button onclick="painelGerarPorPostos(${c.contrato_id},'${mes}',${c.qtd_postos})" title="Gerar ${c.qtd_postos} boletins (1 por posto)"
+           style="padding:4px 8px;background:#fff;color:#7c3aed;border:1px solid #a78bfa;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">📋 ${c.qtd_postos} postos</button>`
+      : '';
+    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${btnGerarUm}${btnPorPostosSem}</div>`;
   } else {
     const statusCor = {rascunho:'#fef3c7|#92400e', aprovado:'#dbeafe|#1d4ed8', emitido:'#d1fae5|#065f46'}[bol.status] || '#f1f5f9|#475569';
     const [bg2, col2] = statusCor.split('|');
@@ -1397,13 +1402,20 @@ function _renderLinhaContratoPainel(c, idx, mes) {
     const btnNovoExtra = `<button onclick="painelNovoBoletim(${c.contrato_id},'${mes}')" title="Criar OUTRO boletim no mesmo mês (NF complementar / 1 NF por evento)"
            style="padding:4px 8px;background:#fff;color:#0f766e;border:1px solid #14b8a6;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">➕ Novo</button>`;
 
+    // 📋 Gerar por postos: cria N boletins (1 por posto) de uma vez.
+    // Só aparece se o contrato tem mais de 1 posto cadastrado.
+    const btnPorPostos = (c.qtd_postos > 1)
+      ? `<button onclick="painelGerarPorPostos(${c.contrato_id},'${mes}',${c.qtd_postos})" title="Gerar ${c.qtd_postos} boletins (1 por posto)"
+           style="padding:4px 8px;background:#fff;color:#7c3aed;border:1px solid #a78bfa;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">📋 ${c.qtd_postos} postos</button>`
+      : '';
+
     // Badge mostrando boletins adicionais neste contrato/competência
     const badgeExtras = (c.dup_count > 0)
       ? `<span onclick="painelListarDuplicatas('${mes}',${c.contrato_id})" title="Clique para listar todos os boletins deste contrato no mês"
               style="display:inline-block;padding:3px 8px;background:#dbeafe;color:#1e40af;border-radius:10px;font-size:10px;font-weight:700;cursor:pointer;border:1px solid #93c5fd">+${c.dup_count} extra(s)</span>`
       : '';
 
-    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;align-items:center">${badgeExtras}${btnPreview}${btnAjustar}${btnAprovar}${btnEmitir}${btnReabrir}${btnPacote}${btnNovoExtra}</div>`;
+    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;align-items:center">${badgeExtras}${btnPreview}${btnAjustar}${btnAprovar}${btnEmitir}${btnReabrir}${btnPacote}${btnNovoExtra}${btnPorPostos}</div>`;
   }
 
   const valorBase   = brl(c.valor_mensal_bruto);
@@ -1637,6 +1649,35 @@ async function painelNovoBoletim(contrato_id, mes) {
     renderPainelFaturamento();
   } catch (err) {
     toast('Erro ao criar: ' + err.message, 'error');
+  }
+}
+
+// Gera N boletins (1 por posto) para um contrato. Usado para Detran (31 postos),
+// Unitins (12 postos), etc. Apaga rascunhos existentes e cria novos a partir
+// dos postos cadastrados em bol_postos + valores de bol_itens.
+async function painelGerarPorPostos(contrato_id, mes, qtd_postos) {
+  const msg = `Gerar ${qtd_postos} boletins (1 por posto) para este contrato em ${mes}?\n\n` +
+              `⚠ ATENÇÃO: rascunhos existentes deste contrato em ${mes} serão APAGADOS.\n` +
+              `Boletins APROVADOS ou EMITIDOS NÃO são afetados se modo='ignorar'.\n\n` +
+              `Deseja continuar?`;
+  if (!confirm(msg)) return;
+
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch('/api/boletins/_gerar-por-postos', {
+      method: 'POST',
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contrato_id, competencia: mes, modo_destino_existente: 'apagar' }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    const total = d.total_criados || 0;
+    const valor = (d.valor_total_contrato || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+    const apagados = d.apagados || 0;
+    toast(`📋 ${total} boletim(ns) criado(s) — Total R$ ${valor}` + (apagados ? ` (${apagados} rascunho(s) substituído(s))` : ''), 'success');
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
   }
 }
 
