@@ -107,7 +107,9 @@ async function main() {
       for (const p of postos) {
         const valor = Number(p.valor_total) || 0;
         const labelPosto = (p.descricao_posto || p.campus_nome || '').toUpperCase();
-        const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServico.toUpperCase()} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. POSTO: ${labelPosto}.`;
+        const tipoUpper = tipoServico.toUpperCase().trim();
+        const prefixo = tipoUpper.startsWith('PRESTAÇÃO DE SERVIÇOS') ? '' : 'PRESTAÇÃO DE SERVIÇOS DE ';
+        const discriminacao = `${prefixo}${tipoUpper} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. POSTO: ${labelPosto}.`;
 
         await client.query(
           `INSERT INTO bol_boletins
