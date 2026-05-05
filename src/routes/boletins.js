@@ -607,6 +607,139 @@ router.patch('/:id/ajustar', async (req, res) => {
 
 // ─── EMITIR NFS-e VIA WEBISS ───────────────────────────────────
 
+// ─── PREVIEW NFS-e ────────────────────────────────────────────
+// GET /api/boletins/:id/preview-nfse
+// Retorna o payload que SERIA enviado ao WebISS (sem emitir nada)
+// + diagnóstico de campos faltantes
+router.get('/:id/preview-nfse', async (req, res) => {
+  const db = req.db;
+  const companyKey = req.companyKey;
+
+  try {
+    const bol = await db.prepare(`
+      SELECT b.*,
+             COALESCE(b.valor_total, b.total_geral, 0) AS valor_efetivo,
+             bc.contrato_ref, bc.contratante as bc_contratante,
+             bc.orgao as bc_orgao, bc.descricao_servico as bc_descricao,
+             bc.insc_municipal as insc_contratante,
+             bc.numero_contrato,
+             COALESCE(
+               (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+               (SELECT c2.orgao FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1)
+             ) AS cnpj_tomador_contrato,
+             COALESCE(
+               (SELECT c1.numContrato FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+               (SELECT c2.numContrato FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1)
+             ) AS num_contrato_encontrado
+      FROM bol_boletins b
+      JOIN bol_contratos bc ON b.contrato_id = bc.id
+      WHERE b.id=?`).get(req.params.id);
+
+    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+
+    const today = new Date().toISOString().substring(0, 10);
+    const competenciaData = bol.competencia.length === 7
+      ? `${bol.competencia}-01`
+      : bol.competencia;
+
+    const aliqISS = 0.02;
+    const valorISS = Math.round(bol.valor_efetivo * aliqISS * 100) / 100;
+
+    const tomadorCnpj  = (bol.insc_contratante || bol.cnpj_tomador_contrato || '').replace(/\D/g, '');
+    const tomadorRazao = bol.bc_contratante || bol.bc_orgao || 'TOMADOR NÃO CONFIGURADO';
+
+    const rpsNum = bol.rps_numero || String(bol.id).padStart(10, '0');
+
+    // Configurações da prestadora
+    const inscPrestadora = process.env[`WEBISS_INSC_${companyKey.toUpperCase()}`] || '';
+    const certPath = path.join(__dirname, '..', '..', 'certificados', `${companyKey}.pfx`);
+    const certExiste = fs.existsSync(certPath);
+    const certSenha = process.env[`WEBISS_CERT_SENHA_${companyKey.toUpperCase()}`];
+
+    const rpsBody = {
+      rps: {
+        numero:       rpsNum,
+        serie:        'A',
+        tipo:         1,
+        dataEmissao:  today,
+        competencia:  competenciaData,
+        servico: {
+          valorServicos:     bol.valor_efetivo,
+          valorDeducoes:     0,
+          valorPis:          0,
+          valorCofins:       0,
+          valorInss:         0,
+          valorIr:           0,
+          valorCsll:         0,
+          issRetido:         false,
+          valorIss:          valorISS,
+          aliquota:          aliqISS,
+          itemLista:         '07.17',
+          codTributacao:     '070700',
+          discriminacao:     (bol.discriminacao || 'PRESTAÇÃO DE SERVIÇOS').substring(0, 2000),
+          exigibilidadeIss:  1,
+        },
+        tomador: {
+          cnpj:        tomadorCnpj || null,
+          razaoSocial: tomadorRazao,
+          email:       '',
+        },
+      },
+    };
+
+    // Validações / pendências
+    const pendencias = [];
+    if (bol.nfse_status === 'EMITIDA') pendencias.push(`NFS-e ${bol.nfse_numero} já foi emitida`);
+    if (bol.status !== 'aprovado')     pendencias.push(`Status do boletim deve ser "aprovado" (atual: "${bol.status}")`);
+    if (!bol.valor_efetivo || bol.valor_efetivo <= 0) pendencias.push('Valor do boletim é zero ou negativo');
+    if (!tomadorCnpj)                  pendencias.push('CNPJ do tomador NÃO configurado (insc_municipal ou contrato_ref)');
+    if (!inscPrestadora)               pendencias.push(`WEBISS_INSC_${companyKey.toUpperCase()} não configurado no .env`);
+    if (!certExiste)                   pendencias.push(`Certificado A1 não encontrado: ${certPath}`);
+    if (!certSenha)                    pendencias.push(`WEBISS_CERT_SENHA_${companyKey.toUpperCase()} não configurado no .env`);
+
+    res.json({
+      ok: pendencias.length === 0,
+      pendencias,
+      boletim: {
+        id: bol.id,
+        contrato_id: bol.contrato_id,
+        posto_id: bol.posto_id,
+        competencia: bol.competencia,
+        status: bol.status,
+        nfse_status: bol.nfse_status,
+        nfse_numero: bol.nfse_numero,
+        valor_total: bol.valor_efetivo,
+      },
+      contrato: {
+        nome: bol.bc_contratante,
+        contrato_ref: bol.contrato_ref,
+        numero_contrato: bol.numero_contrato,
+        num_contrato_encontrado: bol.num_contrato_encontrado,
+        cnpj_tomador_resolvido: tomadorCnpj,
+        razao_tomador_resolvida: tomadorRazao,
+      },
+      prestadora: {
+        empresa: companyKey,
+        inscricao_municipal: inscPrestadora || '(NÃO CONFIGURADA)',
+        certificado_path: certPath,
+        certificado_existe: certExiste,
+        senha_certificado: certSenha ? '(configurada)' : '(NÃO CONFIGURADA)',
+      },
+      tributario: {
+        item_lista_servicos: '07.17',
+        codigo_tributacao_municipio: '070700',
+        aliquota_iss: aliqISS,
+        valor_iss: valorISS,
+        iss_retido: false,
+        exigibilidade_iss: 1,
+      },
+      payload_webiss: rpsBody,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/:id/emitir-nfse', async (req, res) => {
   const db = req.db;
   const company = req.company;
