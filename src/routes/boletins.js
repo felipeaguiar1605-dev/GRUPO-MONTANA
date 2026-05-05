@@ -1785,6 +1785,12 @@ router.get('/painel-faturamento', async (req, res) => {
       ).get(bc.id, mes);
       const dup_count = dupRow ? (dupRow.n - 1) : 0;
 
+      // Quantos postos cadastrados — habilita botão "Gerar por postos" no frontend
+      const postosRow = await db.prepare(
+        'SELECT COUNT(*)::int AS n FROM bol_postos WHERE contrato_id = ?'
+      ).get(bc.id);
+      const qtd_postos = postosRow?.n || 0;
+
       const [ano, mesNum] = mes.split('-');
       const mesNome = MESES_NOME_COMPLETO[parseInt(mesNum)] || mes;
 
@@ -1800,6 +1806,7 @@ router.get('/painel-faturamento', async (req, res) => {
         cnpj_tomador_contrato: bc.cnpj_tomador_contrato || '',
         mes_nome:          `${mesNome}/${ano}`,
         dup_count,
+        qtd_postos,
         boletim: boletim ? {
           id:          boletim.id,
           status:      boletim.status,
