@@ -3981,7 +3981,11 @@ router.post('/_gerar-por-postos', async (req, res) => {
 
         const valor = Number(p.valor_total) || 0;
         const labelPosto = p.descricao_posto || p.campus_nome || '';
-        const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServico.toUpperCase()} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. POSTO: ${labelPosto.toUpperCase()}.`;
+        // Evita "PRESTAÇÃO DE SERVIÇOS DE PRESTAÇÃO DE SERVIÇOS..." quando
+        // descricao_servico já começa com "PRESTAÇÃO DE SERVIÇOS"
+        const tipoUpper = tipoServico.toUpperCase().trim();
+        const prefixo = tipoUpper.startsWith('PRESTAÇÃO DE SERVIÇOS') ? '' : 'PRESTAÇÃO DE SERVIÇOS DE ';
+        const discriminacao = `${prefixo}${tipoUpper} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. POSTO: ${labelPosto.toUpperCase()}.`;
 
         const ins = await db.prepare(`INSERT INTO bol_boletins
           (contrato_id, posto_id, competencia, data_emissao,
