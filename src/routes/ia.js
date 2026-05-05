@@ -94,9 +94,13 @@ router.post('/chat', async (req, res) => {
   const db      = req.db;
   const company = req.company || COMPANIES[req.companyKey];
 
-  // Monta messages para a API
+  // Monta messages para a API — filtra entradas inválidas/vazias do histórico
+  // (a API Claude rejeita com "messages: text content blocks must be non-empty"
+  //  se qualquer mensagem tiver content vazio ou só whitespace)
   const messages = [
-    ...historico.map(h => ({ role: h.role, content: h.content })),
+    ...historico
+      .filter(h => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string' && h.content.trim())
+      .map(h => ({ role: h.role, content: h.content.trim() })),
     { role: 'user', content: mensagem.trim() },
   ];
 
@@ -104,7 +108,7 @@ router.post('/chat', async (req, res) => {
   let systemPrompt = `Você é o assistente financeiro do Montana ERP, um sistema de gestão para empresas de terceirização de mão de obra em Palmas-TO. Responda sempre em português brasileiro de forma objetiva e prática.\n\n`;
   systemPrompt += `=== CONTEXTO ATUAL ===\n`;
   if (db && company) {
-    systemPrompt += buildContexto(db, company);
+    systemPrompt += await buildContexto(db, company);
   }
   systemPrompt += `\n=====================\n`;
   systemPrompt += `Use os dados acima para responder perguntas sobre finanças, contratos, fluxo de caixa e operações. Para perguntas fora do escopo do sistema, responda brevemente e redirecione para o que pode ajudar.`;
@@ -117,7 +121,11 @@ router.post('/chat', async (req, res) => {
       messages,
     });
 
-    const resposta = response.content[0]?.text || '(sem resposta)';
+    const resposta = (response.content || [])
+      .filter(b => b.type === 'text' && b.text)
+      .map(b => b.text)
+      .join('\n')
+      .trim() || '(sem resposta)';
     res.json({ ok: true, resposta, tokens: response.usage });
   } catch (e) {
     console.error('[IA] Erro Claude API:', e.message);
