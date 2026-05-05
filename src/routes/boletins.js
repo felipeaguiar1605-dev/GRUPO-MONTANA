@@ -3647,10 +3647,10 @@ router.get('/:id/nf', async (req, res) => {
 router.get('/_duplicatas', async (req, res) => {
   try {
     const grupos = await req.db.prepare(`
-      SELECT contrato_id, competencia, COUNT(*) AS qtd,
-             ARRAY_AGG(id ORDER BY id) AS ids
+      SELECT contrato_id, competencia, COALESCE(posto_id, 0) AS posto_id,
+             COUNT(*) AS qtd, ARRAY_AGG(id ORDER BY id) AS ids
       FROM bol_boletins
-      GROUP BY contrato_id, competencia
+      GROUP BY contrato_id, competencia, COALESCE(posto_id, 0)
       HAVING COUNT(*) > 1
       ORDER BY contrato_id, competencia
     `).all();
@@ -3664,9 +3664,10 @@ router.get('/_duplicatas', async (req, res) => {
       g.boletins = await req.db.prepare(`
         SELECT id, status, nfse_status, nfse_numero, valor_total, total_geral,
                created_at, updated_at
-        FROM bol_boletins WHERE contrato_id=? AND competencia=?
+        FROM bol_boletins
+        WHERE contrato_id=? AND competencia=? AND COALESCE(posto_id, 0)=?
         ORDER BY id
-      `).all(g.contrato_id, g.competencia);
+      `).all(g.contrato_id, g.competencia, g.posto_id);
     }
     res.json({ ok: true, total: grupos.length, grupos });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -3682,9 +3683,10 @@ router.post('/_dedup', async (req, res) => {
   try {
     const dryRun = req.query.dry_run === 'true' || req.body?.dry_run === true;
     const grupos = await req.db.prepare(`
-      SELECT contrato_id, competencia, ARRAY_AGG(id ORDER BY id) AS ids
+      SELECT contrato_id, competencia, COALESCE(posto_id, 0) AS posto_id,
+             ARRAY_AGG(id ORDER BY id) AS ids
       FROM bol_boletins
-      GROUP BY contrato_id, competencia
+      GROUP BY contrato_id, competencia, COALESCE(posto_id, 0)
       HAVING COUNT(*) > 1
     `).all();
 
@@ -3698,9 +3700,10 @@ router.post('/_dedup', async (req, res) => {
       const bols = await req.db.prepare(`
         SELECT id, status, nfse_status, COALESCE(valor_total, total_geral, 0) AS valor,
                created_at
-        FROM bol_boletins WHERE contrato_id=? AND competencia=?
+        FROM bol_boletins
+        WHERE contrato_id=? AND competencia=? AND COALESCE(posto_id, 0)=?
         ORDER BY id
-      `).all(g.contrato_id, g.competencia);
+      `).all(g.contrato_id, g.competencia, g.posto_id);
 
       const score = (b) => {
         if (b.nfse_status === 'EMITIDA') return 4;
