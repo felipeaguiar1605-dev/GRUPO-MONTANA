@@ -625,10 +625,14 @@ router.get('/:id/preview-nfse', async (req, res) => {
              bc.numero_contrato,
              COALESCE(
                (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+
+               (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato LIKE '%' || bc.contrato_ref || '%' LIMIT 1),
                (SELECT c2.orgao FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1)
              ) AS cnpj_tomador_contrato,
              COALESCE(
                (SELECT c1.numContrato FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+
+               (SELECT c1.numContrato FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato LIKE '%' || bc.contrato_ref || '%' LIMIT 1),
                (SELECT c2.numContrato FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1)
              ) AS num_contrato_encontrado
       FROM bol_boletins b
@@ -757,10 +761,14 @@ router.post('/:id/emitir-nfse', async (req, res) => {
              bc.insc_municipal as insc_contratante,
              COALESCE(
                (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+
+               (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato LIKE '%' || bc.contrato_ref || '%' LIMIT 1),
                (SELECT c2.orgao FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1)
              ) AS cnpj_tomador_contrato,
              COALESCE(
                (SELECT c1.numContrato FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+
+               (SELECT c1.numContrato FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato LIKE '%' || bc.contrato_ref || '%' LIMIT 1),
                (SELECT c2.numContrato FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1)
              ) AS num_contrato_encontrado
       FROM bol_boletins b
@@ -1745,11 +1753,15 @@ router.get('/painel-faturamento', async (req, res) => {
       SELECT bc.*,
         COALESCE(
           (SELECT c1.valor_mensal_bruto FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+
+          (SELECT c1.valor_mensal_bruto FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato LIKE '%' || bc.contrato_ref || '%' LIMIT 1),
           (SELECT c2.valor_mensal_bruto FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1),
           0
         ) AS valor_mensal_bruto,
         COALESCE(
           (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+
+          (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato LIKE '%' || bc.contrato_ref || '%' LIMIT 1),
           (SELECT c2.orgao FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1),
           ''
         ) AS cnpj_tomador_contrato
@@ -1974,6 +1986,8 @@ router.post('/aprovar-lote', async (req, res) => {
              bc.insc_municipal,
              COALESCE(
                (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+
+               (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato LIKE '%' || bc.contrato_ref || '%' LIMIT 1),
                (SELECT c2.orgao FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1),
                ''
              ) AS cnpj_tomador_contrato
