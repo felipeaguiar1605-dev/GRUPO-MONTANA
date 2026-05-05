@@ -1562,6 +1562,10 @@ async function loadWebissConfig() {
     html += badge(r.hasSenha,   'Senha certificado');
     html += badge(r.hasLogin,   'Login WebISS');
     html += badge(r.hasSenhaLogin, 'Senha WebISS');
+    html += badge(!!r.inscMunicipal, 'Inscrição municipal');
+
+    const inscEl = document.getElementById('cfg-webiss-insc');
+    if (inscEl && r.inscMunicipal && !inscEl.value) inscEl.value = r.inscMunicipal;
 
     if (r.certInfo && !r.certInfo.erro) {
       const diasCor = r.certInfo.diasRestantes < 30 ? '#dc2626' : r.certInfo.diasRestantes < 90 ? '#d97706' : '#15803d';
@@ -1580,10 +1584,11 @@ async function uploadCertWebiss() {
   const fileInput = document.getElementById('cfg-cert-file');
   const senha = document.getElementById('cfg-cert-senha')?.value;
   if (!fileInput?.files?.length) return toast('Selecione um arquivo .pfx', 'error');
+  if (!senha) return toast('Informe a senha do certificado', 'error');
 
   const form = new FormData();
   form.append('cert', fileInput.files[0]);
-  if (senha) form.append('senha', senha);
+  form.append('senha', senha);
 
   showLoading('Enviando certificado…');
   try {
@@ -1595,7 +1600,8 @@ async function uploadCertWebiss() {
     }).then(x => x.json());
 
     if (r.ok) {
-      toast('Certificado enviado! ' + (r.size ? Math.round(r.size / 1024) + ' KB' : ''));
+      const detalhe = r.cn ? ` — ${r.cn} · vence ${r.validTo}` : (r.size ? ` (${Math.round(r.size / 1024)} KB)` : '');
+      toast('Certificado validado e salvo' + detalhe);
       fileInput.value = '';
       loadWebissConfig();
     } else {
@@ -1608,13 +1614,19 @@ async function salvarConfigWebiss() {
   const login      = document.getElementById('cfg-webiss-login')?.value;
   const senha      = document.getElementById('cfg-webiss-senha')?.value;
   const senha_cert = document.getElementById('cfg-cert-senha')?.value;
-  if (!login && !senha && !senha_cert) return toast('Preencha ao menos um campo', 'error');
+  const insc       = document.getElementById('cfg-webiss-insc')?.value?.trim();
+  if (!login && !senha && !senha_cert && !insc) return toast('Preencha ao menos um campo', 'error');
 
   showLoading('Salvando credenciais…');
   try {
     const r = await api('/webiss/config-senha', {
       method: 'POST',
-      body: JSON.stringify({ login: login || null, senha_login: senha || null, senha_cert: senha_cert || null })
+      body: JSON.stringify({
+        login: login || null,
+        senha_login: senha || null,
+        senha_cert: senha_cert || null,
+        insc_municipal: insc || null,
+      })
     });
     if (r.ok) { toast('Credenciais salvas!'); loadWebissConfig(); }
     else toast(r.error || 'Erro ao salvar', 'error');
