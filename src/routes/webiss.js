@@ -602,6 +602,7 @@ router.get('/config', async (req, res) => {
   const hasSenha   = !!process.env[`WEBISS_CERT_SENHA_${key}`];
   const hasLogin   = !!process.env[`WEBISS_LOGIN_${key}`];
   const hasSenhaLogin = !!process.env[`WEBISS_SENHA_${key}`];
+  const inscMunicipal = process.env[`WEBISS_INSC_${key}`] || '';
 
   let certInfo = null;
   if (certExists && hasSenha) {
@@ -632,8 +633,9 @@ router.get('/config', async (req, res) => {
     hasSenha,
     hasLogin,
     hasSenhaLogin,
+    inscMunicipal,
     certInfo,
-    pronto: certExists && hasSenha && hasLogin && hasSenhaLogin,
+    pronto: certExists && hasSenha && hasLogin && hasSenhaLogin && !!inscMunicipal,
   });
 });
 
@@ -653,35 +655,75 @@ const certUpload = multer({
   limits: { fileSize: 2 * 1024 * 1024 }, // 2MB máx
 });
 
-router.post('/upload-cert', certUpload.single('cert'), (req, res) => {
-  if (!req.file) return res.status(400).json({ ok: false, error: 'Nenhum arquivo enviado' });
+// Faz backup do .pfx atual antes do multer sobrescrever (preserva fallback
+// se a validação da senha falhar e tivermos que restaurar o anterior).
+const certBackup = (req, res, next) => {
+  const target = path.join(CERT_DIR, req.companyKey + '.pfx');
+  if (fs.existsSync(target)) {
+    req._certBackupPath = target + '.bak';
+    fs.copyFileSync(target, req._certBackupPath);
+  }
+  next();
+};
 
-  // Valida que o .pfx pode ser lido com a senha fornecida (se informada)
-  const senha = req.body.senha;
-  if (senha) {
+router.post('/upload-cert', certBackup, certUpload.single('cert'), (req, res) => {
+  const restoreBackup = () => {
+    try { if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path); } catch {}
     try {
-      const pfx = fs.readFileSync(req.file.path);
-      forge.pkcs12.pkcs12FromAsn1(forge.asn1.fromDer(pfx.toString('binary')), senha);
-    } catch (e) {
-      fs.unlinkSync(req.file.path);
-      return res.status(422).json({ ok: false, error: 'Senha incorreta ou arquivo corrompido: ' + e.message });
-    }
-    // Salva senha no .env
-    _updateEnv(`WEBISS_CERT_SENHA_${req.companyKey.toUpperCase()}`, senha);
+      if (req._certBackupPath && fs.existsSync(req._certBackupPath)) {
+        const target = path.join(CERT_DIR, req.companyKey + '.pfx');
+        fs.copyFileSync(req._certBackupPath, target);
+      }
+    } catch {}
+  };
+  const cleanupBackup = () => {
+    try { if (req._certBackupPath && fs.existsSync(req._certBackupPath)) fs.unlinkSync(req._certBackupPath); } catch {}
+  };
+
+  if (!req.file) {
+    cleanupBackup();
+    return res.status(400).json({ ok: false, error: 'Nenhum arquivo enviado' });
   }
 
-  res.json({ ok: true, certPath: req.file.path, size: req.file.size });
+  // Senha obrigatória — sem ela não dá para validar o .pfx, e aceitar um arquivo
+  // sem validação cria a chance de gravar um arquivo corrompido como cert ativo.
+  const senha = req.body.senha;
+  if (!senha) {
+    restoreBackup();
+    return res.status(400).json({ ok: false, error: 'Senha do certificado é obrigatória' });
+  }
+
+  let cn = '', validTo = '', diasRestantes = null;
+  try {
+    const pfx = fs.readFileSync(req.file.path);
+    const p12 = forge.pkcs12.pkcs12FromAsn1(forge.asn1.fromDer(pfx.toString('binary')), senha);
+    const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
+    const cert = Object.values(certBags)[0]?.[0]?.cert;
+    if (cert) {
+      cn = cert.subject.getField('CN')?.value || '';
+      validTo = cert.validity.notAfter.toISOString().slice(0, 10);
+      diasRestantes = Math.floor((cert.validity.notAfter - new Date()) / 86400000);
+    }
+  } catch (e) {
+    restoreBackup();
+    return res.status(422).json({ ok: false, error: 'Senha incorreta ou arquivo corrompido: ' + e.message });
+  }
+
+  _updateEnv(`WEBISS_CERT_SENHA_${req.companyKey.toUpperCase()}`, senha);
+  cleanupBackup();
+  res.json({ ok: true, certPath: req.file.path, size: req.file.size, cn, validTo, diasRestantes });
 });
 
 /**
  * POST /webiss/config-senha — salva login/senha WebISS e senha do certificado no .env
  */
 router.post('/config-senha', async (req, res) => {
-  const { login, senha_login, senha_cert } = req.body;
+  const { login, senha_login, senha_cert, insc_municipal } = req.body;
   const key = req.companyKey.toUpperCase();
-  if (login)       _updateEnv(`WEBISS_LOGIN_${key}`, login);
-  if (senha_login) _updateEnv(`WEBISS_SENHA_${key}`, senha_login);
-  if (senha_cert)  _updateEnv(`WEBISS_CERT_SENHA_${key}`, senha_cert);
+  if (login)          _updateEnv(`WEBISS_LOGIN_${key}`, login);
+  if (senha_login)    _updateEnv(`WEBISS_SENHA_${key}`, senha_login);
+  if (senha_cert)     _updateEnv(`WEBISS_CERT_SENHA_${key}`, senha_cert);
+  if (insc_municipal) _updateEnv(`WEBISS_INSC_${key}`, String(insc_municipal).trim());
   res.json({ ok: true });
 });
 
