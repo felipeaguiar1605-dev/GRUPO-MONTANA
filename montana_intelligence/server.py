@@ -1,24 +1,20 @@
 #!/usr/bin/env python3
 """
 Montana Intelligence — Servidor MCP/API
-FastAPI que expõe ferramentas do banco de conhecimento para o Claude.
+FastAPI + modo MCP stdio. Atrás de Caddy/Nginx com TLS em produção.
 
 Uso:
-    python3 server.py                   # Porta 8001
-    python3 server.py --port 8001
-    pm2 start server.py --interpreter python3 --name montana-intelligence
+    MONTANA_TOKENS_JSON='{"tok":"label"}' python3 server.py --port 8001
+    python3 server.py --stdio   # modo MCP stdio (sem auth — só para Claude Desktop local)
 
-Configurar no Claude Desktop:
-    Em claude_desktop_config.json adicionar:
-    {
-      "mcpServers": {
-        "montana": {
-          "command": "python3",
-          "args": ["/opt/montana/app_unificado/montana_intelligence/server.py", "--stdio"],
-          "env": { "MONTANA_TOKEN": "seu_token_aqui" }
-        }
-      }
-    }
+Variáveis de ambiente:
+    MONTANA_TOKENS_JSON  JSON {"<token>":"<label>"} — auth Bearer (preferido)
+    MONTANA_TOKEN        token único (legado, fallback)
+    MONTANA_HOST         interface de bind (default 127.0.0.1)
+
+Conexão dos clientes (atrás de proxy TLS):
+    GET https://intel.<host>/pendencias
+    Header: Authorization: Bearer <token>
 """
 
 import sqlite3
@@ -33,7 +29,34 @@ from typing import Optional
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KB_PATH  = os.path.join(BASE_DIR, 'montana_intelligence', 'knowledge_base.db')
-TOKEN    = os.environ.get('MONTANA_TOKEN', 'montana2026')
+
+
+def _load_tokens() -> dict:
+    """
+    Carrega tokens válidos. Suporta dois formatos:
+      MONTANA_TOKENS_JSON='{"<token>":"<label>"}'  (preferido, multi-token)
+      MONTANA_TOKEN='<token>'                       (legado, mono-token)
+    Falha se nenhum estiver definido.
+    """
+    raw = os.environ.get('MONTANA_TOKENS_JSON', '').strip()
+    if raw:
+        try:
+            tokens = json.loads(raw)
+            if isinstance(tokens, dict) and tokens:
+                return tokens
+        except json.JSONDecodeError as e:
+            print(f"ERROR: invalid MONTANA_TOKENS_JSON: {e}", file=sys.stderr)
+            sys.exit(1)
+    single = os.environ.get('MONTANA_TOKEN', '').strip()
+    if single and single != 'montana2026':
+        return {single: 'default'}
+    print("ERROR: MONTANA_TOKEN ou MONTANA_TOKENS_JSON é obrigatório (default 'montana2026' bloqueado).",
+          file=sys.stderr)
+    sys.exit(1)
+
+
+# Lazy: só carrega se servidor for iniciado (permite import em testes).
+TOKENS: Optional[dict] = None
 
 EMPRESAS_DB = {
     'assessoria': os.path.join(BASE_DIR, 'data', 'assessoria', 'montana.db'),
@@ -802,15 +825,31 @@ def run_http(port: int = 8001):
         from fastapi import FastAPI, HTTPException, Depends, Header
         import uvicorn
 
+    global TOKENS
+    if TOKENS is None:
+        TOKENS = _load_tokens()
+
+    host = os.environ.get('MONTANA_HOST', '127.0.0.1')
+
     app = FastAPI(title="Montana Intelligence API", version="1.0.0")
+    # CORS aberto só faz sentido se o reverse proxy à frente já restringe.
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-    async def verificar_token(x_token: str = Header(default=None)):
-        if x_token != TOKEN and TOKEN != 'montana2026':
-            raise HTTPException(status_code=401, detail="Token inválido")
+    async def verificar_token(authorization: str = Header(default=None)):
+        if not authorization or not authorization.lower().startswith("bearer "):
+            raise HTTPException(status_code=401, detail="Missing Bearer token")
+        token = authorization[7:].strip()
+        label = TOKENS.get(token) if TOKENS else None
+        if not label:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return label
+
+    @app.get("/saude")
+    def saude():
+        return {"status": "ok", "kb_existe": os.path.exists(KB_PATH)}
 
     @app.get("/")
-    def raiz():
+    def raiz(_label: str = Depends(verificar_token)):
         return {
             "servico": "Montana Intelligence",
             "status": "online",
@@ -818,48 +857,51 @@ def run_http(port: int = 8001):
             "horario": datetime.now().isoformat()
         }
 
-    @app.get("/saude")
-    def saude():
-        return {"status": "ok", "kb_existe": os.path.exists(KB_PATH)}
-
     @app.get("/pendencias")
-    def api_pendencias(empresa: Optional[str] = None, contrato: Optional[str] = None):
+    def api_pendencias(empresa: Optional[str] = None, contrato: Optional[str] = None,
+                       _label: str = Depends(verificar_token)):
         return pendencias_financeiras(empresa, contrato)
 
     @app.get("/fluxo")
-    def api_fluxo(empresa: str, mes: Optional[str] = None, ano: Optional[int] = None):
+    def api_fluxo(empresa: str, mes: Optional[str] = None, ano: Optional[int] = None,
+                  _label: str = Depends(verificar_token)):
         return fluxo_caixa(empresa, mes, ano)
 
     @app.get("/contratos")
-    def api_contratos(empresa: Optional[str] = None):
+    def api_contratos(empresa: Optional[str] = None,
+                      _label: str = Depends(verificar_token)):
         return status_contratos(empresa)
 
     @app.get("/fiscal")
-    def api_fiscal(empresa: str, competencia: str):
+    def api_fiscal(empresa: str, competencia: str,
+                   _label: str = Depends(verificar_token)):
         return apuracao_fiscal(empresa, competencia)
 
     @app.get("/nfs")
     def api_nfs(tomador: Optional[str] = None, contrato: Optional[str] = None,
                 status: Optional[str] = None, empresa: Optional[str] = None,
-                inicio: Optional[str] = None, fim: Optional[str] = None):
+                inicio: Optional[str] = None, fim: Optional[str] = None,
+                _label: str = Depends(verificar_token)):
         return buscar_nfs(tomador, contrato, status, empresa, inicio, fim)
 
     @app.get("/buscar")
-    def api_buscar(q: str, empresa: Optional[str] = None, categoria: Optional[str] = None):
+    def api_buscar(q: str, empresa: Optional[str] = None, categoria: Optional[str] = None,
+                   _label: str = Depends(verificar_token)):
         return buscar_conhecimento(q, empresa, categoria)
 
     @app.get("/alertas")
-    def api_alertas(dias: int = 30):
+    def api_alertas(dias: int = 30, _label: str = Depends(verificar_token)):
         return alerta_vencimentos(dias)
 
     @app.get("/funcionarios")
-    def api_funcionarios(contrato: str, empresa: Optional[str] = None):
+    def api_funcionarios(contrato: str, empresa: Optional[str] = None,
+                         _label: str = Depends(verificar_token)):
         return funcionarios_contrato(contrato, empresa)
 
-    print(f"\n🚀 Montana Intelligence rodando em http://0.0.0.0:{port}")
-    print(f"   Docs: http://0.0.0.0:{port}/docs")
-    print(f"   Saúde: http://104.196.22.170:{port}/saude\n")
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    print(f"\n🚀 Montana Intelligence rodando em http://{host}:{port}")
+    print(f"   Docs: http://{host}:{port}/docs")
+    print(f"   Auth: Bearer (tokens carregados: {len(TOKENS)})\n")
+    uvicorn.run(app, host=host, port=port)
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────

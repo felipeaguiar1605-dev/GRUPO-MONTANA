@@ -1,6 +1,6 @@
 # 🌐 Guia: Configurar DNS para sistema.grupomontanasec.com
 
-**IP do servidor GCP:** `104.196.22.170`  
+**IP do servidor GCP:** `35.235.241.162`  
 **Domínio:** `sistema.grupomontanasec.com`
 
 ---
@@ -28,7 +28,7 @@ As opções mais comuns são:
 5. Preencha:
    - **Tipo:** `A`
    - **Nome/Host:** `sistema`
-   - **Valor/Destino:** `104.196.22.170`
+   - **Valor/Destino:** `35.235.241.162`
    - **TTL:** `3600` (1 hora)
 6. Salve
 
@@ -43,7 +43,7 @@ As opções mais comuns são:
 5. Preencha:
    - **Type:** `A`
    - **Name:** `sistema`
-   - **IPv4 address:** `104.196.22.170`
+   - **IPv4 address:** `35.235.241.162`
    - **Proxy status:** 🟠 DNS only (não proxied, pelo menos inicialmente)
    - **TTL:** Auto
 6. Clique em **Save**
@@ -58,7 +58,7 @@ As opções mais comuns são:
 4. Clique em **Add** → Tipo **A**
 5. Preencha:
    - **Host:** `sistema`
-   - **Points to:** `104.196.22.170`
+   - **Points to:** `35.235.241.162`
    - **TTL:** 1 Hour
 6. Salve
 
@@ -74,7 +74,7 @@ ping sistema.grupomontanasec.com
 
 Ou acesse online: https://dnschecker.org e busque `sistema.grupomontanasec.com`
 
-Quando resolver para `104.196.22.170`, o DNS está OK.
+Quando resolver para `35.235.241.162`, o DNS está OK.
 
 ---
 
@@ -96,7 +96,7 @@ Após isso, o app estará acessível em:
 
 | Etapa | O que fazer |
 |-------|-------------|
-| 1 | Adicionar registro DNS tipo A: `sistema` → `104.196.22.170` |
+| 1 | Adicionar registro DNS tipo A: `sistema` → `35.235.241.162` |
 | 2 | Aguardar 5-30 minutos para propagar |
 | 3 | Testar: `ping sistema.grupomontanasec.com` |
 | 4 | No servidor: `bash scripts/setup-ssl.sh` |

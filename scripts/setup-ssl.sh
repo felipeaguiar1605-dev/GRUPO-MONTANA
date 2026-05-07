@@ -5,7 +5,7 @@
 #    chmod +x setup-ssl.sh && sudo bash setup-ssl.sh
 #
 #  PRÉ-REQUISITO: DNS do domínio deve apontar para este IP
-#    sistema.grupomontanasec.com → 104.196.22.170
+#    sistema.grupomontanasec.com → 35.235.241.162
 # ═══════════════════════════════════════════════════════════════════
 set -e
 

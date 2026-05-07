@@ -26,12 +26,12 @@ Pergunta o mês e o ano, envia o script ao servidor, gera e baixa automaticament
 ## Como executar manualmente (linha de comando)
 ```bash
 # Gerar no servidor
-ssh -i ~/.ssh/id_montana diretoria@104.196.22.170 \
+ssh -i ~/.ssh/id_montana diretoria@35.235.241.162 \
   "cd /opt/montana/app_unificado && node scripts/gerar_relatorio_receita_federal.js --mes=03 --ano=2026 --empresa=todas"
 
 # Baixar
 scp -i ~/.ssh/id_montana \
-  "diretoria@104.196.22.170:/opt/montana/app_unificado/relatorios/receita_federal_*_2026-03.xlsx" \
+  "diretoria@35.235.241.162:/opt/montana/app_unificado/relatorios/receita_federal_*_2026-03.xlsx" \
   relatorios/
 ```
 
@@ -72,7 +72,7 @@ node scripts/gerar_relatorio_receita_federal.js
 - ⚠️ VERIFICAR: possível NF não importada
 
 ## Servidor de produção
-- Host: `104.196.22.170` (sistema.grupomontanasec.com)
+- Host: `35.235.241.162` (sistema.grupomontanasec.com)
 - Caminho: `/opt/montana/app_unificado/`
 - Relatórios gerados em: `/opt/montana/app_unificado/relatorios/`
 - SSH key: `~/.ssh/id_montana`

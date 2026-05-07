@@ -14,7 +14,7 @@ Uma vez configurado, você pergunta em português e recebe resposta com dados re
 
 ```bash
 # 1. Conectar ao servidor
-ssh diretoria@104.196.22.170
+ssh diretoria@35.235.241.162
 
 # 2. Ir para a pasta
 cd /opt/montana/app_unificado/montana_intelligence
