@@ -11,14 +11,14 @@
  *
  * PRODUÇÃO — Certificados A1:
  *   Os arquivos .pfx precisam estar em /opt/montana/app_unificado/certificados/
- *   na VM GCP (35.247.236.181 — sistema.grupomontanasec.com) com os nomes:
+ *   na VM GCP (35.235.241.162 — sistema.grupomontanasec.com) com os nomes:
  *     assessoria.pfx  (CNPJ 14.092.519/0001-51 — Insc. Municipal 237319)
  *     seguranca.pfx   (CNPJ 19.200.109/0001-09 — Insc. Municipal 515161)
  *     portodovau.pfx  (CNPJ 41.034.574/0001-68)
  *     mustang.pfx     (CNPJ 26.600.137/0001-70)
  *   Copiar via SCP:
- *     scp -i ~/.ssh/id_montana certificados/assessoria.pfx diretoria@35.247.236.181:/opt/montana/app_unificado/certificados/
- *     scp -i ~/.ssh/id_montana certificados/seguranca.pfx  diretoria@35.247.236.181:/opt/montana/app_unificado/certificados/
+ *     scp -i ~/.ssh/id_montana certificados/assessoria.pfx diretoria@35.235.241.162:/opt/montana/app_unificado/certificados/
+ *     scp -i ~/.ssh/id_montana certificados/seguranca.pfx  diretoria@35.235.241.162:/opt/montana/app_unificado/certificados/
  *   As senhas e inscrições municipais devem estar no .env do servidor:
  *     WEBISS_CERT_SENHA_ASSESSORIA=14092519
  *     WEBISS_CERT_SENHA_SEGURANCA=19200109

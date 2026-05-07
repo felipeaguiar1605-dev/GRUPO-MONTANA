@@ -39,7 +39,7 @@
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                 SERVIDOR GCP — 104.196.22.170                       │
+│                 SERVIDOR GCP — 35.235.241.162                       │
 │                                                                     │
 │  ┌─────────────────────────────────────────────────────────────┐   │
 │  │  CAMADA 1 — ETL (Python)                                    │   │
@@ -226,7 +226,7 @@ pm2 start mcp_server.py --interpreter python3 --name montana-mcp
 {
   "mcpServers": {
     "montana": {
-      "url": "http://104.196.22.170:8001",
+      "url": "http://35.235.241.162:8001",
       "token": "SEU_TOKEN_AQUI"
     }
   }

@@ -8,6 +8,18 @@ node_modules/
 
 # Bancos de dados locais — dados ficam no servidor, não no git
 data/
+*.db
+*.db-journal
+montana_intelligence/knowledge_base.db
+montana_intelligence/.env
+
+# Audit logs MCP
+mcp_audit*.jsonl
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
 
 # Certificados digitais A1 — sensíveis, não commitar
 certificados/*.pfx
