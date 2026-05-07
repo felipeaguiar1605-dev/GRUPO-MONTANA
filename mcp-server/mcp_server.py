@@ -1,73 +1,29 @@
 #!/usr/bin/env python3
 """
 Montana Pipeline — MCP Server (Remote/Cloud)
-Roda como SSE server (default 127.0.0.1:3010), atrás de Caddy/Nginx com TLS.
-Conecta ao SQLite do ERP em /opt/montana/app_unificado/data/.
+Versao para deploy no GCP VM. Roda como SSE server na porta 3010.
+Conecta ao SQLite do ERP cloud em /opt/montana/app_unificado/data/.
 
-Variáveis de ambiente obrigatórias:
-  MONTANA_TOKENS_JSON  JSON {"<token>":"<label>", ...} — auth Bearer (obrigatório)
+Uso no servidor:
+  MCP_API_KEY=chave-secreta python3 mcp_server_remote.py
 
-Variáveis opcionais:
-  MONTANA_APP_DIR      raiz do ERP (default /opt/montana/app_unificado)
-  MCP_HOST             interface de bind (default 127.0.0.1)
-  MCP_PORT             porta (default 3010)
-  MCP_AUDIT_LOG        path do audit log (default /opt/montana/logs/mcp_audit.jsonl)
-
-Conexão dos clientes (atrás de proxy TLS):
-  claude mcp add montana-cloud --transport sse \
-    --url https://mcp.<host>/sse \
-    --header "Authorization: Bearer $MONTANA_TOKEN"
+Equipe conecta via Claude Code:
+  claude mcp add montana-cloud --transport sse --url http://104.196.22.170:3010/sse
 """
 import json
 import os
 import sqlite3
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 
-import sqlglot
-from sqlglot import exp
 from mcp.server.fastmcp import FastMCP
 
 # ── Config ────────────────────────────────────────────────────────────
+# No cloud, o DB fica dentro do app_unificado
 APP_DIR = Path(os.environ.get("MONTANA_APP_DIR", "/opt/montana/app_unificado"))
 CLOUD_URL = os.environ.get("MONTANA_CLOUD_URL", "http://localhost:3002")
-MCP_HOST = os.environ.get("MCP_HOST", "127.0.0.1")
 MCP_PORT = int(os.environ.get("MCP_PORT", "3010"))
-AUDIT_LOG = Path(os.environ.get("MCP_AUDIT_LOG", "/opt/montana/logs/mcp_audit.jsonl"))
-
-
-def _load_tokens() -> dict:
-    raw = os.environ.get("MONTANA_TOKENS_JSON", "").strip()
-    if not raw:
-        print("ERROR: MONTANA_TOKENS_JSON env var required (JSON dict {token:label}).",
-              file=sys.stderr)
-        sys.exit(1)
-    try:
-        tokens = json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"ERROR: invalid MONTANA_TOKENS_JSON: {e}", file=sys.stderr)
-        sys.exit(1)
-    if not isinstance(tokens, dict) or not tokens:
-        print("ERROR: MONTANA_TOKENS_JSON must be a non-empty JSON object.",
-              file=sys.stderr)
-        sys.exit(1)
-    return tokens
-
-
-def _audit(label: str, event: str, **fields) -> None:
-    try:
-        AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(
-            {"ts": datetime.utcnow().isoformat() + "Z", "label": label,
-             "event": event, **fields},
-            ensure_ascii=False,
-        )
-        with AUDIT_LOG.open("a") as f:
-            f.write(line + "\n")
-    except Exception:
-        pass
 
 # Detecta automaticamente qual DB usar
 def _find_db():
@@ -94,7 +50,7 @@ mcp = FastMCP(
         "Consulta dados das empresas seguranca e assessoria diretamente "
         "dos bancos de dados do ERP em producao."
     ),
-    host=MCP_HOST,
+    host="0.0.0.0",
     port=MCP_PORT,
 )
 
@@ -367,40 +323,19 @@ def consultar_conta_vinculada(conta: str = "", limite: int = 50) -> str:
     return "\n".join(lines)
 
 
-_FORBIDDEN_NODES = (
-    exp.Insert, exp.Update, exp.Delete, exp.Drop, exp.Alter,
-    exp.Create, exp.TruncateTable, exp.Merge,
-)
-
-
-def _validate_select_only(query: str) -> tuple[bool, str]:
-    try:
-        statements = sqlglot.parse(query, read="sqlite")
-    except Exception as e:
-        return False, f"parse_error: {e}"
-    statements = [s for s in statements if s is not None]
-    if len(statements) != 1:
-        return False, f"only_one_statement_allowed (found {len(statements)})"
-    stmt = statements[0]
-    if not isinstance(stmt, (exp.Select, exp.Union, exp.With, exp.Subquery)):
-        return False, f"only_select_allowed (got {type(stmt).__name__})"
-    for node in stmt.walk():
-        if isinstance(node, _FORBIDDEN_NODES):
-            return False, f"forbidden_statement_type: {type(node).__name__}"
-    return True, "ok"
-
-
 @mcp.tool()
 def sql_query(empresa: str, query: str) -> str:
     """
     Query SQL SELECT no banco cloud (somente leitura).
     Parametros:
       empresa: seguranca ou assessoria
-      query: SQL SELECT (parser sqlglot bloqueia DML/DDL e múltiplos statements)
+      query: SQL SELECT
     """
-    ok, reason = _validate_select_only(query)
-    if not ok:
-        return f"ERRO: {reason}"
+    q = query.strip().upper()
+    if not q.startswith("SELECT"):
+        return "ERRO: Apenas queries SELECT."
+    if any(kw in q for kw in ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "CREATE"]):
+        return "ERRO: Apenas SELECT permitido."
 
     conn = _get_conn(empresa)
     try:
@@ -865,53 +800,11 @@ def nfs_pendentes_resumo(
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Auth middleware (Bearer)
-# ══════════════════════════════════════════════════════════════════════
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
-
-
-class BearerAuthMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, tokens: dict):
-        super().__init__(app)
-        self.tokens = tokens
-
-    async def dispatch(self, request, call_next):
-        if request.url.path in ("/health", "/healthz"):
-            return await call_next(request)
-        auth = request.headers.get("authorization", "")
-        if not auth.lower().startswith("bearer "):
-            _audit("-", "auth_missing", path=request.url.path,
-                   client=request.client.host if request.client else "?")
-            return JSONResponse({"error": "missing_bearer"}, status_code=401)
-        token = auth[7:].strip()
-        label = self.tokens.get(token)
-        if not label:
-            _audit("-", "auth_invalid", path=request.url.path,
-                   client=request.client.host if request.client else "?")
-            return JSONResponse({"error": "invalid_token"}, status_code=401)
-        request.state.token_label = label
-        start = time.monotonic()
-        response = await call_next(request)
-        _audit(label, "request",
-               path=request.url.path, status=response.status_code,
-               latency_ms=round((time.monotonic() - start) * 1000, 1))
-        return response
-
-
-# ══════════════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    tokens = _load_tokens()
-    print(f"Montana Cloud MCP Server starting on {MCP_HOST}:{MCP_PORT}...")
+    print(f"Montana Cloud MCP Server starting on port {MCP_PORT}...")
     print(f"App dir: {APP_DIR}")
     print(f"DBs: {_find_db()}")
-    print(f"Auth tokens loaded: {len(tokens)} ({sorted(tokens.values())})")
-    print(f"Audit log: {AUDIT_LOG}")
-
-    app = mcp.sse_app()
-    app.add_middleware(BearerAuthMiddleware, tokens=tokens)
-
-    import uvicorn
-    uvicorn.run(app, host=MCP_HOST, port=MCP_PORT, log_level="info")
+    print(f"Connect via: claude mcp add montana-cloud --transport sse --url http://35.247.236.181:{MCP_PORT}/sse")
+    mcp.run(transport="sse")

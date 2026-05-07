@@ -3,7 +3,7 @@
 #  Montana Intelligence — Setup no Servidor GCP
 #  Execute UMA VEZ no servidor após o deploy do código
 #
-#  ssh diretoria@35.235.241.162
+#  ssh diretoria@104.196.22.170
 #  cd /opt/montana/app_unificado/montana_intelligence
 #  chmod +x setup_gcp.sh && ./setup_gcp.sh
 # ═══════════════════════════════════════════════════════════════
@@ -88,9 +88,9 @@ echo ""
 echo "═══════════════════════════════════════════════"
 echo -e "${VERDE}  ✅ Setup concluído!${NC}"
 echo ""
-echo "  Servidor rodando em: http://35.235.241.162:8001"
+echo "  Servidor rodando em: http://104.196.22.170:8001"
 echo "  Teste agora:"
-echo "    curl http://35.235.241.162:8001/saude"
+echo "    curl http://104.196.22.170:8001/saude"
 echo ""
 echo "  Próximo passo — adicionar ao Claude Desktop:"
 echo "  Arquivo: %APPDATA%\Claude\claude_desktop_config.json"

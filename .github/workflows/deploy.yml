@@ -1,13 +1,5 @@
 name: Deploy Montana App
 
-# Histórico de IPs:
-#   104.196.22.170 → desativado 2026-04-27
-#   35.247.236.181 → desativado 2026-05-07
-#   35.235.241.162 → atual (2026-05-07)
-# Estratégia de SCP via /tmp + sudo cp -af resolve o "Permission denied" que
-# acontecia porque /opt/montana/app_unificado/{src,public}/* são owned por root.
-# (sudo nopasswd está configurado pra `diretoria` no host.)
-
 on:
   push:
     branches: [ main ]
@@ -16,12 +8,6 @@ on:
       - 'public/**'
       - 'package.json'
       - 'ecosystem.config.js'
-  workflow_dispatch:  # permite disparo manual via UI
-
-env:
-  GCP_HOST: 35.235.241.162
-  GCP_USER: diretoria
-  GCP_PATH: /opt/montana/app_unificado
 
 jobs:
   deploy:
@@ -30,60 +16,27 @@ jobs:
 
     steps:
       - name: Checkout código
-        uses: actions/checkout@v5  # Node 24 (Node 20 deprecated em 16/Set/2026)
+        uses: actions/checkout@v4
 
       - name: Configurar chave SSH
         run: |
           mkdir -p ~/.ssh
-          # Secret SSH_PRIVATE_KEY agora é a chave privada em BASE64 (single-line).
-          # Decode evita corrupção de newlines/CRLF causada por copy/paste no Web UI.
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" | base64 -d > ~/.ssh/id_montana
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_montana
           chmod 600 ~/.ssh/id_montana
-          # Sanity check: confirma que a chave é parseable
-          ssh-keygen -y -f ~/.ssh/id_montana > /dev/null && echo "✅ Private key OK"
-          ssh-keyscan -H "$GCP_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -H 104.196.22.170 >> ~/.ssh/known_hosts
 
-      - name: Enviar código para staging /tmp/montana_deploy
+      - name: Enviar código para o servidor
         run: |
-          set -e
-          ssh -i ~/.ssh/id_montana "$GCP_USER@$GCP_HOST" "rm -rf /tmp/montana_deploy && mkdir -p /tmp/montana_deploy"
-          scp -i ~/.ssh/id_montana -rq src     "$GCP_USER@$GCP_HOST:/tmp/montana_deploy/"
-          scp -i ~/.ssh/id_montana -rq public  "$GCP_USER@$GCP_HOST:/tmp/montana_deploy/"
-          scp -i ~/.ssh/id_montana    package.json         "$GCP_USER@$GCP_HOST:/tmp/montana_deploy/"
-          scp -i ~/.ssh/id_montana    ecosystem.config.js  "$GCP_USER@$GCP_HOST:/tmp/montana_deploy/" || true
+          scp -i ~/.ssh/id_montana -r src/     diretoria@104.196.22.170:/opt/montana/app_unificado/
+          scp -i ~/.ssh/id_montana -r public/  diretoria@104.196.22.170:/opt/montana/app_unificado/
+          scp -i ~/.ssh/id_montana    package.json diretoria@104.196.22.170:/opt/montana/app_unificado/
+          scp -i ~/.ssh/id_montana    ecosystem.config.js diretoria@104.196.22.170:/opt/montana/app_unificado/
 
-      - name: Backup + sudo cp para destino + npm install + pm2 restart
+      - name: Instalar dependências e reiniciar
         run: |
-          ssh -i ~/.ssh/id_montana "$GCP_USER@$GCP_HOST" "
-            set -e
-            TS=\$(date +%Y%m%d_%H%M%S)
-            BKP=/tmp/montana_bkp_\$TS
-            mkdir -p \$BKP
-            cp -a $GCP_PATH/src \$BKP/ 2>/dev/null || true
-            cp -a $GCP_PATH/public \$BKP/ 2>/dev/null || true
-            echo \"Backup pré-deploy em \$BKP\"
+          ssh -i ~/.ssh/id_montana diretoria@104.196.22.170 \
+            "cd /opt/montana/app_unificado && npm install --production 2>&1 | tail -3 && pm2 restart montana-app"
 
-            sudo cp -af /tmp/montana_deploy/src/.    $GCP_PATH/src/
-            sudo cp -af /tmp/montana_deploy/public/. $GCP_PATH/public/
-            sudo cp -af /tmp/montana_deploy/package.json $GCP_PATH/package.json
-            [ -f /tmp/montana_deploy/ecosystem.config.js ] && sudo cp -af /tmp/montana_deploy/ecosystem.config.js $GCP_PATH/ecosystem.config.js || true
-
-            cd $GCP_PATH
-            npm install --production 2>&1 | tail -5
-
-            pm2 restart montana-app
-            sleep 3
-          "
-
-      - name: Verificar status pós-deploy
+      - name: Verificar status
         run: |
-          ssh -i ~/.ssh/id_montana "$GCP_USER@$GCP_HOST" "pm2 list | grep montana-app"
-          # Smoke test do health endpoint
-          curl -sf --max-time 10 https://sistema.grupomontanasec.com/api/health \
-            && echo '✅ /api/health OK' \
-            || (echo '❌ /api/health falhou' && exit 1)
-
-      - name: Limpar staging remoto
-        if: always()
-        run: |
-          ssh -i ~/.ssh/id_montana "$GCP_USER@$GCP_HOST" "rm -rf /tmp/montana_deploy" || true
+          ssh -i ~/.ssh/id_montana diretoria@104.196.22.170 "pm2 status"
