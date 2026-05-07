@@ -93,7 +93,7 @@ function getValor(linha, mapa, chave) {
 
 // ── POST /api/alterdata/importar-funcionarios ─────────────────────
 router.post('/importar-funcionarios', (req, res) => {
-  upload.single('arquivo')(req, res, async (err) => {
+  upload.single('arquivo')(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado. Use o campo "arquivo".' });
 
@@ -132,40 +132,38 @@ router.post('/importar-funcionarios', (req, res) => {
       const db = req.db;
 
       // Tenta adicionar coluna cargo (texto) se ainda não existir — Alterdata não usa cargo_id
-      try { await db.exec(`ALTER TABLE rh_funcionarios ADD COLUMN cargo TEXT DEFAULT ''`); } catch (_) {}
+      try { db.exec(`ALTER TABLE rh_funcionarios ADD COLUMN cargo TEXT DEFAULT ''`); } catch (_) {}
+
+      // Statements reutilizáveis (preparados fora da transaction para melhor performance)
+      const stmtBusca   = db.prepare(`SELECT id FROM rh_funcionarios WHERE cpf=? AND cpf!='' LIMIT 1`);
+      const stmtInsert  = db.prepare(`
+        INSERT INTO rh_funcionarios
+          (matricula, nome, cpf, pis, data_admissao, data_demissao,
+           cargo, lotacao, salario_base, status, created_at, updated_at)
+        VALUES
+          (@matricula, @nome, @cpf, @pis, @data_admissao, @data_demissao,
+           @cargo, @lotacao, @salario_base, @status, NOW(), NOW())
+      `);
+      const stmtUpdate  = db.prepare(`
+        UPDATE rh_funcionarios SET
+          matricula     = @matricula,
+          nome          = @nome,
+          pis           = @pis,
+          data_admissao = @data_admissao,
+          data_demissao = @data_demissao,
+          cargo         = @cargo,
+          lotacao       = @lotacao,
+          salario_base  = @salario_base,
+          status        = @status,
+          updated_at    = NOW()
+        WHERE cpf = @cpf AND cpf != ''
+      `);
 
       let importados = 0;
       let atualizados = 0;
       const erros = [];
 
-      // P0 fix (2026-04-30): db.transaction com fn sync + .get/.run async em PG
-      // não esperava completar (BEGIN/COMMIT antes dos INSERTs/UPDATEs).
-      // Reescrito: fn async + tx.prepare dentro + await em cada call.
-      const processar = db.transaction(async (tx) => {
-        const stmtBusca   = tx.prepare(`SELECT id FROM rh_funcionarios WHERE cpf=? AND cpf!='' LIMIT 1`);
-        const stmtInsert  = tx.prepare(`
-          INSERT INTO rh_funcionarios
-            (matricula, nome, cpf, pis, data_admissao, data_demissao,
-             cargo, lotacao, salario_base, status, created_at, updated_at)
-          VALUES
-            (@matricula, @nome, @cpf, @pis, @data_admissao, @data_demissao,
-             @cargo, @lotacao, @salario_base, @status, NOW(), NOW())
-        `);
-        const stmtUpdate  = tx.prepare(`
-          UPDATE rh_funcionarios SET
-            matricula     = @matricula,
-            nome          = @nome,
-            pis           = @pis,
-            data_admissao = @data_admissao,
-            data_demissao = @data_demissao,
-            cargo         = @cargo,
-            lotacao       = @lotacao,
-            salario_base  = @salario_base,
-            status        = @status,
-            updated_at    = NOW()
-          WHERE cpf = @cpf AND cpf != ''
-        `);
-
+      const processar = db.transaction(() => {
         for (let i = 1; i < linhas.length; i++) {
           const cols = linhas[i].split(sep);
           // Linha vazia ou com apenas separadores
@@ -190,17 +188,17 @@ router.post('/importar-funcionarios', (req, res) => {
               data_demissao: dataDem, cargo, lotacao, salario_base: salario, status };
 
             if (cpf) {
-              const jaExiste = await stmtBusca.get(cpf);
+              const jaExiste = stmtBusca.get(cpf);
               if (jaExiste) {
-                await stmtUpdate.run(params);
+                stmtUpdate.run(params);
                 atualizados++;
               } else {
-                await stmtInsert.run(params);
+                stmtInsert.run(params);
                 importados++;
               }
             } else {
               // Sem CPF: sempre insere (não há chave de dedup)
-              await stmtInsert.run(params);
+              stmtInsert.run(params);
               importados++;
             }
           } catch (e) {
@@ -209,11 +207,11 @@ router.post('/importar-funcionarios', (req, res) => {
         }
       });
 
-      await processar();
+      processar();
 
-      // Registra importação (fora da tx — tx já foi committed)
+      // Registra importação
       try {
-        await db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros, status) VALUES ('ALTERDATA', @arquivo, @registros, 'OK')`).run({
+        db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros, status) VALUES ('ALTERDATA', @arquivo, @registros, 'OK')`).run({
           arquivo: req.file.originalname,
           registros: importados + atualizados
         });

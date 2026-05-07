@@ -47,32 +47,20 @@ async function setCfg(db, chave, valor) {
   `).run(chave, valor || '');
 }
 
-// P0 fix (2026-04-29): getCfg() é async (retorna Promise) - antes este helper
-// devolvia um objeto com Promises não resolvidas, quebrando toda a integração BB.
-async function getBBConfig(db) {
-  const [
-    client_id, client_secret, app_key, agencia, conta,
-    ambiente, scope, ultimo_sync,
-    cert_path, key_path, pfx_path, pfx_passphrase,
-  ] = await Promise.all([
-    getCfg(db, 'bb_client_id'),
-    getCfg(db, 'bb_client_secret'),
-    getCfg(db, 'bb_app_key'),
-    getCfg(db, 'bb_agencia'),
-    getCfg(db, 'bb_conta'),
-    getCfg(db, 'bb_ambiente'),
-    getCfg(db, 'bb_scope'),
-    getCfg(db, 'bb_ultimo_sync'),
-    getCfg(db, 'bb_cert_path'),
-    getCfg(db, 'bb_key_path'),
-    getCfg(db, 'bb_pfx_path'),
-    getCfg(db, 'bb_pfx_passphrase'),
-  ]);
+function getBBConfig(db) {
   return {
-    client_id, client_secret, app_key, agencia, conta,
-    ambiente: ambiente || 'producao',
-    scope:    scope    || 'extrato-info',
-    ultimo_sync, cert_path, key_path, pfx_path, pfx_passphrase,
+    client_id:     getCfg(db, 'bb_client_id'),
+    client_secret: getCfg(db, 'bb_client_secret'),
+    app_key:       getCfg(db, 'bb_app_key'),
+    agencia:       getCfg(db, 'bb_agencia'),
+    conta:         getCfg(db, 'bb_conta'),
+    ambiente:      getCfg(db, 'bb_ambiente') || 'producao',
+    scope:         getCfg(db, 'bb_scope')    || 'extrato-info',
+    ultimo_sync:   getCfg(db, 'bb_ultimo_sync'),
+    cert_path:     getCfg(db, 'bb_cert_path'),
+    key_path:      getCfg(db, 'bb_key_path'),
+    pfx_path:      getCfg(db, 'bb_pfx_path'),
+    pfx_passphrase:getCfg(db, 'bb_pfx_passphrase'),
   };
 }
 
@@ -102,14 +90,13 @@ function buildTlsOpts(cfg) {
 }
 
 // Retorna array de todas as contas: [{agencia, conta, descricao}]
-// P0 fix: era sync com getCfg async (Promise leakou para JSON.parse)
-async function getBBContas(db, cfg) {
+function getBBContas(db, cfg) {
   const contas = [];
   if (cfg.agencia && cfg.conta) {
     contas.push({ agencia: cfg.agencia, conta: cfg.conta, descricao: 'Conta principal' });
   }
   try {
-    const extra = await getCfg(db, 'bb_contas_extra');
+    const extra = getCfg(db, 'bb_contas_extra');
     if (extra) {
       const arr = JSON.parse(extra);
       if (Array.isArray(arr)) contas.push(...arr);
@@ -335,8 +322,21 @@ function periodoEmBlocos(dataInicio, dataFim) {
 }
 
 async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim, companyKey = '') {
-  // P0 fix: prepares movidos para DENTRO da transaction (txIns / txInsByHash)
-  // para garantir que rodem no mesmo connection do BEGIN/COMMIT.
+  // INSERT com id (numeroDocumento do BB) — usa id + bb_hash como dupla proteção
+  const ins = db.prepare(`
+    INSERT INTO extratos
+      (id, mes, data, data_iso, tipo, historico, debito, credito, bb_hash, status_conciliacao)
+    VALUES
+      (@id, @mes, @data, @data_iso, @tipo, @historico, @debito, @credito, @bb_hash, 'PENDENTE')
+  `);
+  // INSERT sem id — usa bb_hash como único critério de dedup
+  const insByHash = db.prepare(`
+    INSERT INTO extratos
+      (mes, data, data_iso, tipo, historico, debito, credito, bb_hash, status_conciliacao)
+    VALUES
+      (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito, @bb_hash, 'PENDENTE')
+  `);
+
   let imported = 0, skipped = 0;
   const blocos = periodoEmBlocos(dataInicio, dataFim);
 
@@ -348,26 +348,7 @@ async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim, co
       let lista = data.listaLancamento || data.lancamentos || data.data || [];
       if (!Array.isArray(lista)) lista = Object.values(lista);
 
-      // P0 fix v2 (2026-04-29 14:00): em PG, try/catch para 23505 (UNIQUE)
-      // dentro de transação NÃO funciona — qualquer erro aborta toda a tx
-      // ("current transaction is aborted, commands ignored").
-      // Solução correta: ON CONFLICT DO NOTHING — Postgres-native upsert.
-      // r.changes = 0 quando ja existe, sem precisar try/catch.
-      const trans = db.transaction(async (tx) => {
-        const txIns       = tx.prepare(`
-          INSERT INTO extratos
-            (id, mes, data, data_iso, tipo, historico, debito, credito, bb_hash, status_conciliacao)
-          VALUES
-            (@id, @mes, @data, @data_iso, @tipo, @historico, @debito, @credito, @bb_hash, 'PENDENTE')
-          ON CONFLICT DO NOTHING
-        `);
-        const txInsByHash = tx.prepare(`
-          INSERT INTO extratos
-            (mes, data, data_iso, tipo, historico, debito, credito, bb_hash, status_conciliacao)
-          VALUES
-            (@mes, @data, @data_iso, @tipo, @historico, @debito, @credito, @bb_hash, 'PENDENTE')
-          ON CONFLICT DO NOTHING
-        `);
+      await db.transaction(async () => {
         for (const l of lista) {
           if (!isLancamentoReal(l)) { skipped++; continue; }
           const ext = lancamentoToExtrato(l);
@@ -379,20 +360,19 @@ async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim, co
             historico: ext.historico,
             debito:    ext.debito   ?? null,
             credito:   ext.credito  ?? null,
+            // Hash garante unicidade mesmo sem numeroDocumento
             bb_hash:   bbHash(companyKey, ext.iso, ext.tipo, ext.historico,
                               ext.debito ?? 0, ext.credito ?? 0),
           };
           let r;
           if (ext.id) {
-            r = await txIns.run({ id: ext.id, ...row });
+            r = ins.run({ id: ext.id, ...row });
           } else {
-            r = await txInsByHash.run(row);
+            r = insByHash.run(row);
           }
-          // ON CONFLICT DO NOTHING: r.changes=0 = ja existia
-          if (r && r.changes > 0) imported++; else skipped++;
+          if (r.changes > 0) imported++; else skipped++;
         }
-      });
-      await trans();
+      })();
 
       hasMore = (data.numeroPaginaProximo || 0) > 0 && lista.length > 0;
       pagina++;
@@ -407,7 +387,7 @@ async function syncConta(db, cfg, token, agencia, conta, dataInicio, dataFim, co
 
 async function syncBB(db, cfg, dataInicio, dataFim, companyKey = '') {
   const token  = await getBBToken(cfg);
-  const contas = await getBBContas(db, cfg);
+  const contas = getBBContas(db, cfg);
 
   let totalImported = 0, totalSkipped = 0;
   const resultadosPorConta = [];
@@ -429,8 +409,8 @@ async function syncBB(db, cfg, dataInicio, dataFim, companyKey = '') {
 // ─── GET /bb/status ───────────────────────────────────────────────────────────
 
 router.get('/status', async (req, res) => {
-  const cfg    = await getBBConfig(req.db);
-  const contas = await getBBContas(req.db, cfg);
+  const cfg    = getBBConfig(req.db);
+  const contas = getBBContas(req.db, cfg);
   res.json({
     ok:           true,
     configurado:  isBBConfigurado(cfg),
@@ -463,18 +443,17 @@ router.post('/config', async (req, res) => {
   }
 
   const db = req.db;
-  // P0 fix: setCfg é async — sem await criava race condition
-  await setCfg(db, 'bb_client_id',     client_id);
-  await setCfg(db, 'bb_client_secret', client_secret);
-  await setCfg(db, 'bb_app_key',       app_key);
-  await setCfg(db, 'bb_agencia',       agencia);
-  await setCfg(db, 'bb_conta',         conta);
-  await setCfg(db, 'bb_ambiente',      ambiente || 'producao');
-  await setCfg(db, 'bb_scope',         scope    || 'extrato-info');
-  if (cert_path)      await setCfg(db, 'bb_cert_path',      cert_path);
-  if (key_path)       await setCfg(db, 'bb_key_path',       key_path);
-  if (pfx_path)       await setCfg(db, 'bb_pfx_path',       pfx_path);
-  if (pfx_passphrase) await setCfg(db, 'bb_pfx_passphrase', pfx_passphrase);
+  setCfg(db, 'bb_client_id',     client_id);
+  setCfg(db, 'bb_client_secret', client_secret);
+  setCfg(db, 'bb_app_key',       app_key);
+  setCfg(db, 'bb_agencia',       agencia);
+  setCfg(db, 'bb_conta',         conta);
+  setCfg(db, 'bb_ambiente',      ambiente || 'producao');
+  setCfg(db, 'bb_scope',         scope    || 'extrato-info');
+  if (cert_path)      setCfg(db, 'bb_cert_path',      cert_path);
+  if (key_path)       setCfg(db, 'bb_key_path',       key_path);
+  if (pfx_path)       setCfg(db, 'bb_pfx_path',       pfx_path);
+  if (pfx_passphrase) setCfg(db, 'bb_pfx_passphrase', pfx_passphrase);
 
   res.json({ ok: true, message: 'Credenciais BB salvas com sucesso' });
 });
@@ -488,14 +467,14 @@ router.post('/config/conta', async (req, res) => {
   const db = req.db;
   let extra = [];
   try {
-    const raw = await getCfg(db, 'bb_contas_extra');
+    const raw = getCfg(db, 'bb_contas_extra');
     if (raw) extra = JSON.parse(raw);
   } catch (_) {}
 
   // Evita duplicata
   if (!extra.find(c => c.agencia === agencia && c.conta === conta)) {
     extra.push({ agencia, conta, descricao: descricao || `Conta ${conta}` });
-    await setCfg(db, 'bb_contas_extra', JSON.stringify(extra));
+    setCfg(db, 'bb_contas_extra', JSON.stringify(extra));
   }
 
   res.json({ ok: true, total: extra.length + 1 });
@@ -510,12 +489,12 @@ router.delete('/config/conta', async (req, res) => {
   const db = req.db;
   let extra = [];
   try {
-    const raw = await getCfg(db, 'bb_contas_extra');
+    const raw = getCfg(db, 'bb_contas_extra');
     if (raw) extra = JSON.parse(raw);
   } catch (_) {}
 
   extra = extra.filter(c => c.conta !== conta);
-  await setCfg(db, 'bb_contas_extra', JSON.stringify(extra));
+  setCfg(db, 'bb_contas_extra', JSON.stringify(extra));
   res.json({ ok: true });
 });
 
@@ -523,13 +502,10 @@ router.delete('/config/conta', async (req, res) => {
 
 router.delete('/config', async (req, res) => {
   const db = req.db;
-  // P0 fix: forEach não respeita async — usar for-of pra esperar todos os deletes
-  const chaves = ['bb_client_id','bb_client_secret','bb_app_key','bb_agencia','bb_conta',
-                  'bb_ambiente','bb_scope','bb_ultimo_sync','bb_cert_path','bb_key_path',
-                  'bb_pfx_path','bb_pfx_passphrase','bb_contas_extra'];
-  for (const k of chaves) {
-    await db.prepare(`DELETE FROM configuracoes WHERE chave=?`).run(k);
-  }
+  ['bb_client_id','bb_client_secret','bb_app_key','bb_agencia','bb_conta',
+   'bb_ambiente','bb_scope','bb_ultimo_sync','bb_cert_path','bb_key_path',
+   'bb_pfx_path','bb_pfx_passphrase','bb_contas_extra']
+    .forEach(async k => await db.prepare(`DELETE FROM configuracoes WHERE chave=?`).run(k));
   res.json({ ok: true });
 });
 
@@ -537,7 +513,7 @@ router.delete('/config', async (req, res) => {
 
 router.post('/sync', async (req, res) => {
   const db  = req.db;
-  const cfg = await getBBConfig(db);
+  const cfg = getBBConfig(db);
 
   if (!isBBConfigurado(cfg)) {
     return res.status(400).json({ error: 'BB não configurado para esta empresa. Configure as credenciais primeiro.' });
@@ -564,7 +540,7 @@ router.post('/sync', async (req, res) => {
     const { imported, skipped, contas } = await syncBB(db, cfg, dataInicio, dataFim, req.companyKey);
 
     const agora = new Date().toISOString();
-    await setCfg(db, 'bb_ultimo_sync', agora);
+    setCfg(db, 'bb_ultimo_sync', agora);
 
     await db.prepare(`INSERT INTO importacoes (tipo, arquivo, registros) VALUES ('bb-sync', ?, ?)`)
       .run(`BB sync ${dataInicio} → ${dataFim}`, imported);
@@ -593,101 +569,6 @@ router.get('/historico', async (req, res) => {
     ORDER BY data_importacao DESC LIMIT 20
   `).all();
   res.json({ ok: true, historico: rows });
-});
-
-// ─── POST /bb/diag-period ─────────────────────────────────────────────────────
-// Endpoint de diagnóstico: tenta buscar lançamentos da API BB DIA A DIA
-// dentro de um período, identificando exatamente qual data dispara erro 500.
-// Útil quando uma sincronização falha com "Erro Interno do Servidor" do BB.
-//
-// Body: { agencia, conta, dataInicio: 'YYYY-MM-DD', dataFim: 'YYYY-MM-DD' }
-//   - se agencia/conta omitidos, usa a conta principal configurada
-//   - dataInicio/dataFim default = ultimos 7 dias
-//
-// NÃO grava nada no banco. Apenas tenta GET e reporta status por dia.
-router.post('/diag-period', async (req, res) => {
-  const cfg = await getBBConfig(req.db);
-  if (!isBBConfigurado(cfg)) {
-    return res.status(400).json({ error: 'BB não configurado' });
-  }
-
-  const hoje = new Date();
-  const fmtLocal = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  const hojeStr = fmtLocal(hoje);
-
-  let { agencia, conta, dataInicio, dataFim } = req.body || {};
-  agencia    = agencia || cfg.agencia;
-  conta      = conta   || cfg.conta;
-  dataFim    = dataFim || hojeStr;
-  dataInicio = dataInicio || (() => {
-    const d = new Date(hoje); d.setDate(d.getDate() - 7); return fmtLocal(d);
-  })();
-  if (dataFim    > hojeStr) dataFim    = hojeStr;
-  if (dataInicio > hojeStr) dataInicio = hojeStr;
-
-  const dias = [];
-  // Gera lista de dias (inclusivo)
-  let cur = new Date(dataInicio + 'T00:00:00Z');
-  const fim = new Date(dataFim + 'T00:00:00Z');
-  while (cur <= fim) {
-    dias.push(cur.toISOString().split('T')[0]);
-    cur.setUTCDate(cur.getUTCDate() + 1);
-  }
-
-  let token;
-  try {
-    token = await getBBToken(cfg);
-  } catch (e) {
-    return res.status(502).json({ error: 'Falha OAuth BB: ' + e.message });
-  }
-
-  const resultados = [];
-  for (const dia of dias) {
-    const t0 = Date.now();
-    try {
-      const data = await getLancamentos(cfg, token, agencia, conta, dia, dia, 1);
-      const lista = data.listaLancamento || data.lancamentos || data.data || [];
-      const qtd = Array.isArray(lista) ? lista.length : Object.keys(lista || {}).length;
-      resultados.push({
-        dia,
-        ok: true,
-        qtd_lancamentos: qtd,
-        elapsed_ms: Date.now() - t0,
-      });
-    } catch (e) {
-      // Tenta extrair codigo/ocorrencia do erro BB
-      const msg = e.message || '';
-      const codeMatch = msg.match(/"codigo":\s*"(\d+)"/);
-      const ocorMatch = msg.match(/"ocorrencia":\s*"([0-9]+)"/);
-      resultados.push({
-        dia,
-        ok: false,
-        erro: msg.substring(0, 250),
-        codigo_bb: codeMatch ? codeMatch[1] : null,
-        ocorrencia_bb: ocorMatch ? ocorMatch[1] : null,
-        elapsed_ms: Date.now() - t0,
-      });
-    }
-  }
-
-  const totalDias = resultados.length;
-  const okDias    = resultados.filter(r => r.ok).length;
-  const erroDias  = resultados.filter(r => !r.ok);
-
-  res.json({
-    ok: true,
-    agencia,
-    conta: conta.toString().replace(/.(?=.{4})/g, '*'),
-    periodo: { dataInicio, dataFim },
-    total_dias: totalDias,
-    ok_dias: okDias,
-    erro_dias: erroDias.length,
-    dias_com_erro: erroDias.map(r => ({ dia: r.dia, codigo_bb: r.codigo_bb, ocorrencia_bb: r.ocorrencia_bb, erro_resumo: r.erro.substring(0, 120) })),
-    resultados,
-    sumario: erroDias.length === 0
-      ? `✅ Todos os ${totalDias} dias responderam OK.`
-      : `❌ ${erroDias.length}/${totalDias} dias falharam. Reporte ao BB com as ocorrencias listadas.`,
-  });
 });
 
 module.exports = router;

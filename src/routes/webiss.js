@@ -386,30 +386,25 @@ router.post('/importar', async (req, res) => {
       allNfses.push(...page);
     }
 
-    // P0 fix (2026-04-29): ensureExtraColumns é async — sem await ALTER TABLE
-    // podia rodar depois do INSERT, e fn de transaction precisava ser async.
-    await ensureExtraColumns(db);
+    ensureExtraColumns(db);
+
+    const ins = db.prepare(`
+      INSERT INTO notas_fiscais
+        (numero, competencia, cidade, tomador, cnpj_tomador,
+         valor_bruto, valor_liquido,
+         inss, ir, iss, csll, pis, cofins, retencao,
+         data_emissao, status_conciliacao,
+         webiss_numero_nfse, discriminacao)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `);
 
     let imported = 0, skipped = 0;
 
-    // P0 fix v2 (2026-04-29 14:00): try/catch dentro de transaction PG aborta
-    // a tx inteira ("current transaction is aborted"). Solução: ON CONFLICT
-    // DO NOTHING — Postgres-native, evita o crash sem precisar de SAVEPOINT.
-    const trans = db.transaction(async (tx) => {
-      const ins = tx.prepare(`
-        INSERT INTO notas_fiscais
-          (numero, competencia, cidade, tomador, cnpj_tomador,
-           valor_bruto, valor_liquido,
-           inss, ir, iss, csll, pis, cofins, retencao,
-           data_emissao, status_conciliacao,
-           webiss_numero_nfse, discriminacao)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT DO NOTHING
-      `);
-      for (const nf of allNfses) {
+    db.transaction(rows => {
+      for (const nf of rows) {
         const retencao = nf.valorInss + nf.valorIr + nf.valorIss +
                          nf.valorCsll + nf.valorPis + nf.valorCofins;
-        const r = await ins.run(
+        const r = ins.run(
           nf.numero,
           nf.competencia,
           'Palmas/TO',
@@ -429,10 +424,9 @@ router.post('/importar', async (req, res) => {
           nf.numero,       // webiss_numero_nfse
           nf.discriminacao,
         );
-        if (r && r.changes > 0) imported++; else skipped++;
+        if (r.changes > 0) imported++; else skipped++;
       }
-    });
-    await trans();
+    })(allNfses);
 
     // Cenário 1: linka boletim_id por match nfse_numero (idempotente)
     const linked = await autoLinkNfBoletim(db);
@@ -691,7 +685,8 @@ router.post('/upload-cert', certBackup, certUpload.single('cert'), (req, res) =>
     return res.status(400).json({ ok: false, error: 'Nenhum arquivo enviado' });
   }
 
-  // Senha obrigatória — sem ela não dá para validar o .pfx
+  // Senha obrigatória — sem ela não dá para validar o .pfx, e aceitar um arquivo
+  // sem validação cria a chance de gravar um arquivo corrompido como cert ativo.
   const senha = req.body.senha;
   if (!senha) {
     restoreBackup();

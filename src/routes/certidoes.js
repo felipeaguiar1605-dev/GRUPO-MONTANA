@@ -37,12 +37,11 @@ function calcStatus(data_validade) {
 }
 
 async function atualizarStatus(db, rows) {
-  // P0 fix (2026-04-30): upd.run sem await + fora da tx em PG.
-  const trans = db.transaction(async (tx) => {
-    const upd = tx.prepare(`UPDATE certidoes SET status=@status, updated_at=NOW() WHERE id=@id`);
+  const upd = db.prepare(`UPDATE certidoes SET status=@status, updated_at=NOW() WHERE id=@id`);
+  const trans = db.transaction(async () => {
     for (const r of rows) {
       const novo = calcStatus(r.data_validade);
-      if (novo !== r.status) { await upd.run({ status: novo, id: r.id }); r.status = novo; }
+      if (novo !== r.status) { upd.run({ status: novo, id: r.id }); r.status = novo; }
     }
   });
   await trans();
