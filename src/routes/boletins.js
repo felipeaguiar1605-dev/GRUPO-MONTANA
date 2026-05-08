@@ -1262,14 +1262,21 @@ router.get('/:id/preview-pdf', async (req, res) => {
     const contrato = await req.db.prepare(`SELECT * FROM bol_contratos WHERE id = ?`).get(boletim.contrato_id);
     if (!contrato) return res.status(404).json({ error: 'Contrato do boletim não encontrado' });
 
-    const postos = await req.db.prepare(`SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem`).all(boletim.contrato_id);
+    // Se o boletim tem posto_id (modelo multi-boletim: 1 posto por boletim),
+    // carrega APENAS esse posto. Caso contrário, agrega todos os postos do
+    // contrato (modelo legado: 1 boletim = todos os postos).
+    let postos;
+    if (boletim.posto_id) {
+      postos = await req.db.prepare(`SELECT * FROM bol_postos WHERE id = ?`).all(boletim.posto_id);
+    } else {
+      postos = await req.db.prepare(`SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem`).all(boletim.contrato_id);
+    }
     for (const p of postos) {
       p.itens = await req.db.prepare(`SELECT * FROM bol_itens WHERE posto_id = ? ORDER BY ordem`).all(p.id);
     }
-    if (!postos.length) return res.status(400).json({ error: 'Contrato sem postos cadastrados' });
+    if (!postos.length) return res.status(400).json({ error: 'Boletim sem posto cadastrado' });
 
-    // Para preview, junta TODOS os items de TODOS os postos num "posto agregado"
-    // (mesmo formato do PDF SEDUC original — 1 boletim por contrato com todas as funções).
+    // Posto consolidado (1 posto direto OU agregado dos N postos do contrato)
     const postoAggregado = {
       campus_nome: postos.map(p => p.campus_nome || p.label_resumo).join(' · '),
       municipio: postos[0]?.municipio || '',
