@@ -2518,4 +2518,144 @@ router.post('/_dedup', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── CLONAR COMPETÊNCIA ───────────────────────────────────────
+// POST /api/boletins/_clonar-competencia
+// body: { competencia_origem: "2026-03", competencia_destino: "2026-04",
+//         modo_destino_existente: "apagar"|"ignorar"|"duplicar",  // default "apagar"
+//         dry_run: false,
+//         contratos: [ids] (opcional - filtra só esses contratos da origem) }
+router.post('/_clonar-competencia', async (req, res) => {
+  const db = req.db;
+  const {
+    competencia_origem,
+    competencia_destino,
+    modo_destino_existente = 'apagar',
+    dry_run = false,
+    contratos = null,
+  } = req.body || {};
+
+  if (!competencia_origem || !competencia_destino) {
+    return res.status(400).json({ error: 'competencia_origem e competencia_destino são obrigatórios' });
+  }
+  if (competencia_origem === competencia_destino) {
+    return res.status(400).json({ error: 'origem e destino não podem ser iguais' });
+  }
+  if (!['apagar', 'ignorar', 'duplicar'].includes(modo_destino_existente)) {
+    return res.status(400).json({ error: 'modo_destino_existente inválido' });
+  }
+
+  const [anoOrig, mesOrig] = competencia_origem.split('-');
+  const [anoDest, mesDest] = competencia_destino.split('-');
+  const mesNomeOrigem = MESES_NOME_COMPLETO[parseInt(mesOrig)] || mesOrig;
+  const mesNomeDestino = MESES_NOME_COMPLETO[parseInt(mesDest)] || mesDest;
+
+  try {
+    // 1. Origens
+    let origensQuery = 'SELECT * FROM bol_boletins WHERE competencia = ?';
+    const origensParams = [competencia_origem];
+    if (Array.isArray(contratos) && contratos.length) {
+      const ph = contratos.map(() => '?').join(',');
+      origensQuery += ` AND contrato_id IN (${ph})`;
+      origensParams.push(...contratos);
+    }
+    origensQuery += ' ORDER BY contrato_id, id';
+    const origens = await db.prepare(origensQuery).all(...origensParams);
+
+    if (origens.length === 0) {
+      return res.json({ ok: true, dry_run, plano: { motivo: 'sem boletins na origem' }, criados: 0 });
+    }
+
+    // 2. Destinos existentes (mesmos contratos da origem)
+    const contratoIds = [...new Set(origens.map(o => o.contrato_id))];
+    const phC = contratoIds.map(() => '?').join(',');
+    const destinosExistentes = await db.prepare(
+      `SELECT * FROM bol_boletins WHERE competencia = ? AND contrato_id IN (${phC})`
+    ).all(competencia_destino, ...contratoIds);
+
+    const plano = {
+      origens: origens.map(o => ({ id: o.id, contrato_id: o.contrato_id, valor_total: o.valor_total, status: o.status })),
+      destinos_pre_existentes: destinosExistentes.map(d => ({ id: d.id, contrato_id: d.contrato_id, valor_total: d.valor_total, status: d.status })),
+      modo_destino_existente,
+      sera_apagado: modo_destino_existente === 'apagar' ? destinosExistentes.length : 0,
+      sera_criado: origens.length,
+    };
+
+    if (dry_run) {
+      return res.json({ ok: true, dry_run: true, plano });
+    }
+
+    // 3. Aplicar (transação manual)
+    await db.prepare('BEGIN').run();
+    try {
+      let apagados = 0;
+      if (modo_destino_existente === 'apagar' && destinosExistentes.length) {
+        const idsDel = destinosExistentes.map(d => d.id);
+        const phD = idsDel.map(() => '?').join(',');
+        await db.prepare(`DELETE FROM bol_boletins WHERE id IN (${phD})`).run(...idsDel);
+        apagados = idsDel.length;
+      }
+
+      const criados = [];
+      for (const o of origens) {
+        // Se modo "ignorar" e já existe destino para este contrato, pula
+        if (modo_destino_existente === 'ignorar' &&
+            destinosExistentes.some(d => d.contrato_id === o.contrato_id)) {
+          continue;
+        }
+
+        // Discriminação: substitui mês/ano antigo pelo novo
+        let novaDiscr = o.discriminacao || '';
+        if (novaDiscr) {
+          const reMes = new RegExp(mesNomeOrigem, 'gi');
+          novaDiscr = novaDiscr.replace(reMes, mesNomeDestino.toUpperCase());
+          if (anoOrig !== anoDest) {
+            novaDiscr = novaDiscr.replace(new RegExp(`/${anoOrig}\\b`, 'g'), `/${anoDest}`);
+          }
+        }
+
+        const ins = await db.prepare(`INSERT INTO bol_boletins
+          (contrato_id, competencia, data_emissao, valor_base, valor_total,
+           glosas, acrescimos, discriminacao, obs, status, nfse_status)
+          VALUES (?, ?, CURRENT_DATE, ?, ?, ?, ?, ?, ?, 'rascunho', 'PENDENTE')`).run(
+          o.contrato_id,
+          competencia_destino,
+          o.valor_base ?? 0,
+          o.valor_total ?? 0,
+          o.glosas ?? 0,
+          o.acrescimos ?? 0,
+          novaDiscr,
+          o.obs ?? null
+        );
+        const novoId = ins.lastInsertRowid;
+
+        // Filhas: bol_boletim_colaboradores
+        try {
+          await db.prepare(`INSERT INTO bol_boletim_colaboradores
+            (boletim_id, posto_id, nome_colaborador, cpf, funcao, data_inicio, data_fim, observacao, ordem)
+            SELECT ?, posto_id, nome_colaborador, cpf, funcao, data_inicio, data_fim, observacao, ordem
+            FROM bol_boletim_colaboradores WHERE boletim_id = ?`).run(novoId, o.id);
+        } catch (_) {}
+
+        // Filhas: bol_boletim_glosas
+        try {
+          await db.prepare(`INSERT INTO bol_boletim_glosas
+            (boletim_id, posto_id, motivo, valor, data_referencia)
+            SELECT ?, posto_id, motivo, valor, data_referencia
+            FROM bol_boletim_glosas WHERE boletim_id = ?`).run(novoId, o.id);
+        } catch (_) {}
+
+        criados.push({ origem_id: o.id, novo_id: novoId, contrato_id: o.contrato_id });
+      }
+
+      await db.prepare('COMMIT').run();
+      res.json({ ok: true, dry_run: false, apagados, criados, total_criados: criados.length, plano });
+    } catch (innerErr) {
+      try { await db.prepare('ROLLBACK').run(); } catch (_) {}
+      throw innerErr;
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
