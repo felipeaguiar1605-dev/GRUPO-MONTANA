@@ -38,20 +38,11 @@ router.use(async (req, res, next) => {
     try { await db.prepare(`ALTER TABLE bol_boletins ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
   }
 
-  // Garantia de unicidade (1 boletim por contrato/competência). Se já existem
-  // duplicatas, o CREATE UNIQUE INDEX falha com 23505 — logamos uma vez e
-  // seguimos. O usuário pode listar via GET /_duplicatas e mergear via
-  // POST /_dedup. Após a limpeza, esse próprio middleware aplica o índice
-  // na próxima request.
-  try {
-    await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bol_uniq_contrato_comp
-                      ON bol_boletins(contrato_id, competencia)`).run();
-  } catch (e) {
-    if (!global._warnedBolDup) {
-      console.warn('[boletins] UNIQUE(contrato_id, competencia) não pôde ser aplicado — provável duplicata existente. Use GET /api/boletins/_duplicatas + POST /api/boletins/_dedup. Detalhe:', e.message);
-      global._warnedBolDup = true;
-    }
-  }
+  // NOTA (2026-05): N boletins por (contrato, competência) é caso de uso
+  // legítimo (NFs complementares, aditivos, glosa retroativa). Anteriormente
+  // havia CREATE UNIQUE INDEX aqui — removido. _duplicatas e _dedup
+  // continuam disponíveis como ferramenta manual quando o usuário sabe
+  // que algum grupo é duplicata real.
 
   // Cenário 1: vínculo NF↔boletim. Garante coluna boletim_id em notas_fiscais
   // e índice. Idempotente. (também é garantido em /emitir-nfse e webiss.js)
@@ -463,19 +454,6 @@ router.post('/gerar', async (req, res) => {
     const contrato = await req.db.prepare('SELECT * FROM bol_contratos WHERE id = ?').get(contrato_id);
     if (!contrato) return res.status(404).json({ error: 'Contrato não encontrado' });
 
-    // Anti-duplicação: 1 boletim por (contrato, competência). Mantém paridade
-    // com /gerar-boletim que já fazia esse check. Antes esse endpoint criava
-    // boletins novos sem verificar — gerando duplicatas no DB.
-    const dupExist = await req.db.prepare(
-      'SELECT id FROM bol_boletins WHERE contrato_id = ? AND competencia = ?'
-    ).get(contrato_id, competencia);
-    if (dupExist) {
-      return res.status(409).json({
-        error: `Já existe boletim para esse contrato/competência (id=${dupExist.id}). Reabra/edite o existente em vez de gerar outro.`,
-        boletim_id: dupExist.id,
-      });
-    }
-
     const postos = await req.db.prepare('SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem').all(contrato_id);
     for (const p of postos) {
       p.itens = await req.db.prepare('SELECT * FROM bol_itens WHERE posto_id = ? ORDER BY ordem').all(p.id);
@@ -561,9 +539,14 @@ router.post('/gerar-boletim', async (req, res) => {
     }
     const db = req.db;
 
-    // Verificar se já existe
-    const existente = await db.prepare('SELECT * FROM bol_boletins WHERE contrato_id=? AND competencia=?').get(contrato_id, competencia);
-    if (existente) return res.json({ data: existente, novo: false });
+    // Por padrão retorna o existente (evita duplicação acidental).
+    // Para criar deliberadamente um segundo boletim no mesmo (contrato, competência),
+    // passe { force_new: true } no body — caso de NF complementar, aditivo, etc.
+    const forceNew = req.body?.force_new === true;
+    if (!forceNew) {
+      const existente = await db.prepare('SELECT * FROM bol_boletins WHERE contrato_id=? AND competencia=? ORDER BY id DESC LIMIT 1').get(contrato_id, competencia);
+      if (existente) return res.json({ data: existente, novo: false });
+    }
 
     // Buscar contrato de boletim para calcular valor base
     const bc = await db.prepare('SELECT * FROM bol_contratos WHERE id=?').get(contrato_id);
@@ -1279,14 +1262,21 @@ router.get('/:id/preview-pdf', async (req, res) => {
     const contrato = await req.db.prepare(`SELECT * FROM bol_contratos WHERE id = ?`).get(boletim.contrato_id);
     if (!contrato) return res.status(404).json({ error: 'Contrato do boletim não encontrado' });
 
-    const postos = await req.db.prepare(`SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem`).all(boletim.contrato_id);
+    // Se o boletim tem posto_id (modelo multi-boletim: 1 posto por boletim),
+    // carrega APENAS esse posto. Caso contrário, agrega todos os postos do
+    // contrato (modelo legado: 1 boletim = todos os postos).
+    let postos;
+    if (boletim.posto_id) {
+      postos = await req.db.prepare(`SELECT * FROM bol_postos WHERE id = ?`).all(boletim.posto_id);
+    } else {
+      postos = await req.db.prepare(`SELECT * FROM bol_postos WHERE contrato_id = ? ORDER BY ordem`).all(boletim.contrato_id);
+    }
     for (const p of postos) {
       p.itens = await req.db.prepare(`SELECT * FROM bol_itens WHERE posto_id = ? ORDER BY ordem`).all(p.id);
     }
-    if (!postos.length) return res.status(400).json({ error: 'Contrato sem postos cadastrados' });
+    if (!postos.length) return res.status(400).json({ error: 'Boletim sem posto cadastrado' });
 
-    // Para preview, junta TODOS os items de TODOS os postos num "posto agregado"
-    // (mesmo formato do PDF SEDUC original — 1 boletim por contrato com todas as funções).
+    // Posto consolidado (1 posto direto OU agregado dos N postos do contrato)
     const postoAggregado = {
       campus_nome: postos.map(p => p.campus_nome || p.label_resumo).join(' · '),
       municipio: postos[0]?.municipio || '',
@@ -2533,6 +2523,405 @@ router.post('/_dedup', async (req, res) => {
       plano,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── CLONAR COMPETÊNCIA ───────────────────────────────────────
+// POST /api/boletins/_clonar-competencia
+// body: { competencia_origem: "2026-03", competencia_destino: "2026-04",
+//         modo_destino_existente: "apagar"|"ignorar"|"duplicar",  // default "apagar"
+//         dry_run: false,
+//         contratos: [ids] (opcional - filtra só esses contratos da origem) }
+router.post('/_clonar-competencia', async (req, res) => {
+  const db = req.db;
+  const {
+    competencia_origem,
+    competencia_destino,
+    modo_destino_existente = 'apagar',
+    dry_run = false,
+    contratos = null,
+  } = req.body || {};
+
+  if (!competencia_origem || !competencia_destino) {
+    return res.status(400).json({ error: 'competencia_origem e competencia_destino são obrigatórios' });
+  }
+  if (competencia_origem === competencia_destino) {
+    return res.status(400).json({ error: 'origem e destino não podem ser iguais' });
+  }
+  if (!['apagar', 'ignorar', 'duplicar'].includes(modo_destino_existente)) {
+    return res.status(400).json({ error: 'modo_destino_existente inválido' });
+  }
+
+  const [anoOrig, mesOrig] = competencia_origem.split('-');
+  const [anoDest, mesDest] = competencia_destino.split('-');
+  const mesNomeOrigem = MESES_NOME_COMPLETO[parseInt(mesOrig)] || mesOrig;
+  const mesNomeDestino = MESES_NOME_COMPLETO[parseInt(mesDest)] || mesDest;
+
+  try {
+    // 1. Origens
+    let origensQuery = 'SELECT * FROM bol_boletins WHERE competencia = ?';
+    const origensParams = [competencia_origem];
+    if (Array.isArray(contratos) && contratos.length) {
+      const ph = contratos.map(() => '?').join(',');
+      origensQuery += ` AND contrato_id IN (${ph})`;
+      origensParams.push(...contratos);
+    }
+    origensQuery += ' ORDER BY contrato_id, id';
+    const origens = await db.prepare(origensQuery).all(...origensParams);
+
+    if (origens.length === 0) {
+      return res.json({ ok: true, dry_run, plano: { motivo: 'sem boletins na origem' }, criados: 0 });
+    }
+
+    // 2. Destinos existentes (mesmos contratos da origem)
+    const contratoIds = [...new Set(origens.map(o => o.contrato_id))];
+    const phC = contratoIds.map(() => '?').join(',');
+    const destinosExistentes = await db.prepare(
+      `SELECT * FROM bol_boletins WHERE competencia = ? AND contrato_id IN (${phC})`
+    ).all(competencia_destino, ...contratoIds);
+
+    const plano = {
+      origens: origens.map(o => ({ id: o.id, contrato_id: o.contrato_id, valor_total: o.valor_total, status: o.status })),
+      destinos_pre_existentes: destinosExistentes.map(d => ({ id: d.id, contrato_id: d.contrato_id, valor_total: d.valor_total, status: d.status })),
+      modo_destino_existente,
+      sera_apagado: modo_destino_existente === 'apagar' ? destinosExistentes.length : 0,
+      sera_criado: origens.length,
+    };
+
+    if (dry_run) {
+      return res.json({ ok: true, dry_run: true, plano });
+    }
+
+    // 3. Aplicar (transação manual)
+    await db.prepare('BEGIN').run();
+    try {
+      let apagados = 0;
+      if (modo_destino_existente === 'apagar' && destinosExistentes.length) {
+        const idsDel = destinosExistentes.map(d => d.id);
+        const phD = idsDel.map(() => '?').join(',');
+        await db.prepare(`DELETE FROM bol_boletins WHERE id IN (${phD})`).run(...idsDel);
+        apagados = idsDel.length;
+      }
+
+      const criados = [];
+      for (const o of origens) {
+        // Se modo "ignorar" e já existe destino para este contrato, pula
+        if (modo_destino_existente === 'ignorar' &&
+            destinosExistentes.some(d => d.contrato_id === o.contrato_id)) {
+          continue;
+        }
+
+        // Discriminação: substitui mês/ano antigo pelo novo
+        let novaDiscr = o.discriminacao || '';
+        if (novaDiscr) {
+          const reMes = new RegExp(mesNomeOrigem, 'gi');
+          novaDiscr = novaDiscr.replace(reMes, mesNomeDestino.toUpperCase());
+          if (anoOrig !== anoDest) {
+            novaDiscr = novaDiscr.replace(new RegExp(`/${anoOrig}\\b`, 'g'), `/${anoDest}`);
+          }
+        }
+
+        const ins = await db.prepare(`INSERT INTO bol_boletins
+          (contrato_id, competencia, data_emissao, valor_base, valor_total,
+           glosas, acrescimos, discriminacao, obs, status, nfse_status)
+          VALUES (?, ?, CURRENT_DATE, ?, ?, ?, ?, ?, ?, 'rascunho', 'PENDENTE')`).run(
+          o.contrato_id,
+          competencia_destino,
+          o.valor_base ?? 0,
+          o.valor_total ?? 0,
+          o.glosas ?? 0,
+          o.acrescimos ?? 0,
+          novaDiscr,
+          o.obs ?? null
+        );
+        const novoId = ins.lastInsertRowid;
+
+        // Filhas: bol_boletim_colaboradores
+        try {
+          await db.prepare(`INSERT INTO bol_boletim_colaboradores
+            (boletim_id, posto_id, nome_colaborador, cpf, funcao, data_inicio, data_fim, observacao, ordem)
+            SELECT ?, posto_id, nome_colaborador, cpf, funcao, data_inicio, data_fim, observacao, ordem
+            FROM bol_boletim_colaboradores WHERE boletim_id = ?`).run(novoId, o.id);
+        } catch (_) {}
+
+        // Filhas: bol_boletim_glosas
+        try {
+          await db.prepare(`INSERT INTO bol_boletim_glosas
+            (boletim_id, posto_id, motivo, valor, data_referencia)
+            SELECT ?, posto_id, motivo, valor, data_referencia
+            FROM bol_boletim_glosas WHERE boletim_id = ?`).run(novoId, o.id);
+        } catch (_) {}
+
+        criados.push({ origem_id: o.id, novo_id: novoId, contrato_id: o.contrato_id });
+      }
+
+      await db.prepare('COMMIT').run();
+      res.json({ ok: true, dry_run: false, apagados, criados, total_criados: criados.length, plano });
+    } catch (innerErr) {
+      try { await db.prepare('ROLLBACK').run(); } catch (_) {}
+      throw innerErr;
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── GERAR BOLETINS POR POSTO ─────────────────────────────────
+// POST /api/boletins/_gerar-por-postos
+// body: { contrato_id, competencia, modo_destino_existente: 'apagar'|'ignorar', dry_run: false }
+// Cria 1 boletim por posto do contrato, com valor_total = SUM(itens.qtd * valor_unitario)
+router.post('/_gerar-por-postos', async (req, res) => {
+  const db = req.db;
+  const {
+    contrato_id,
+    competencia,
+    modo_destino_existente = 'apagar',
+    dry_run = false,
+  } = req.body || {};
+
+  if (!contrato_id || !competencia) {
+    return res.status(400).json({ error: 'contrato_id e competencia são obrigatórios' });
+  }
+  if (!['apagar', 'ignorar'].includes(modo_destino_existente)) {
+    return res.status(400).json({ error: 'modo_destino_existente inválido' });
+  }
+
+  try {
+    // 1. Postos do contrato com valor agregado dos itens
+    const postos = await db.prepare(`
+      SELECT p.id, p.campus_nome, p.municipio, p.descricao_posto,
+             COALESCE(SUM(i.quantidade * i.valor_unitario), 0) AS valor_total
+      FROM bol_postos p
+      LEFT JOIN bol_itens i ON i.posto_id = p.id
+      WHERE p.contrato_id = ?
+      GROUP BY p.id, p.campus_nome, p.municipio, p.descricao_posto, p.ordem
+      ORDER BY p.ordem, p.id
+    `).all(contrato_id);
+
+    if (!postos.length) {
+      return res.status(404).json({ error: 'Contrato sem postos cadastrados' });
+    }
+
+    // 2. Boletins já existentes nessa competência
+    const existentes = await db.prepare(
+      `SELECT id, posto_id FROM bol_boletins WHERE contrato_id=? AND competencia=?`
+    ).all(contrato_id, competencia);
+
+    // 3. Contrato info para discriminação
+    const bc = await db.prepare('SELECT * FROM bol_contratos WHERE id=?').get(contrato_id);
+    const ct = bc ? await db.prepare('SELECT * FROM contratos WHERE numContrato=?').get(bc.contrato_ref) : null;
+
+    const [ano, mes] = competencia.split('-');
+    const mesNome = MESES_NOME_COMPLETO[parseInt(mes)] || mes;
+    const tipoServico = bc?.descricao_servico || ct?.contrato || 'SERVIÇOS';
+    const numContrato = bc?.contrato_ref || bc?.numero_contrato || '';
+
+    const valorTotalContrato = postos.reduce((s, p) => s + Number(p.valor_total || 0), 0);
+
+    const plano = {
+      contrato_id,
+      competencia,
+      total_postos: postos.length,
+      boletins_existentes: existentes.length,
+      sera_apagado: modo_destino_existente === 'apagar' ? existentes.length : 0,
+      sera_criado: modo_destino_existente === 'apagar'
+        ? postos.length
+        : postos.filter(p => !existentes.some(e => e.posto_id === p.id)).length,
+      valor_total_contrato: valorTotalContrato,
+    };
+
+    if (dry_run) {
+      return res.json({ ok: true, dry_run: true, plano, postos });
+    }
+
+    // 4. Aplicar em transação
+    await db.prepare('BEGIN').run();
+    try {
+      let apagados = 0;
+      if (modo_destino_existente === 'apagar' && existentes.length) {
+        for (const e of existentes) {
+          await db.prepare('DELETE FROM bol_boletins WHERE id = ?').run(e.id);
+          apagados++;
+        }
+      }
+
+      const criados = [];
+      for (const p of postos) {
+        if (modo_destino_existente === 'ignorar' &&
+            existentes.some(e => e.posto_id === p.id)) {
+          continue;
+        }
+
+        const valor = Number(p.valor_total) || 0;
+        const labelPosto = p.descricao_posto || p.campus_nome || '';
+        const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServico.toUpperCase()} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. POSTO: ${labelPosto.toUpperCase()}.`;
+
+        const ins = await db.prepare(`INSERT INTO bol_boletins
+          (contrato_id, posto_id, competencia, data_emissao,
+           valor_base, valor_total, glosas, acrescimos,
+           discriminacao, status, nfse_status)
+          VALUES (?, ?, ?, CURRENT_DATE, ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')`).run(
+          contrato_id, p.id, competencia, valor, valor, discriminacao
+        );
+
+        criados.push({
+          boletim_id: ins.lastInsertRowid,
+          posto_id: p.id,
+          posto: p.campus_nome,
+          municipio: p.municipio,
+          valor,
+        });
+      }
+
+      await db.prepare('COMMIT').run();
+      res.json({
+        ok: true,
+        dry_run: false,
+        apagados,
+        criados,
+        total_criados: criados.length,
+        valor_total_contrato: valorTotalContrato,
+        plano,
+      });
+    } catch (innerErr) {
+      try { await db.prepare('ROLLBACK').run(); } catch (_) {}
+      throw innerErr;
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── PREVIEW NFS-e ────────────────────────────────────────────
+// GET /api/boletins/:id/preview-nfse
+// Retorna o payload que SERIA enviado ao WebISS (sem emitir nada)
+// + diagnóstico de campos faltantes
+router.get('/:id/preview-nfse', async (req, res) => {
+  const db = req.db;
+  const companyKey = req.companyKey;
+
+  try {
+    const bol = await db.prepare(`
+      SELECT b.*,
+             COALESCE(b.valor_total, b.total_geral, 0) AS valor_efetivo,
+             bc.contrato_ref, bc.contratante as bc_contratante,
+             bc.orgao as bc_orgao, bc.descricao_servico as bc_descricao,
+             bc.insc_municipal as insc_contratante,
+             bc.numero_contrato,
+             COALESCE(
+               (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+               (SELECT c2.orgao FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1)
+             ) AS cnpj_tomador_contrato,
+             COALESCE(
+               (SELECT c1.numContrato FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+               (SELECT c2.numContrato FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1)
+             ) AS num_contrato_encontrado
+      FROM bol_boletins b
+      JOIN bol_contratos bc ON b.contrato_id = bc.id
+      WHERE b.id=?`).get(req.params.id);
+
+    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+
+    const today = new Date().toISOString().substring(0, 10);
+    const competenciaData = bol.competencia.length === 7
+      ? `${bol.competencia}-01`
+      : bol.competencia;
+
+    const aliqISS = 0.02;
+    const valorISS = Math.round(bol.valor_efetivo * aliqISS * 100) / 100;
+
+    const tomadorCnpj  = (bol.insc_contratante || bol.cnpj_tomador_contrato || '').replace(/\D/g, '');
+    const tomadorRazao = bol.bc_contratante || bol.bc_orgao || 'TOMADOR NÃO CONFIGURADO';
+
+    const rpsNum = bol.rps_numero || String(bol.id).padStart(10, '0');
+
+    // Configurações da prestadora
+    const inscPrestadora = process.env[`WEBISS_INSC_${companyKey.toUpperCase()}`] || '';
+    const certPath = path.join(__dirname, '..', '..', 'certificados', `${companyKey}.pfx`);
+    const certExiste = fs.existsSync(certPath);
+    const certSenha = process.env[`WEBISS_CERT_SENHA_${companyKey.toUpperCase()}`];
+
+    const rpsBody = {
+      rps: {
+        numero:       rpsNum,
+        serie:        'A',
+        tipo:         1,
+        dataEmissao:  today,
+        competencia:  competenciaData,
+        servico: {
+          valorServicos:     bol.valor_efetivo,
+          valorDeducoes:     0,
+          valorPis:          0,
+          valorCofins:       0,
+          valorInss:         0,
+          valorIr:           0,
+          valorCsll:         0,
+          issRetido:         false,
+          valorIss:          valorISS,
+          aliquota:          aliqISS,
+          itemLista:         '07.17',
+          codTributacao:     '070700',
+          discriminacao:     (bol.discriminacao || 'PRESTAÇÃO DE SERVIÇOS').substring(0, 2000),
+          exigibilidadeIss:  1,
+        },
+        tomador: {
+          cnpj:        tomadorCnpj || null,
+          razaoSocial: tomadorRazao,
+          email:       '',
+        },
+      },
+    };
+
+    // Validações / pendências
+    const pendencias = [];
+    if (bol.nfse_status === 'EMITIDA') pendencias.push(`NFS-e ${bol.nfse_numero} já foi emitida`);
+    if (bol.status !== 'aprovado')     pendencias.push(`Status do boletim deve ser "aprovado" (atual: "${bol.status}")`);
+    if (!bol.valor_efetivo || bol.valor_efetivo <= 0) pendencias.push('Valor do boletim é zero ou negativo');
+    if (!tomadorCnpj)                  pendencias.push('CNPJ do tomador NÃO configurado (insc_municipal ou contrato_ref)');
+    if (!inscPrestadora)               pendencias.push(`WEBISS_INSC_${companyKey.toUpperCase()} não configurado no .env`);
+    if (!certExiste)                   pendencias.push(`Certificado A1 não encontrado: ${certPath}`);
+    if (!certSenha)                    pendencias.push(`WEBISS_CERT_SENHA_${companyKey.toUpperCase()} não configurado no .env`);
+
+    res.json({
+      ok: pendencias.length === 0,
+      pendencias,
+      boletim: {
+        id: bol.id,
+        contrato_id: bol.contrato_id,
+        posto_id: bol.posto_id,
+        competencia: bol.competencia,
+        status: bol.status,
+        nfse_status: bol.nfse_status,
+        nfse_numero: bol.nfse_numero,
+        valor_total: bol.valor_efetivo,
+      },
+      contrato: {
+        nome: bol.bc_contratante,
+        contrato_ref: bol.contrato_ref,
+        numero_contrato: bol.numero_contrato,
+        num_contrato_encontrado: bol.num_contrato_encontrado,
+        cnpj_tomador_resolvido: tomadorCnpj,
+        razao_tomador_resolvida: tomadorRazao,
+      },
+      prestadora: {
+        empresa: companyKey,
+        inscricao_municipal: inscPrestadora || '(NÃO CONFIGURADA)',
+        certificado_path: certPath,
+        certificado_existe: certExiste,
+        senha_certificado: certSenha ? '(configurada)' : '(NÃO CONFIGURADA)',
+      },
+      tributario: {
+        item_lista_servicos: '07.17',
+        codigo_tributacao_municipio: '070700',
+        aliquota_iss: aliqISS,
+        valor_iss: valorISS,
+        iss_retido: false,
+        exigibilidade_iss: 1,
+      },
+      payload_webiss: rpsBody,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
