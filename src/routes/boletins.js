@@ -2658,4 +2658,130 @@ router.post('/_clonar-competencia', async (req, res) => {
   }
 });
 
+// ─── GERAR BOLETINS POR POSTO ─────────────────────────────────
+// POST /api/boletins/_gerar-por-postos
+// body: { contrato_id, competencia, modo_destino_existente: 'apagar'|'ignorar', dry_run: false }
+// Cria 1 boletim por posto do contrato, com valor_total = SUM(itens.qtd * valor_unitario)
+router.post('/_gerar-por-postos', async (req, res) => {
+  const db = req.db;
+  const {
+    contrato_id,
+    competencia,
+    modo_destino_existente = 'apagar',
+    dry_run = false,
+  } = req.body || {};
+
+  if (!contrato_id || !competencia) {
+    return res.status(400).json({ error: 'contrato_id e competencia são obrigatórios' });
+  }
+  if (!['apagar', 'ignorar'].includes(modo_destino_existente)) {
+    return res.status(400).json({ error: 'modo_destino_existente inválido' });
+  }
+
+  try {
+    // 1. Postos do contrato com valor agregado dos itens
+    const postos = await db.prepare(`
+      SELECT p.id, p.campus_nome, p.municipio, p.descricao_posto,
+             COALESCE(SUM(i.quantidade * i.valor_unitario), 0) AS valor_total
+      FROM bol_postos p
+      LEFT JOIN bol_itens i ON i.posto_id = p.id
+      WHERE p.contrato_id = ?
+      GROUP BY p.id, p.campus_nome, p.municipio, p.descricao_posto, p.ordem
+      ORDER BY p.ordem, p.id
+    `).all(contrato_id);
+
+    if (!postos.length) {
+      return res.status(404).json({ error: 'Contrato sem postos cadastrados' });
+    }
+
+    // 2. Boletins já existentes nessa competência
+    const existentes = await db.prepare(
+      `SELECT id, posto_id FROM bol_boletins WHERE contrato_id=? AND competencia=?`
+    ).all(contrato_id, competencia);
+
+    // 3. Contrato info para discriminação
+    const bc = await db.prepare('SELECT * FROM bol_contratos WHERE id=?').get(contrato_id);
+    const ct = bc ? await db.prepare('SELECT * FROM contratos WHERE numContrato=?').get(bc.contrato_ref) : null;
+
+    const [ano, mes] = competencia.split('-');
+    const mesNome = MESES_NOME_COMPLETO[parseInt(mes)] || mes;
+    const tipoServico = bc?.descricao_servico || ct?.contrato || 'SERVIÇOS';
+    const numContrato = bc?.contrato_ref || bc?.numero_contrato || '';
+
+    const valorTotalContrato = postos.reduce((s, p) => s + Number(p.valor_total || 0), 0);
+
+    const plano = {
+      contrato_id,
+      competencia,
+      total_postos: postos.length,
+      boletins_existentes: existentes.length,
+      sera_apagado: modo_destino_existente === 'apagar' ? existentes.length : 0,
+      sera_criado: modo_destino_existente === 'apagar'
+        ? postos.length
+        : postos.filter(p => !existentes.some(e => e.posto_id === p.id)).length,
+      valor_total_contrato: valorTotalContrato,
+    };
+
+    if (dry_run) {
+      return res.json({ ok: true, dry_run: true, plano, postos });
+    }
+
+    // 4. Aplicar em transação
+    await db.prepare('BEGIN').run();
+    try {
+      let apagados = 0;
+      if (modo_destino_existente === 'apagar' && existentes.length) {
+        for (const e of existentes) {
+          await db.prepare('DELETE FROM bol_boletins WHERE id = ?').run(e.id);
+          apagados++;
+        }
+      }
+
+      const criados = [];
+      for (const p of postos) {
+        if (modo_destino_existente === 'ignorar' &&
+            existentes.some(e => e.posto_id === p.id)) {
+          continue;
+        }
+
+        const valor = Number(p.valor_total) || 0;
+        const labelPosto = p.descricao_posto || p.campus_nome || '';
+        const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServico.toUpperCase()} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. POSTO: ${labelPosto.toUpperCase()}.`;
+
+        const ins = await db.prepare(`INSERT INTO bol_boletins
+          (contrato_id, posto_id, competencia, data_emissao,
+           valor_base, valor_total, glosas, acrescimos,
+           discriminacao, status, nfse_status)
+          VALUES (?, ?, ?, CURRENT_DATE, ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')`).run(
+          contrato_id, p.id, competencia, valor, valor, discriminacao
+        );
+
+        criados.push({
+          boletim_id: ins.lastInsertRowid,
+          posto_id: p.id,
+          posto: p.campus_nome,
+          municipio: p.municipio,
+          valor,
+        });
+      }
+
+      await db.prepare('COMMIT').run();
+      res.json({
+        ok: true,
+        dry_run: false,
+        apagados,
+        criados,
+        total_criados: criados.length,
+        valor_total_contrato: valorTotalContrato,
+        plano,
+      });
+    } catch (innerErr) {
+      try { await db.prepare('ROLLBACK').run(); } catch (_) {}
+      throw innerErr;
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
