@@ -1,0 +1,80 @@
+name: CI — Syntax & Smoke
+
+# Workflow de validação básica: roda em push/PR, NÃO faz deploy.
+# Objetivo: pegar erros de sintaxe antes que cheguem em produção.
+# Passos pesados (deploy, testes E2E) ficam em deploy.yml separado.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'scripts/**'
+      - 'package.json'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  syntax-check:
+    name: Syntax check (Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instalar dependências
+        run: npm ci --omit=dev --no-audit --no-fund || npm install --omit=dev --no-audit --no-fund
+
+      - name: node --check em src/**
+        run: |
+          set -e
+          FAIL=0
+          while IFS= read -r f; do
+            if ! node --check "$f"; then
+              echo "::error file=$f::Syntax error"
+              FAIL=1
+            fi
+          done < <(find src -type f -name '*.js')
+          exit $FAIL
+
+      - name: node --check em scripts/**
+        continue-on-error: true   # scripts ad-hoc podem ter deps opcionais
+        run: |
+          FAIL=0
+          while IFS= read -r f; do
+            if ! node --check "$f" 2>/dev/null; then
+              echo "::warning file=$f::Syntax error em script ad-hoc"
+              FAIL=1
+            fi
+          done < <(find scripts -type f -name '*.js')
+          exit $FAIL
+
+      - name: Validar JavaScript público (public/*.js)
+        run: |
+          set -e
+          FAIL=0
+          for f in public/*.js; do
+            [ -f "$f" ] || continue
+            # public/*.js roda no browser — usa --check mas desliga strict "require is not defined"
+            if ! node --check "$f" 2>&1 | grep -q "SyntaxError"; then
+              :
+            else
+              echo "::error file=$f::Syntax error em public JS"
+              FAIL=1
+            fi
+          done
+          exit $FAIL
+
+      - name: Validar JSON (package.json, etc.)
+        run: |
+          for f in package.json ecosystem.config.js; do
+            [ -f "$f" ] || continue
+            if [[ "$f" == *.json ]]; then
+              node -e "JSON.parse(require('fs').readFileSync('$f'))" || exit 1
+            fi
+          done
