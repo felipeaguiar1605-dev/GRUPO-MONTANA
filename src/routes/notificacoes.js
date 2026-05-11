@@ -444,8 +444,8 @@ async function verificarDuplicatas(db, companyKey) {
       WHERE (bb_hash IS NULL OR bb_hash = '') AND data_iso != ''
         AND (COALESCE(debito,0) + COALESCE(credito,0)) > 0
       GROUP BY data_iso, historico, debito, credito, tipo
-      HAVING cnt > 1
-      ORDER BY cnt DESC LIMIT 30
+      HAVING COUNT(*) > 1
+      ORDER BY COUNT(*) DESC LIMIT 30
     `).all();
     resultado.extratos = dupExt;
     if (dupExt.length > 0) resultado.temDuplicatas = true;
@@ -456,7 +456,7 @@ async function verificarDuplicatas(db, companyKey) {
     const dupHash = await db.prepare(`
       SELECT bb_hash, COUNT(*) cnt FROM extratos
       WHERE bb_hash != '' AND bb_hash NOT LIKE '%_dup%'
-      GROUP BY bb_hash HAVING cnt > 1 LIMIT 20
+      GROUP BY bb_hash HAVING COUNT(*) > 1 LIMIT 20
     `).all();
     if (dupHash.length > 0) {
       resultado.extratos.push(...dupHash.map(r => ({ ...r, tipo_duplic: 'bb_hash' })));
@@ -471,8 +471,8 @@ async function verificarDuplicatas(db, companyKey) {
              STRING_AGG(tomador::text, ' / ') tomadores
       FROM notas_fiscais
       WHERE numero != '' AND numero != '0'
-      GROUP BY numero HAVING cnt > 1
-      ORDER BY cnt DESC LIMIT 20
+      GROUP BY numero HAVING COUNT(*) > 1
+      ORDER BY COUNT(*) DESC LIMIT 20
     `).all();
     resultado.notas = dupNfs;
     if (dupNfs.length > 0) resultado.temDuplicatas = true;
@@ -486,8 +486,8 @@ async function verificarDuplicatas(db, companyKey) {
              MIN(valor_bruto) valor_bruto
       FROM despesas
       WHERE dedup_hash != '' AND dedup_hash NOT LIKE '%_dup%'
-      GROUP BY dedup_hash HAVING cnt > 1
-      ORDER BY cnt DESC LIMIT 20
+      GROUP BY dedup_hash HAVING COUNT(*) > 1
+      ORDER BY COUNT(*) DESC LIMIT 20
     `).all();
     resultado.despesas = dupDesp;
     if (dupDesp.length > 0) resultado.temDuplicatas = true;

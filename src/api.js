@@ -876,7 +876,9 @@ router.get('/extratos', async (req, res) => {
   params.limit = parseInt(limit);
   params.offset = offset;
 
-  const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM extratos WHERE ${where}`).get(params).cnt;
+  // FIX 2026-05-05: .cnt deve ser acessado APÓS o await, não antes (retornava undefined)
+  const totalRow = await req.db.prepare(`SELECT COUNT(*) as cnt FROM extratos WHERE ${where}`).get(params);
+  const total = totalRow?.cnt ?? 0;
   const rows = await req.db.prepare(`SELECT * FROM extratos WHERE ${where} ORDER BY data_iso DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
 
   res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
@@ -1552,7 +1554,8 @@ router.get('/liquidacoes', async (req, res) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit); params.offset = offset;
 
-  const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM liquidacoes WHERE ${where}`).get(params).cnt;
+  const totalRow1 = await req.db.prepare(`SELECT COUNT(*) as cnt FROM liquidacoes WHERE ${where}`).get(params);
+  const total = totalRow1?.cnt ?? 0;
   const rows = await req.db.prepare(`SELECT * FROM liquidacoes WHERE ${where} ORDER BY data_liquidacao_iso DESC LIMIT @limit OFFSET @offset`).all(params);
   res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
 });
@@ -1568,7 +1571,8 @@ router.get('/pagamentos', async (req, res) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit); params.offset = offset;
 
-  const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM pagamentos WHERE ${where}`).get(params).cnt;
+  const totalRow2 = await req.db.prepare(`SELECT COUNT(*) as cnt FROM pagamentos WHERE ${where}`).get(params);
+  const total = totalRow2?.cnt ?? 0;
   const rows = await req.db.prepare(`SELECT * FROM pagamentos WHERE ${where} ORDER BY data_pagamento_iso DESC LIMIT @limit OFFSET @offset`).all(params);
   res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
 });
@@ -2460,7 +2464,8 @@ router.get('/despesas', async (req, res) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
   params.limit = parseInt(limit); params.offset = offset;
 
-  const total = await req.db.prepare(`SELECT COUNT(*) as cnt FROM despesas WHERE ${where}`).get(params).cnt;
+  const totalRow3 = await req.db.prepare(`SELECT COUNT(*) as cnt FROM despesas WHERE ${where}`).get(params);
+  const total = totalRow3?.cnt ?? 0;
   const rows  = await req.db.prepare(`SELECT * FROM despesas WHERE ${where} ORDER BY data_iso DESC, id DESC LIMIT @limit OFFSET @offset`).all(params);
   res.json({ total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), data: rows });
 });
@@ -2985,7 +2990,7 @@ router.patch('/despesas/:id', async (req, res) => {
   if (!updates.length) return res.status(400).json({ error: 'Nada para atualizar' });
 
   // Recalculate totals
-  updates.push('updated_at = datetime(\'now\')');
+  updates.push('updated_at = NOW()');
   await req.db.prepare(`UPDATE despesas SET ${updates.join(', ')} WHERE id = @id`).run(params);
 
   // Recalculate retencao and liquido after field updates
