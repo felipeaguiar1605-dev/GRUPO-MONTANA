@@ -3198,6 +3198,20 @@ async function autoVincularNFs() {
 let _pcDados = null;  // cache da última apuração
 
 function initPisCofinsSeg() {
+  // FIX 2026-05-09: empresas Simples Nacional não têm apuração separada de PIS/COFINS
+  const PISCOFINS_NAO_APLIC = ['portodovau', 'mustang'];
+  if (PISCOFINS_NAO_APLIC.includes(currentCompany)) {
+    const meta = COMPANIES_META[currentCompany] || {};
+    _pcSetText('pc-titulo', '💰 Apuração PIS/COFINS');
+    _pcSetText('pc-subtitulo', `${meta.nome || currentCompany} — Simples Nacional`);
+    _pcHide('pc-loading');
+    _pcHide('pc-cards');
+    _pcHide('pc-btn-excel');
+    _pcShow('pc-aviso-nao-aplicavel');
+    _pcSetText('pc-aviso-nao-aplicavel',
+      `${meta.nome || currentCompany} utiliza Simples Nacional — PIS/COFINS recolhidos via DAS unificado. Apuração separada não se aplica.`);
+    return;
+  }
   const inp = document.getElementById('pc-mes');
   if (inp && !inp.value) {
     const now = new Date();
@@ -3213,6 +3227,10 @@ function _pcShow(id, display = 'block') { const el = document.getElementById(id)
 function _pcHide(id) { _pcShow(id, 'none'); }
 
 async function loadPisCofinsSeg() {
+  // FIX 2026-05-09: guard — evita chamada de API para Simples Nacional
+  const PISCOFINS_NAO_APLIC = ['portodovau', 'mustang'];
+  if (PISCOFINS_NAO_APLIC.includes(currentCompany)) { initPisCofinsSeg(); return; }
+
   const anoMes = document.getElementById('pc-mes')?.value;
   if (!anoMes) return;
 
@@ -3410,21 +3428,29 @@ async function loadInssRetido() {
     const dctfInp = document.getElementById('ir-dctfweb-valor');
     if (dctfInp && r.dctfweb_declarado > 0) dctfInp.value = r.dctfweb_declarado.toFixed(2);
 
-    // Alerta gap
+    // FIX 2026-05-09: Alerta gap — só mostra vermelho se o contador já informou
+    // um valor E ele diverge. Quando dctfweb=0 (ainda não informado), mostra âmbar.
     const alertEl = document.getElementById('ir-alerta');
-    if (r.gap > 1) {
-      alertEl.style.display = 'block';
-      alertEl.innerHTML = `⚠ DCTFWeb de ${d.competencia} declara apenas <strong>${brl(r.dctfweb_declarado)}</strong>.` +
-        ` INSS retido nas NFs: <strong>${brl(r.total_inss_declarado)}</strong>.` +
-        ` Gap: <strong>${brl(r.gap)}</strong> — possível necessidade de retificação.`;
-    } else if (r.dctfweb_declarado === 0) {
-      alertEl.style.display = 'block';
-      alertEl.style.background = '#fef3c7';
-      alertEl.style.borderColor = '#fcd34d';
-      alertEl.style.color = '#92400e';
-      alertEl.innerHTML = `⚠ DCTFWeb não informada para ${d.competencia}. Informe o valor declarado abaixo para calcular o gap.`;
-    } else {
-      alertEl.style.display = 'none';
+    if (alertEl) {
+      if (r.dctfweb_declarado > 0 && r.gap > 1) {
+        // Vermelho: valor informado mas diverge → possível retificação
+        alertEl.style.display = 'block';
+        alertEl.style.background = '#fee2e2';
+        alertEl.style.borderColor = '#fca5a5';
+        alertEl.style.color = '#991b1b';
+        alertEl.innerHTML = `⚠ DCTFWeb de ${d.competencia} declara apenas <strong>${brl(r.dctfweb_declarado)}</strong>.` +
+          ` INSS retido nas NFs: <strong>${brl(r.total_inss_declarado)}</strong>.` +
+          ` Gap: <strong>${brl(r.gap)}</strong> — verifique a necessidade de retificação.`;
+      } else if (!r.dctfweb_declarado) {
+        // Âmbar: ainda não informado → pede que o contador preencha abaixo
+        alertEl.style.display = 'block';
+        alertEl.style.background = '#fef3c7';
+        alertEl.style.borderColor = '#fcd34d';
+        alertEl.style.color = '#92400e';
+        alertEl.innerHTML = `ℹ️ DCTFWeb de ${d.competencia} ainda não informada. Preencha o valor declarado no campo abaixo.`;
+      } else {
+        alertEl.style.display = 'none';
+      }
     }
 
     // KPIs
