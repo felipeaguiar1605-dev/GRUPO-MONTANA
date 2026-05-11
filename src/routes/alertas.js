@@ -126,15 +126,31 @@ router.get('/', async (req, res) => {
   }
 
   // ── 5. Patrimônio depreciado >90% ─────────────────────────────
+  // valor_atual não existe como coluna — é calculado em runtime a partir de
+  // valor_aquisicao, data_aquisicao, vida_util_meses e valor_residual.
+  // Reproduzimos aqui a mesma fórmula de patrimonio.js (linha 121-141).
   try {
-    const depreciados = await db.prepare(`
-      SELECT descricao, valor_aquisicao, valor_atual, categoria
+    const ativos = await db.prepare(`
+      SELECT descricao, valor_aquisicao, valor_residual, vida_util_meses,
+             data_aquisicao, categoria
       FROM patrimonio
-      WHERE status = 'ATIVO'
-        AND valor_aquisicao > 0
-        AND valor_atual < valor_aquisicao * 0.10
-      ORDER BY valor_atual ASC LIMIT 5
+      WHERE status = 'ATIVO' AND valor_aquisicao > 0 AND vida_util_meses > 0
+        AND data_aquisicao IS NOT NULL
     `).all();
+
+    const hoje = new Date();
+    const depreciados = ativos.map(p => {
+      const aq = new Date(p.data_aquisicao);
+      const meses = Math.max(0, (hoje.getFullYear() - aq.getFullYear()) * 12 + (hoje.getMonth() - aq.getMonth()));
+      const mesesUsados = Math.min(meses, p.vida_util_meses);
+      const baseDeprec = Math.max(p.valor_aquisicao - (p.valor_residual || 0), 0);
+      const deprAcum   = (baseDeprec / p.vida_util_meses) * mesesUsados;
+      const valorAtual = Math.max(p.valor_aquisicao - deprAcum, p.valor_residual || 0);
+      return { ...p, valor_atual: valorAtual };
+    })
+    .filter(p => p.valor_atual < p.valor_aquisicao * 0.10)
+    .sort((a, b) => a.valor_atual - b.valor_atual)
+    .slice(0, 5);
 
     if (depreciados.length > 0) {
       alertas.push({
@@ -208,10 +224,29 @@ router.get('/', async (req, res) => {
   }
 
   // ── 7. Caixa livre crítico ────────────────────────────────────
+  // Calcula cobertura em dias: saldo_atual / burn_rate_diario.
+  // burn_rate = média de saídas (debitos) dos últimos 90 dias.
+  // Schema legacy tinha caixa_parametros.dias_cobertura mas a coluna foi removida —
+  // agora calculamos inline a partir de extratos.
   try {
-    const param = await db.prepare(`SELECT dias_cobertura FROM caixa_parametros LIMIT 1`).get();
-    if (param && param.dias_cobertura != null) {
-      const dias = parseFloat(param.dias_cobertura);
+    const saldoRow = await db.prepare(`
+      SELECT COALESCE(SUM(credito) - SUM(debito), 0) AS saldo
+      FROM extratos
+      WHERE data_iso IS NOT NULL AND data_iso != ''
+    `).get();
+
+    const burnRow = await db.prepare(`
+      SELECT COALESCE(SUM(debito), 0) AS total_saidas
+      FROM extratos
+      WHERE data_iso IS NOT NULL AND data_iso != ''
+        AND safe_date(data_iso) >= CURRENT_DATE - INTERVAL '90 days'
+        AND safe_date(data_iso) < CURRENT_DATE
+    `).get();
+
+    const saldo = parseFloat(saldoRow?.saldo || 0);
+    const burnDia = parseFloat(burnRow?.total_saidas || 0) / 90;
+    if (saldo > 0 && burnDia > 0) {
+      const dias = saldo / burnDia;
       if (dias < 15) {
         alertas.push({
           tipo: 'caixa_critico',
@@ -233,7 +268,9 @@ router.get('/', async (req, res) => {
       }
     }
   } catch(e) {
-    // tabela pode não existir — ignora silenciosamente
+    if (!e.message?.includes('does not exist') && !e.message?.includes('no such table')) {
+      console.error('[alertas] caixa livre:', e.message);
+    }
   }
 
   // ── 8. Certidões vencidas e próximas do vencimento ───────────

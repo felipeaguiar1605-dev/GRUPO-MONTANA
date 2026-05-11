@@ -88,7 +88,7 @@ async function seedAdmin(db) {
     // Migra usuário financeiro também
     const senhaFin = process.env.FINANCEIRO_SENHA || 'fin2026';
     const hashFin = bcrypt.hashSync(senhaFin, 10);
-    db.prepare(`
+    await db.prepare(`
       INSERT OR IGNORE INTO usuarios (usuario, nome, email, senha_hash, role, criado_por)
       VALUES ('financeiro', 'Financeiro', '', ?, 'financeiro', 'sistema')
     `).run(hashFin);
@@ -97,9 +97,9 @@ async function seedAdmin(db) {
 
 // ─── GET /api/usuarios — lista usuários (admin only) ─────────────
 
-router.get('/', soAdmin, (req, res) => {
-  ensureTable(req.db);
-  const rows = req.db.prepare(`
+router.get('/', soAdmin, async (req, res) => {
+  await ensureTable(req.db);
+  const rows = await req.db.prepare(`
     SELECT id, usuario, usuario AS login, nome, email, role, ativo, lotacao, criado_por, created_at, updated_at
     FROM usuarios ORDER BY id
   `).all();
@@ -108,7 +108,7 @@ router.get('/', soAdmin, (req, res) => {
 
 // ─── POST /api/usuarios — criar usuário (admin only) ─────────────
 
-router.post('/', soAdmin, (req, res) => {
+router.post('/', soAdmin, async (req, res) => {
   const { usuario, nome, email = '', senha, role } = req.body;
   if (!usuario || !nome || !senha || !role) {
     return res.status(400).json({ error: 'usuario, nome, senha e role são obrigatórios' });
@@ -120,12 +120,12 @@ router.post('/', soAdmin, (req, res) => {
     return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres' });
   }
 
-  ensureTable(req.db);
-  const existe = req.db.prepare('SELECT id FROM usuarios WHERE usuario = ?').get(usuario);
+  await ensureTable(req.db);
+  const existe = await req.db.prepare('SELECT id FROM usuarios WHERE usuario = ?').get(usuario);
   if (existe) return res.status(409).json({ error: 'Usuário já existe' });
 
   const hash = bcrypt.hashSync(senha, 10);
-  const result = req.db.prepare(`
+  const result = await req.db.prepare(`
     INSERT INTO usuarios (usuario, nome, email, senha_hash, role, criado_por)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(usuario, nome, email, hash, role, req.usuario.usuario);
@@ -135,12 +135,12 @@ router.post('/', soAdmin, (req, res) => {
 
 // ─── PATCH /api/usuarios/:id — editar (admin only) ───────────────
 
-router.patch('/:id', soAdmin, (req, res) => {
+router.patch('/:id', soAdmin, async (req, res) => {
   const { id } = req.params;
   const { nome, email, senha, role, ativo, lotacao } = req.body;
 
-  ensureTable(req.db);
-  const user = req.db.prepare('SELECT * FROM usuarios WHERE id = ?').get(id);
+  await ensureTable(req.db);
+  const user = await req.db.prepare('SELECT * FROM usuarios WHERE id = ?').get(id);
   if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
 
   // Impede desativar o próprio admin logado
@@ -158,7 +158,7 @@ router.patch('/:id', soAdmin, (req, res) => {
     senhaHash = bcrypt.hashSync(senha, 10);
   }
 
-  req.db.prepare(`
+  await req.db.prepare(`
     UPDATE usuarios SET
       nome       = COALESCE(?, nome),
       email      = COALESCE(?, email),
@@ -177,8 +177,8 @@ router.patch('/:id', soAdmin, (req, res) => {
 
 router.delete('/:id', soAdmin, async (req, res) => {
   const { id } = req.params;
-  ensureTable(req.db);
-  const user = req.db.prepare('SELECT * FROM usuarios WHERE id = ?').get(id);
+  await ensureTable(req.db);
+  const user = await req.db.prepare('SELECT * FROM usuarios WHERE id = ?').get(id);
   if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
   if (user.usuario === req.usuario.usuario) {
     return res.status(400).json({ error: 'Você não pode remover sua própria conta' });
@@ -189,25 +189,25 @@ router.delete('/:id', soAdmin, async (req, res) => {
 
 // ─── POST /api/usuarios/:id/reset-senha — resetar para padrão ────
 
-router.post('/:id/reset-senha', soAdmin, (req, res) => {
+router.post('/:id/reset-senha', soAdmin, async (req, res) => {
   const { id } = req.params;
-  ensureTable(req.db);
-  const user = req.db.prepare('SELECT id FROM usuarios WHERE id=?').get(id);
+  await ensureTable(req.db);
+  const user = await req.db.prepare('SELECT id FROM usuarios WHERE id=?').get(id);
   if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
   const hash = bcrypt.hashSync('Montana@2026', 10);
-  req.db.prepare('UPDATE usuarios SET senha_hash=?, updated_at=NOW() WHERE id=?').run(hash, id);
+  await req.db.prepare('UPDATE usuarios SET senha_hash=?, updated_at=NOW() WHERE id=?').run(hash, id);
   res.json({ ok: true });
 });
 
 // ─── POST /api/usuarios/criar-funcionarios — bulk creation ────────
 
-router.post('/criar-funcionarios', soAdmin, (req, res) => {
-  ensureTable(req.db);
-  // Check if rh_funcionarios exists
-  const temFuncionarios = req.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='rh_funcionarios'").get();
-  if (!temFuncionarios) return res.status(400).json({ error: 'Tabela rh_funcionarios não encontrada' });
+router.post('/criar-funcionarios', soAdmin, async (req, res) => {
+  await ensureTable(req.db);
+  // Check if rh_funcionarios exists (PG: usa to_regclass)
+  const temFuncionarios = await req.db.prepare("SELECT to_regclass('public.rh_funcionarios') AS exists_tbl").get();
+  if (!temFuncionarios?.exists_tbl) return res.status(400).json({ error: 'Tabela rh_funcionarios não encontrada' });
 
-  const funcionarios = req.db.prepare("SELECT id, nome, cargo FROM rh_funcionarios WHERE ativo=1 ORDER BY nome").all();
+  const funcionarios = await req.db.prepare("SELECT id, nome, cargo FROM rh_funcionarios WHERE status='ATIVO' ORDER BY nome").all();
 
   function normalizar(str) {
     return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -230,14 +230,15 @@ router.post('/criar-funcionarios', soAdmin, (req, res) => {
   for (const func of funcionarios) {
     let login = gerarLogin(func.nome);
     let sufixo = 1, loginFinal = login;
-    while (req.db.prepare('SELECT id FROM usuarios WHERE usuario=?').get(loginFinal)) {
+    while (await req.db.prepare('SELECT id FROM usuarios WHERE usuario=?').get(loginFinal)) {
       loginFinal = `${login}${sufixo++}`;
     }
     try {
-      inserir.run(loginFinal, func.nome, senhaHash);
+      await inserir.run(loginFinal, func.nome, senhaHash);
       criados++;
     } catch(e) {
-      if (e.message.includes('UNIQUE')) existentes++;
+      // PG: duplicate key value violates unique constraint
+      if (e.code === '23505' || /unique|duplicate/i.test(e.message)) existentes++;
     }
   }
 

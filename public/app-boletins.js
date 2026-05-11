@@ -7,7 +7,7 @@
   const _orig = window.showTab;
   window.showTab = function(id, el) {
     _orig(id, el);
-    if (id === 'boletins') loadBoletinsTab();
+    if (id === 'fat-cadastro') loadBoletinsTab();
   };
 })();
 
@@ -37,12 +37,20 @@ function renderBolLista() {
   _bolView = 'lista';
   const container = document.getElementById('bol-content');
 
-  // KPIs
-  const ativos = _bolContratos.filter(c => c.ativo).length;
+  // Filtra encerrados/rescindidos/inativos — mesmo critério usado no seletor de
+  // contrato e no Painel de Faturamento. Contratos encerrados deixam de aparecer
+  // tanto na listagem quanto nos KPIs.
+  const contratosVisiveis = _bolContratos.filter(c => {
+    if (c.ativo === false || c.ativo === 0 || c.ativo === '0' || c.ativo === 'false') return false;
+    if (/\b(encerrad|rescindid)/i.test(c.nome || '')) return false;
+    return true;
+  });
+  const totalCadastrados = contratosVisiveis.length;
+  const ativos = contratosVisiveis.filter(c => c.ativo).length;
   let kpisHtml = `
     <div class="kpi-row" style="margin-bottom:16px">
       <div class="kpi-card" style="border-left:4px solid #2563eb">
-        <div class="kpi-v" style="color:#1d4ed8">${_bolContratos.length}</div>
+        <div class="kpi-v" style="color:#1d4ed8">${totalCadastrados}</div>
         <div class="kpi-l">Contratos Cadastrados</div>
       </div>
       <div class="kpi-card" style="border-left:4px solid #22c55e">
@@ -65,7 +73,7 @@ function renderBolLista() {
       <tbody>
   `;
 
-  if (_bolContratos.length === 0) {
+  if (contratosVisiveis.length === 0) {
     tableHtml += `<tr><td colspan="6">
       <div style="text-align:center;padding:30px 20px">
         <div style="font-size:32px;margin-bottom:8px">📋</div>
@@ -76,7 +84,7 @@ function renderBolLista() {
     </td></tr>`;
   }
 
-  for (const c of _bolContratos) {
+  for (const c of contratosVisiveis) {
     const statusBadge = c.ativo
       ? '<span class="badge badge-ok">Ativo</span>'
       : '<span class="badge badge-warn">Inativo</span>';
@@ -1242,6 +1250,11 @@ async function renderPainelFaturamento() {
       style="padding:8px 16px;background:#0f172a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">
       ⚡ Gerar Todos (${stats.sem_boletim} sem boletim)
     </button>
+    <button onclick="painelGerarMesPostos('${mes}')"
+      title="Para cada contrato com postos cadastrados, cria 1 boletim por posto (estilo UFT: 1 NF = 1 boletim)"
+      style="padding:8px 16px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">
+      🧩 Gerar Mês por Postos
+    </button>
     <button onclick="painelAprovarTodos('${mes}')"
       style="padding:8px 16px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">
       ✅ Aprovar Todos Rascunhos (${stats.rascunho})
@@ -1286,6 +1299,13 @@ function _renderLinhaContratoPainel(c, idx, mes) {
   const bg = idx % 2 === 0 ? '#fff' : '#f8fafc';
   const bol = c.boletim;
 
+  // ─── MODO OPÇÃO A: contrato tem postos cadastrados → 1 boletim por posto ───
+  const qtdPostos = Number(c.qtd_postos || 0);
+  const resPostos = c.postos_resumo || { qtd:0, emitidos:0, aprovados_pend:0, rascunhos:0, valor_total:0 };
+  if (qtdPostos > 0) {
+    return _renderLinhaContratoPainelPostos(c, idx, mes, bg, qtdPostos, resPostos);
+  }
+
   let statusBadge, nfseBadge, acoes;
 
   if (!bol) {
@@ -1321,6 +1341,11 @@ function _renderLinhaContratoPainel(c, idx, mes) {
            style="padding:4px 9px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">✅ Aprovar</button>`
       : '';
 
+    const btnDesfazer = (bol.status === 'rascunho' && bol.nfse_status !== 'EMITIDA')
+      ? `<button onclick="painelDesfazer(${bol.id},'${mes}')" title="Apagar este rascunho — o contrato volta ao estado 'Sem Boletim'"
+           style="padding:4px 8px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">↩️ Desfazer</button>`
+      : '';
+
     const btnEmitir = (bol.status === 'aprovado' && bol.nfse_status !== 'EMITIDA')
       ? `<button onclick="emitirNFSe(${bol.id},'${mes}',${bol.valor_total})"
            style="padding:4px 9px;background:#059669;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">🚀 Emitir NFS-e</button>`
@@ -1336,7 +1361,7 @@ function _renderLinhaContratoPainel(c, idx, mes) {
     const btnPreview = `<button onclick="previewBoletimPDF(${bol.id}, ${c.contrato_id}, '${mes}')" title="Visualizar PDF do boletim"
            style="padding:4px 8px;background:#0ea5e9;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">👁️ PDF</button>`;
 
-    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${btnPreview}${btnAjustar}${btnAprovar}${btnEmitir}${btnPacote}</div>`;
+    acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${btnPreview}${btnAjustar}${btnAprovar}${btnDesfazer}${btnEmitir}${btnPacote}</div>`;
   }
 
   const valorBase   = brl(c.valor_mensal_bruto);
@@ -1355,7 +1380,441 @@ function _renderLinhaContratoPainel(c, idx, mes) {
   </tr>`;
 }
 
+// ─── Linha do contrato no modo Opção A (1 boletim por posto) ───
+function _renderLinhaContratoPainelPostos(c, idx, mes, bg, qtdPostos, res) {
+  const brl = v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+  const valorBase = brl(c.valor_mensal_bruto);
+  const valorBoletim = res.qtd > 0 ? brl(res.valor_total) : `<span style="color:#94a3b8">—</span>`;
+
+  let statusBadge, nfseBadge, acoes;
+  if (res.qtd === 0) {
+    statusBadge = `<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700">SEM BOLETINS</span>`;
+    nfseBadge = `<span style="color:#94a3b8;font-size:10px">—</span>`;
+    acoes = `
+      <button onclick="painelGerarPostosContrato(${c.contrato_id},'${mes}')"
+        title="Gerar 1 boletim por posto cadastrado"
+        style="padding:4px 10px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">🧩 Gerar (${qtdPostos} postos)</button>`;
+  } else {
+    const totalFalt = res.qtd - res.emitidos;
+    statusBadge = `<span style="background:#ede9fe;color:#5b21b6;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700" title="Rascunho: ${res.rascunhos} | Aprovado: ${res.aprovados_pend} | Emitido: ${res.emitidos}">${res.qtd} boletins</span>`;
+    if (res.emitidos === res.qtd) {
+      nfseBadge = `<span style="background:#d1fae5;color:#065f46;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700">✔ ${res.emitidos}/${res.qtd}</span>`;
+    } else if (res.emitidos > 0) {
+      nfseBadge = `<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700" title="${totalFalt} pendentes">⏳ ${res.emitidos}/${res.qtd}</span>`;
+    } else {
+      nfseBadge = `<span style="color:#94a3b8;font-size:10px">PENDENTE (0/${res.qtd})</span>`;
+    }
+    acoes = `
+      <button onclick="painelAbrirPostos(${c.contrato_id},'${mes}','${(c.nome||'').replace(/'/g,"\\'")}')"
+        title="Ver detalhe dos boletins por posto"
+        style="padding:4px 10px;background:#0ea5e9;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">👁️ Ver ${res.qtd} posto(s)</button>`;
+    if (res.qtd < qtdPostos) {
+      acoes += `
+      <button onclick="painelGerarPostosContrato(${c.contrato_id},'${mes}')"
+        title="${qtdPostos - res.qtd} posto(s) ainda sem boletim — gerar os faltantes"
+        style="padding:4px 8px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">🧩 +${qtdPostos - res.qtd}</button>`;
+    }
+  }
+
+  return `
+  <tr style="background:${bg};border-bottom:1px solid #f1f5f9">
+    <td style="padding:10px 12px;font-weight:700;color:#1e293b;max-width:180px">${c.nome}
+      <div style="font-size:10px;color:#7c3aed;font-weight:600;margin-top:2px">🧩 ${qtdPostos} posto(s) cadastrado(s)</div>
+    </td>
+    <td style="padding:10px 8px;color:#475569;font-size:11px;max-width:160px">${c.contratante}</td>
+    <td style="padding:10px 8px;text-align:right;color:#64748b;font-weight:600">${valorBase}</td>
+    <td style="padding:10px 8px;text-align:right;color:#1e293b;font-weight:700">${valorBoletim}</td>
+    <td style="padding:10px 8px;text-align:center">${statusBadge}</td>
+    <td style="padding:10px 8px;text-align:center">${nfseBadge}</td>
+    <td style="padding:10px 8px;text-align:center"><div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${acoes}</div></td>
+  </tr>`;
+}
+
 // ─── Ações do Painel ──────────────────────────────────────────
+
+// OPÇÃO A: gera 1 boletim por posto pra cada contrato com postos cadastrados
+async function painelGerarMesPostos(mes) {
+  const token = localStorage.getItem('montana_jwt') || '';
+  const btn = event?.target;
+  if (btn) { btn.disabled = true; btn.textContent = '🧩 Gerando...'; }
+  try {
+    const r = await fetch('/api/boletins/gerar-mes-postos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ mes }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    const semPostos = d.contratos_sem_postos > 0 ? ` | ${d.contratos_sem_postos} contrato(s) sem postos cadastrados` : '';
+    toast(`✅ ${d.criados} boletim(ns) por posto criado(s) | ${d.existentes} já existiam${semPostos}`, 'success');
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🧩 Gerar Mês por Postos'; }
+  }
+}
+
+// OPÇÃO A: gera boletins-por-posto pra UM contrato específico
+async function painelGerarPostosContrato(contrato_id, mes) {
+  const token = localStorage.getItem('montana_jwt') || '';
+  const btn = event?.target;
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+  try {
+    const r = await fetch('/api/boletins/gerar-boletim-postos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ contrato_id, competencia: mes }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    if (d.sem_postos) {
+      toast('⚠ Contrato sem postos cadastrados — abra Editar Contrato e adicione postos antes', 'warn');
+    } else {
+      toast(`✅ ${d.criados} boletim(ns) criado(s) | ${d.existentes} já existiam (${d.total_postos} postos)`, 'success');
+    }
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+  }
+}
+
+// Abre modal com lista detalhada de boletins-por-posto de um contrato/mês
+async function painelAbrirPostos(contrato_id, mes, nomeContrato) {
+  window._painelLastContratoId = contrato_id;
+  const token = localStorage.getItem('montana_jwt') || '';
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-painel-postos';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;overflow:auto';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:1100px;width:100%;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,0.3)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h3 style="margin:0;font-size:16px;font-weight:800;color:#1e293b">🧩 Boletins por Posto — ${nomeContrato} — ${mes}</h3>
+        <button onclick="document.getElementById('modal-painel-postos').remove()"
+          style="background:#f1f5f9;border:none;border-radius:7px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer">✕ Fechar</button>
+      </div>
+      <div id="painel-postos-body"><div style="padding:20px;text-align:center;color:#64748b">Carregando…</div></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  try {
+    const r = await fetch(`/api/boletins/painel-postos?contrato_id=${contrato_id}&mes=${mes}`,
+      { headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token } });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    document.getElementById('painel-postos-body').innerHTML = _renderTabelaPostos(d.postos, mes);
+  } catch (err) {
+    document.getElementById('painel-postos-body').innerHTML = `<div style="color:#dc2626;padding:12px">❌ ${err.message}</div>`;
+  }
+}
+
+function _renderTabelaPostos(postos, mes) {
+  const brl = v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const total = postos.reduce((s,p) => s + (p.boletim?.valor_total || 0), 0);
+  const rows = postos.map((p, idx) => {
+    const bg = idx % 2 === 0 ? '#fff' : '#f8fafc';
+    const bol = p.boletim;
+    let statusBadge, nfseBadge, acoes;
+    if (!bol) {
+      statusBadge = `<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700">SEM BOLETIM</span>`;
+      nfseBadge = `<span style="color:#94a3b8;font-size:10px">—</span>`;
+      acoes = `<span style="font-size:10px;color:#94a3b8">aguarda Gerar</span>`;
+    } else {
+      const statusCor = {rascunho:'#fef3c7|#92400e', aprovado:'#dbeafe|#1d4ed8'}[bol.status] || '#f1f5f9|#475569';
+      const [bg2, col2] = statusCor.split('|');
+      statusBadge = `<span style="background:${bg2};color:${col2};padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700">${(bol.status||'').toUpperCase()}</span>`;
+      if (bol.nfse_status === 'EMITIDA') {
+        nfseBadge = `<span style="background:#d1fae5;color:#065f46;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700" title="NFS-e ${bol.nfse_numero}">✔ ${bol.nfse_numero}</span>`;
+      } else if (bol.nfse_status === 'ERRO') {
+        nfseBadge = `<span style="background:#fef2f2;color:#dc2626;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700" title="${bol.nfse_erro||''}">❌ ERRO</span>`;
+      } else {
+        nfseBadge = `<span style="color:#94a3b8;font-size:10px">PENDENTE</span>`;
+      }
+      // Inclui token+company na query string: links abertos em nova aba não
+      // recebem header Authorization automaticamente. authMiddleware aceita ?token=.
+      const _qs = `?token=${encodeURIComponent(localStorage.getItem('montana_jwt') || '')}&company=${encodeURIComponent(currentCompany || '')}`;
+      const btnPdfBoletim = `<a href="/api/boletins/${bol.id}/pdf-previo${_qs}" target="_blank" title="PDF do boletim de medição (estilo Laíse/Ecione)"
+           style="padding:4px 8px;background:#0ea5e9;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;text-decoration:none">📄 PDF Boletim</a>`;
+      const btnPreviaNF = (bol.nfse_status !== 'EMITIDA')
+        ? `<button onclick="painelPostoPrevia(${bol.id})" title="Ver prévia do RPS/NFS-e antes de emitir, com retenções editáveis"
+             style="padding:4px 9px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">🧾 Prévia NF</button>`
+        : '';
+      const btnPdfDefinitivo = bol.nfse_status === 'EMITIDA'
+        ? `<a href="/api/boletins/${bol.id}/pdf-definitivo${_qs}" target="_blank" title="PDF do boletim com dados da NFS-e emitida"
+             style="padding:4px 8px;background:#059669;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;text-decoration:none">📑 Definitivo</a>`
+        : '';
+      const btnAprovar = (bol.status === 'rascunho' && bol.nfse_status !== 'EMITIDA')
+        ? `<button onclick="painelPostoAprovar(${bol.id})" style="padding:4px 9px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">✅ Aprovar</button>`
+        : '';
+      const btnEmitir = (bol.status === 'aprovado' && bol.nfse_status !== 'EMITIDA')
+        ? `<button onclick="painelPostoEmitir(${bol.id}, ${bol.valor_total})" style="padding:4px 9px;background:#059669;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">🚀 Emitir</button>`
+        : '';
+      acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${btnPdfBoletim}${btnPreviaNF}${btnPdfDefinitivo}${btnAprovar}${btnEmitir}</div>`;
+    }
+    return `
+      <tr style="background:${bg};border-bottom:1px solid #f1f5f9">
+        <td style="padding:8px 10px;font-weight:600;color:#1e293b">${p.campus_nome || p.label_resumo || '—'}</td>
+        <td style="padding:8px 10px;color:#475569;font-size:11px">${p.municipio || '—'}</td>
+        <td style="padding:8px 10px;text-align:right;color:#1e293b;font-weight:700">${bol ? brl(bol.valor_total) : '—'}</td>
+        <td style="padding:8px 10px;text-align:center">${statusBadge}</td>
+        <td style="padding:8px 10px;text-align:center">${nfseBadge}</td>
+        <td style="padding:8px 10px;text-align:center">${acoes}</td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">
+          <th style="padding:10px 10px;text-align:left;font-weight:700;color:#475569">Posto / Campus</th>
+          <th style="padding:10px 10px;text-align:left;font-weight:700;color:#475569">Município</th>
+          <th style="padding:10px 10px;text-align:right;font-weight:700;color:#475569">Valor</th>
+          <th style="padding:10px 10px;text-align:center;font-weight:700;color:#475569">Status</th>
+          <th style="padding:10px 10px;text-align:center;font-weight:700;color:#475569">NFS-e</th>
+          <th style="padding:10px 10px;text-align:center;font-weight:700;color:#475569">Ações</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr style="background:#f1f5f9;font-weight:800;border-top:2px solid #cbd5e1">
+          <td colspan="2" style="padding:10px;color:#1e293b">TOTAL (${postos.length} posto(s))</td>
+          <td style="padding:10px;text-align:right;color:#7c3aed">${brl(total)}</td>
+          <td colspan="3"></td>
+        </tr>
+      </tfoot>
+    </table>`;
+}
+
+async function painelPostoAprovar(boletim_id) {
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch(`/api/boletins/${boletim_id}/aprovar`, {
+      method: 'POST',
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    toast('✅ Boletim aprovado', 'success');
+    // recarrega o modal de detalhes mantendo aberto
+    document.querySelector('#modal-painel-postos button[onclick*=remove]')?.previousElementSibling;
+    const titulo = document.querySelector('#modal-painel-postos h3')?.textContent || '';
+    const m = titulo.match(/—\s*(.+?)\s*—\s*(\d{4}-\d{2})/);
+    if (m) {
+      document.getElementById('modal-painel-postos').remove();
+      const c = window._painelLastContratoId;
+      if (c) painelAbrirPostos(c, m[2], m[1]);
+    }
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+  }
+}
+
+async function painelPostoEmitir(boletim_id, valor) {
+  // Em vez de confirm() simples, abre modal de preview com retenções editáveis.
+  // O usuário vê tudo que vai pro WebISS, ajusta PIS/COFINS/INSS/IR/CSLL/ISS retido,
+  // e só depois confirma a emissão definitiva.
+  return painelPostoPrevia(boletim_id);
+}
+
+// Abre o modal de prévia da NFS-e (RPS + retenções editáveis) sem disparar emissão.
+// Pode ser chamado pelo botão "🧾 Prévia NF" no drill-down, ou pelo "🚀 Emitir"
+// (que é o mesmo modal — o botão Confirmar dentro dele dispara a emissão).
+async function painelPostoPrevia(boletim_id) {
+  const token = localStorage.getItem('montana_jwt') || '';
+  const h = { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token };
+  let preview;
+  try {
+    const r = await fetch(`/api/boletins/${boletim_id}/preview-nfse`, { headers: h });
+    preview = await r.json();
+    if (!r.ok) throw new Error(preview.error);
+  } catch (err) {
+    toast('Erro ao carregar prévia: ' + err.message, 'error');
+    return;
+  }
+  _abrirModalPreviewNfse(boletim_id, preview);
+}
+
+function _abrirModalPreviewNfse(boletim_id, preview) {
+  // Remove modal pré-existente se houver
+  document.getElementById('modal-preview-nfse')?.remove();
+
+  const brl = v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const rps = preview.rps;
+  const ret = preview.retencoes;
+  const valor = Number(rps.servico.valorServicos);
+  const fonteLabel = {
+    'override': 'editado nesta sessão',
+    'padrao_contrato': '✓ usando padrão do contrato',
+    'zerado': '⚠ primeira emissão — zerado',
+  }[preview.fonte_retencoes] || '';
+
+  const podeEmitir = preview.boletim?.status === 'aprovado' && preview.boletim?.nfse_status !== 'EMITIDA';
+  const avisoStatus = !podeEmitir
+    ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#92400e">
+        ⚠ Boletim em status <strong>${(preview.boletim?.status||'?').toUpperCase()}</strong> — só é possível emitir NFS-e após aprovação. Você está vendo a prévia somente para conferência.
+      </div>` : '';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-preview-nfse';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow:auto';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:920px;width:100%;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,0.3)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;border-bottom:2px solid #e2e8f0;padding-bottom:12px">
+        <h3 style="margin:0;font-size:16px;font-weight:800;color:#1e293b">🧾 Prévia NFS-e — antes de emitir</h3>
+        <button onclick="document.getElementById('modal-preview-nfse').remove()"
+          style="background:#f1f5f9;border:none;border-radius:7px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer">✕ Fechar</button>
+      </div>
+      ${avisoStatus}
+
+      <!-- Dados RPS -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;font-size:12px">
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+          <div style="font-weight:700;color:#1e293b;margin-bottom:6px">📋 RPS</div>
+          <div>Número: <strong>${rps.numero}</strong></div>
+          <div>Série: <strong>${rps.serie}</strong></div>
+          <div>Emissão: <strong>${rps.dataEmissao}</strong></div>
+          <div>Competência: <strong>${rps.competencia}</strong></div>
+          <div>Item lista serv.: <strong>${rps.servico.itemLista}</strong></div>
+        </div>
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+          <div style="font-weight:700;color:#1e293b;margin-bottom:6px">👤 Tomador</div>
+          <div>Razão: <strong>${preview.tomador_razao || '<em>vazio</em>'}</strong></div>
+          <div>CNPJ: <strong>${preview.tomador_cnpj || '<em style=color:#dc2626>FALTA — configure no contrato</em>'}</strong></div>
+        </div>
+      </div>
+
+      <!-- Discriminação -->
+      <div style="margin-bottom:14px">
+        <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Discriminação dos Serviços</label>
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:11px;color:#1e293b;max-height:80px;overflow:auto">${rps.servico.discriminacao}</div>
+      </div>
+
+      <!-- Retenções -->
+      <div style="border:1px solid #c7d2fe;background:#eef2ff;border-radius:8px;padding:14px;margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="font-weight:800;color:#3730a3;font-size:13px">⚙️ Retenções</div>
+          <div style="font-size:10px;color:#6366f1">${fonteLabel}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:11px">
+          ${_inputRet('valorPis',     'PIS',      ret.valorPis)}
+          ${_inputRet('valorCofins',  'COFINS',   ret.valorCofins)}
+          ${_inputRet('valorInss',    'INSS',     ret.valorInss)}
+          ${_inputRet('valorIr',      'IR',       ret.valorIr)}
+          ${_inputRet('valorCsll',    'CSLL',     ret.valorCsll)}
+          ${_inputRet('valorDeducoes','Deduções', ret.valorDeducoes)}
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:10px;border-top:1px dashed #c7d2fe;padding-top:10px">
+          <label style="font-size:11px;color:#3730a3;font-weight:600">
+            <input type="checkbox" id="ret-issRetido" ${ret.issRetido ? 'checked':''} onchange="_previewRecalc()"> ISS Retido
+          </label>
+          <label style="font-size:11px;color:#3730a3;font-weight:600">
+            Alíquota ISS:
+            <input type="number" step="0.0001" id="ret-aliquotaIss" value="${ret.aliquotaIss}" style="width:70px;padding:3px 6px;border:1px solid #c7d2fe;border-radius:4px;font-size:11px" onchange="_previewRecalc()">
+            (${(ret.aliquotaIss*100).toFixed(2)}%)
+          </label>
+        </div>
+      </div>
+
+      <!-- Totais -->
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px">
+        <div style="background:#f1f5f9;border-radius:8px;padding:12px;text-align:center">
+          <div style="font-size:10px;color:#64748b;font-weight:700">VALOR BRUTO</div>
+          <div style="font-size:18px;font-weight:800;color:#1e293b" id="prev-bruto">${brl(valor)}</div>
+        </div>
+        <div style="background:#fef2f2;border-radius:8px;padding:12px;text-align:center">
+          <div style="font-size:10px;color:#991b1b;font-weight:700">RETENÇÕES</div>
+          <div style="font-size:18px;font-weight:800;color:#dc2626" id="prev-retido">${brl(valor - preview.valor_liquido)}</div>
+        </div>
+        <div style="background:#d1fae5;border-radius:8px;padding:12px;text-align:center">
+          <div style="font-size:10px;color:#065f46;font-weight:700">LÍQUIDO A RECEBER</div>
+          <div style="font-size:18px;font-weight:800;color:#059669" id="prev-liquido">${brl(preview.valor_liquido)}</div>
+        </div>
+      </div>
+      <div style="font-size:10px;color:#64748b;margin-bottom:14px">ISS calculado: <span id="prev-iss">${brl(preview.valor_iss)}</span> (somado ao retido apenas se ISS Retido marcado)</div>
+
+      <!-- Ações -->
+      <div style="display:flex;gap:10px;justify-content:flex-end;border-top:2px solid #e2e8f0;padding-top:14px">
+        <button onclick="document.getElementById('modal-preview-nfse').remove()"
+          style="padding:10px 18px;background:#f1f5f9;color:#475569;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">Fechar</button>
+        <button onclick="_previewConfirmarEmissao(${boletim_id})"
+          id="btn-confirmar-emissao" ${podeEmitir ? '' : 'disabled'}
+          title="${podeEmitir ? 'Envia o RPS pro WebISS Palmas. Operação irreversível — só pode ser cancelada por outro fluxo da prefeitura.' : 'Aprove o boletim antes pra liberar a emissão.'}"
+          style="padding:10px 22px;background:${podeEmitir ? '#059669' : '#94a3b8'};color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:800;cursor:${podeEmitir ? 'pointer' : 'not-allowed'};opacity:${podeEmitir ? '1' : '0.6'}">
+          🚀 Emitir NFS-e definitivamente
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  window._previewValorBruto = valor;
+}
+
+function _inputRet(name, label, val) {
+  return `<div>
+    <label style="font-size:10px;font-weight:700;color:#3730a3;display:block;margin-bottom:2px">${label} (R$)</label>
+    <input type="number" step="0.01" min="0" id="ret-${name}" value="${Number(val||0).toFixed(2)}"
+      onchange="_previewRecalc()" oninput="_previewRecalc()"
+      style="width:100%;padding:6px 8px;border:1px solid #c7d2fe;border-radius:5px;font-size:12px;font-weight:600;color:#1e293b">
+  </div>`;
+}
+
+function _previewLerRetencoes() {
+  return {
+    valorPis:      Number(document.getElementById('ret-valorPis').value || 0),
+    valorCofins:   Number(document.getElementById('ret-valorCofins').value || 0),
+    valorInss:     Number(document.getElementById('ret-valorInss').value || 0),
+    valorIr:       Number(document.getElementById('ret-valorIr').value || 0),
+    valorCsll:     Number(document.getElementById('ret-valorCsll').value || 0),
+    valorDeducoes: Number(document.getElementById('ret-valorDeducoes').value || 0),
+    issRetido:     document.getElementById('ret-issRetido').checked,
+    aliquotaIss:   Number(document.getElementById('ret-aliquotaIss').value || 0),
+  };
+}
+
+function _previewRecalc() {
+  const brl = v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const bruto = window._previewValorBruto || 0;
+  const r = _previewLerRetencoes();
+  const valorIss = Math.round(bruto * r.aliquotaIss * 100) / 100;
+  const retido = r.valorPis + r.valorCofins + r.valorInss + r.valorIr + r.valorCsll + (r.issRetido ? valorIss : 0);
+  const liquido = Math.round((bruto - retido) * 100) / 100;
+  document.getElementById('prev-retido').textContent = brl(retido);
+  document.getElementById('prev-liquido').textContent = brl(liquido);
+  document.getElementById('prev-iss').textContent = brl(valorIss);
+}
+
+async function _previewConfirmarEmissao(boletim_id) {
+  if (!confirm('ATENÇÃO: A emissão NFS-e é IRREVERSÍVEL — gera nota fiscal real no WebISS Palmas. Confirma?')) return;
+  const btn = document.getElementById('btn-confirmar-emissao');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Enviando ao WebISS...'; }
+
+  const retencoes = _previewLerRetencoes();
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch(`/api/boletins/${boletim_id}/emitir-nfse`, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ retencoes }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    toast(`✅ NFS-e emitida (Nº ${d.numero_nfse || d.nfse_numero || '?'})`, 'success');
+    document.getElementById('modal-preview-nfse')?.remove();
+
+    // Recarrega o modal de drill-down se estiver aberto
+    const titulo = document.querySelector('#modal-painel-postos h3')?.textContent || '';
+    const m = titulo.match(/—\s*(.+?)\s*—\s*(\d{4}-\d{2})/);
+    if (m) {
+      const c = window._painelLastContratoId;
+      document.getElementById('modal-painel-postos').remove();
+      if (c) painelAbrirPostos(c, m[2], m[1]);
+    }
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro emissão: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🚀 Emitir NFS-e definitivamente'; }
+  }
+}
 
 async function painelGerarTodos(mes) {
   const token = localStorage.getItem('montana_jwt') || '';
@@ -1378,6 +1837,11 @@ async function painelGerarTodos(mes) {
 }
 
 async function painelGerarUm(contrato_id, mes) {
+  // FIX (2026-05): debounce — desabilita o botão durante a request pra evitar
+  // double-click gerar duas POSTs concorrentes (causava duplicatas antes do
+  // ON CONFLICT no backend; agora é só polidez UX).
+  const btn = event?.target;
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
   const token = localStorage.getItem('montana_jwt') || '';
   try {
     const r = await fetch('/api/boletins/gerar-boletim', {
@@ -1391,6 +1855,7 @@ async function painelGerarUm(contrato_id, mes) {
     renderPainelFaturamento();
   } catch (err) {
     toast('Erro: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
   }
 }
 
@@ -1404,6 +1869,26 @@ async function painelAprovar(boletim_id, mes) {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error);
     toast('✅ Boletim aprovado', 'success');
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+  }
+}
+
+// ─── Desfazer rascunho ────────────────────────────────────────
+// Apaga um boletim em status rascunho. Backend bloqueia se já foi aprovado ou
+// se a NFS-e já foi emitida.
+async function painelDesfazer(boletim_id, mes) {
+  if (!confirm('Desfazer este rascunho? O contrato volta ao estado "Sem Boletim" e os dados do boletim atual são apagados.')) return;
+  const token = localStorage.getItem('montana_jwt') || '';
+  try {
+    const r = await fetch(`/api/boletins/${boletim_id}`, {
+      method: 'DELETE',
+      headers: { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    toast('↩️ Rascunho desfeito', 'success');
     renderPainelFaturamento();
   } catch (err) {
     toast('Erro: ' + err.message, 'error');
@@ -1972,9 +2457,25 @@ async function _abrirSeletorContrato() {
   // Buscar valores dos contratos financeiros
   const contratosFinanc = (await api('/contratos'))?.data || [];
   const valMap = {};
+  const statusMap = {};
   for (const cf of contratosFinanc) {
     valMap[cf.numContrato] = cf.valor_mensal_bruto || 0;
+    statusMap[cf.numContrato] = (cf.status || '').toUpperCase();
   }
+
+  // Filtra encerrados/rescindidos e inativos. Bate em 3 sinais:
+  //   1. bol_contratos.ativo é falsy (false/0/null)
+  //   2. nome contém "(encerrado)" ou similar (convenção legada)
+  //   3. status do contrato financeiro vinculado é ENCERRADO/RESCINDIDO
+  const contratosFiltrados = _bolContratos.filter(c => {
+    if (c.ativo === false || c.ativo === 0 || c.ativo === '0' || c.ativo === 'false') return false;
+    if (/\b(encerrad|rescindid)/i.test(c.nome || '')) return false;
+    const st = statusMap[c.contrato_ref] || statusMap[c.numero_contrato] || '';
+    if (/ENCERRAD|RESCINDID/i.test(st)) return false;
+    return true;
+  });
+
+  if (!contratosFiltrados.length) { toast('Nenhum contrato ativo disponível', 'error'); return; }
 
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px';
@@ -1986,7 +2487,7 @@ async function _abrirSeletorContrato() {
           style="background:rgba(255,255,255,.2);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 10px;line-height:1">×</button>
       </div>
       <div style="padding:16px;max-height:70vh;overflow-y:auto">
-        ${_bolContratos.map(c => {
+        ${contratosFiltrados.map(c => {
           const vm = valMap[c.contrato_ref || c.numero_contrato] || 0;
           return `<button onclick="this.closest('div[style*=fixed]').remove();abrirGerarBoletim(${c.id},'${(c.contrato_ref||c.numero_contrato||'').replace(/'/g,"\\'")}','${(c.nome||c.contratante||'').replace(/'/g,"\\'")}',${vm})"
             style="display:block;width:100%;text-align:left;padding:10px 14px;border:1.5px solid #e2e8f0;border-radius:8px;margin-bottom:8px;background:#fff;cursor:pointer;font-size:13px;transition:background .15s"

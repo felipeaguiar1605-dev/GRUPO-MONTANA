@@ -43,6 +43,7 @@ router.use(async (req, res, next) => {
     ['contrato_ref',    "TEXT DEFAULT ''"],  // numContrato da tabela contratos
     ['orgao',           "TEXT DEFAULT ''"],  // razão social do tomador para NFS-e
     ['insc_municipal',  "TEXT DEFAULT ''"],  // CNPJ do tomador (campo nomenclatura WebISS)
+    ['retencoes_padrao', 'TEXT'],            // JSON com retenções default (PIS,COFINS,INSS,IR,CSLL,issRetido,aliquotaIss) — usado como pré-preenchimento no preview de emissão
   ];
   for (const [col, def] of contrCols) {
     try { await db.prepare(`ALTER TABLE bol_contratos ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
@@ -86,6 +87,27 @@ router.use(async (req, res, next) => {
     )`).run();
     await db.prepare(`CREATE INDEX IF NOT EXISTS idx_bbg_boletim ON bol_boletim_glosas(boletim_id)`).run();
   } catch (_) {}
+
+  // ─── Padronização Opção A (2026-05): 1 boletim = 1 NF (estilo UFT) ───
+  // Coluna posto_id já existe (legado). Garantir 2 índices UNIQUE parciais:
+  //   • idx_bol_boletins_contrato_comp_null    → 1 consolidado por contrato/competência (posto_id IS NULL)
+  //   • idx_bol_boletins_contrato_posto_comp   → 1 por posto/contrato/competência (posto_id IS NOT NULL)
+  // O índice legado idx_bol_boletins_contrato_comp (sem filtro) impedia N
+  // boletins por posto na mesma competência; é convertido em parcial aqui.
+  try { await db.prepare(`ALTER TABLE bol_boletins ADD COLUMN posto_id BIGINT`).run(); } catch (_) {}
+  try {
+    await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bol_boletins_contrato_posto_comp
+      ON bol_boletins (contrato_id, posto_id, competencia)
+      WHERE posto_id IS NOT NULL`).run();
+  } catch (_) {}
+  // Substitui o índice legado por versão parcial (posto_id IS NULL).
+  // Idempotente: se o legado já foi renomeado, o DROP só remove o que existe.
+  try {
+    await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bol_boletins_contrato_comp_null
+      ON bol_boletins (contrato_id, competencia)
+      WHERE posto_id IS NULL`).run();
+  } catch (_) {}
+  try { await db.prepare(`DROP INDEX IF EXISTS idx_bol_boletins_contrato_comp`).run(); } catch (_) {}
 
   next();
 });
@@ -518,10 +540,6 @@ router.post('/gerar-boletim', async (req, res) => {
     }
     const db = req.db;
 
-    // Verificar se já existe
-    const existente = await db.prepare('SELECT * FROM bol_boletins WHERE contrato_id=? AND competencia=?').get(contrato_id, competencia);
-    if (existente) return res.json({ data: existente, novo: false });
-
     // Buscar contrato de boletim para calcular valor base
     const bc = await db.prepare('SELECT * FROM bol_contratos WHERE id=?').get(contrato_id);
     const ct = bc ? await db.prepare('SELECT * FROM contratos WHERE numContrato=?').get(bc.contrato_ref) : null;
@@ -535,12 +553,20 @@ router.post('/gerar-boletim', async (req, res) => {
     const numContrato = bc?.contrato_ref || bc?.numero_contrato || '';
     const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServico.toUpperCase()} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. VALOR MENSAL CONFORME BOLETIM DE MEDIÇÃO APROVADO.`;
 
-    const stmt = db.prepare(`INSERT INTO bol_boletins
+    // FIX (2026-05): INSERT idempotente via ON CONFLICT. Substitui o
+    // SELECT+INSERT que tinha race condition (TOCTOU). Se já existe boletim
+    // pra (contrato_id, competencia), CONFLICT é silencioso e retornamos o
+    // existente. Depende do UNIQUE INDEX idx_bol_boletins_contrato_comp.
+    const info = await db.prepare(`INSERT INTO bol_boletins
       (contrato_id, competencia, data_emissao, valor_base, valor_total, glosas, acrescimos, discriminacao, status, nfse_status)
-      VALUES (?, ?, CURRENT_DATE, ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')`);
-    const info = stmt.run(contrato_id, competencia, valor_base, valor_base, discriminacao);
-    const novo = await db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(info.lastInsertRowid);
-    res.json({ data: novo, novo: true });
+      VALUES (?, ?, CURRENT_DATE, ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')
+      ON CONFLICT (contrato_id, competencia) DO NOTHING
+      RETURNING id`).run(contrato_id, competencia, valor_base, valor_base, discriminacao);
+    const novoFlag = info.changes && info.changes > 0;
+    const boletim = novoFlag
+      ? await db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(info.lastInsertRowid)
+      : await db.prepare('SELECT * FROM bol_boletins WHERE contrato_id=? AND competencia=?').get(contrato_id, competencia);
+    res.json({ data: boletim, novo: novoFlag });
   } catch (err) {
     console.error('Erro ao gerar boletim:', err);
     res.status(500).json({ error: err.message });
@@ -576,87 +602,187 @@ router.patch('/:id/ajustar', async (req, res) => {
 
 // ─── EMITIR NFS-e VIA WEBISS ───────────────────────────────────
 
-router.post('/:id/emitir-nfse', async (req, res) => {
+// Helper: monta o RPS pronto pra enviar (ou só preview). Carrega o boletim,
+// resolve tomador e retenções (override do body > padrão do contrato > zerado).
+// requireCert=true valida certificado/.env (modo emissão); false só monta payload.
+async function _montarRpsPayload(req, opts = { requireCert: true }) {
   const db = req.db;
-  const company = req.company;
   const companyKey = req.companyKey;
+  const retOverride = req.body?.retencoes || null;
 
-  try {
-    // FIX1: COALESCE(valor_total, total_geral) — suporta boletins importados do legado
-    // FIX2: JOIN duplo — tenta contrato_ref exato primeiro, fallback LIKE numero_contrato
-    // FIX3: c.orgao = CNPJ do tomador; bc.contratante = razão social
-    const bol = db.prepare(`
-      SELECT b.*,
-             COALESCE(b.valor_total, b.total_geral, 0) AS valor_efetivo,
-             bc.contrato_ref, bc.contratante as bc_contratante,
-             bc.orgao as bc_orgao, bc.descricao_servico as bc_descricao,
-             bc.insc_municipal as insc_contratante,
-             COALESCE(
-               (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
-               (SELECT c2.orgao FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1)
-             ) AS cnpj_tomador_contrato,
-             COALESCE(
-               (SELECT c1.numContrato FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
-               (SELECT c2.numContrato FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1)
-             ) AS num_contrato_encontrado
-      FROM bol_boletins b
-      JOIN bol_contratos bc ON b.contrato_id = bc.id
-      WHERE b.id=?`).get(req.params.id);
+  const bol = await db.prepare(`
+    SELECT b.*,
+           COALESCE(b.valor_total, b.total_geral, 0) AS valor_efetivo,
+           bc.contrato_ref, bc.contratante as bc_contratante,
+           bc.orgao as bc_orgao, bc.descricao_servico as bc_descricao,
+           bc.insc_municipal as insc_contratante,
+           bc.retencoes_padrao as retencoes_padrao_contrato,
+           bc.id as bol_contrato_id,
+           COALESCE(
+             (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+             (SELECT c2.orgao FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1)
+           ) AS cnpj_tomador_contrato,
+           COALESCE(
+             (SELECT c1.numContrato FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+             (SELECT c2.numContrato FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1)
+           ) AS num_contrato_encontrado
+    FROM bol_boletins b
+    JOIN bol_contratos bc ON b.contrato_id = bc.id
+    WHERE b.id=?`).get(req.params.id);
 
-    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
-    if (bol.nfse_status === 'EMITIDA') {
-      return res.status(400).json({ error: `NFS-e ${bol.nfse_numero} já emitida para este boletim` });
-    }
-    // FIX4: exige status 'aprovado' no backend (não só no frontend)
-    if (bol.status !== 'aprovado') {
-      return res.status(400).json({ error: `Boletim deve estar com status "aprovado" para emitir NFS-e (atual: ${bol.status})` });
-    }
-    if (!bol.valor_efetivo || bol.valor_efetivo <= 0) {
-      return res.status(400).json({ error: 'Valor do boletim inválido (zero ou negativo) — ajuste o valor antes de emitir' });
-    }
+  if (!bol) return { ok:false, status:404, error:'Boletim não encontrado' };
+  if (bol.nfse_status === 'EMITIDA') {
+    return { ok:false, status:400, error:`NFS-e ${bol.nfse_numero} já emitida para este boletim` };
+  }
+  if (opts.requireCert && bol.status !== 'aprovado') {
+    return { ok:false, status:400, error:`Boletim deve estar com status "aprovado" para emitir NFS-e (atual: ${bol.status})` };
+  }
+  if (!bol.valor_efetivo || bol.valor_efetivo <= 0) {
+    return { ok:false, status:400, error:'Valor do boletim inválido (zero ou negativo) — ajuste o valor antes de emitir' };
+  }
 
-    // Verificar certificado
+  if (opts.requireCert) {
     const certPath = path.join(__dirname, '..', '..', 'certificados', `${companyKey}.pfx`);
     const certSenha = process.env[`WEBISS_CERT_SENHA_${companyKey.toUpperCase()}`];
     if (!fs.existsSync(certPath)) {
-      return res.status(400).json({ error: `Certificado A1 não encontrado para ${companyKey}. Faça upload em Configurações → WebISS.` });
+      return { ok:false, status:400, error:`Certificado A1 não encontrado para ${companyKey}. Faça upload em Configurações → WebISS.` };
     }
     if (!certSenha) {
-      return res.status(400).json({ error: `Senha do certificado não configurada (WEBISS_CERT_SENHA_${companyKey.toUpperCase()} no .env)` });
+      return { ok:false, status:400, error:`Senha do certificado não configurada (WEBISS_CERT_SENHA_${companyKey.toUpperCase()} no .env)` };
     }
-
-    // Inscrição municipal da prestadora
     const inscPrestadora = process.env[`WEBISS_INSC_${companyKey.toUpperCase()}`] || '';
     if (!inscPrestadora) {
-      return res.status(400).json({ error: `Inscrição Municipal não configurada (WEBISS_INSC_${companyKey.toUpperCase()} no .env)` });
+      return { ok:false, status:400, error:`Inscrição Municipal não configurada (WEBISS_INSC_${companyKey.toUpperCase()} no .env)` };
     }
+  }
 
-    // FIX4: RPS idempotente — reutiliza rps_numero gravado se for retentativa
-    // Garante coluna rps_numero
-    try { await db.prepare(`ALTER TABLE bol_boletins ADD COLUMN rps_numero TEXT`).run(); } catch (_) {}
-    const rpsNum = bol.rps_numero || String(bol.id).padStart(10, '0');
-    // Persiste rps_numero imediatamente para garantir idempotência em retentativas
-    if (!bol.rps_numero) {
-      await db.prepare(`UPDATE bol_boletins SET rps_numero=? WHERE id=?`).run(rpsNum, bol.id);
-    }
+  // RPS idempotente — reutiliza rps_numero gravado se for retentativa
+  try { await db.prepare(`ALTER TABLE bol_boletins ADD COLUMN rps_numero TEXT`).run(); } catch (_) {}
+  const rpsNum = bol.rps_numero || String(bol.id).padStart(10, '0');
+  if (opts.requireCert && !bol.rps_numero) {
+    await db.prepare(`UPDATE bol_boletins SET rps_numero=? WHERE id=?`).run(rpsNum, bol.id);
+  }
 
-    const today  = new Date().toISOString().substring(0, 10);
+  const today = new Date().toISOString().substring(0, 10);
+  const competenciaData = bol.competencia.length === 7 ? `${bol.competencia}-01` : bol.competencia;
 
-    // Competência no formato YYYY-MM-DD (primeiro dia do mês)
-    const competenciaData = bol.competencia.length === 7
-      ? `${bol.competencia}-01`
-      : bol.competencia;
+  // Retenções: override do body > padrão do contrato > zeradas
+  let padraoContrato = {};
+  if (bol.retencoes_padrao_contrato) {
+    try { padraoContrato = JSON.parse(bol.retencoes_padrao_contrato) || {}; } catch (_) { padraoContrato = {}; }
+  }
+  const retencoes = {
+    valorDeducoes: 0,
+    valorPis:      0,
+    valorCofins:   0,
+    valorInss:     0,
+    valorIr:       0,
+    valorCsll:     0,
+    issRetido:     false,
+    aliquotaIss:   0.02,
+    itemLista:     '07.17',
+    codTributacao: '070700',
+    ...padraoContrato,
+    ...(retOverride || {}),
+  };
+  // Sanitiza tipos
+  for (const k of ['valorDeducoes','valorPis','valorCofins','valorInss','valorIr','valorCsll','aliquotaIss']) {
+    retencoes[k] = Number(retencoes[k] || 0);
+  }
+  retencoes.issRetido = !!retencoes.issRetido;
 
-    // Alíquota ISS — 2% padrão (contratos federais isentos/suspensos; municipais 3%)
-    const aliqISS = 0.02;
-    const valorISS = Math.round(bol.valor_efetivo * aliqISS * 100) / 100;
+  const valorISS = Math.round(bol.valor_efetivo * retencoes.aliquotaIss * 100) / 100;
 
-    // FIX3: CNPJ = c.orgao (contratos.orgao armazena CNPJ do tomador neste sistema)
-    // Prioridade: insc_municipal (manual) > cnpj_tomador_contrato (join) > vazio
-    const tomadorCnpj = (bol.insc_contratante || bol.cnpj_tomador_contrato || '').replace(/\D/g, '');
-    // Razão social: bc_contratante (sempre preenchido) > bc_orgao > fallback
-    const tomadorRazao = bol.bc_contratante || bol.bc_orgao || 'TOMADOR NÃO CONFIGURADO';
+  const tomadorCnpj = (bol.insc_contratante || bol.cnpj_tomador_contrato || '').replace(/\D/g, '');
+  const tomadorRazao = bol.bc_contratante || bol.bc_orgao || 'TOMADOR NÃO CONFIGURADO';
 
+  // Líquido = valor serviços - todas retenções (- ISS só se retido)
+  const totalRetidas =
+    retencoes.valorPis + retencoes.valorCofins + retencoes.valorInss +
+    retencoes.valorIr + retencoes.valorCsll + (retencoes.issRetido ? valorISS : 0);
+  const valorLiquido = Math.round((bol.valor_efetivo - totalRetidas) * 100) / 100;
+
+  const rpsBody = {
+    rps: {
+      numero:       rpsNum,
+      serie:        'A',
+      tipo:         1,
+      dataEmissao:  today,
+      competencia:  competenciaData,
+      servico: {
+        valorServicos:     bol.valor_efetivo,
+        valorDeducoes:     retencoes.valorDeducoes,
+        valorPis:          retencoes.valorPis,
+        valorCofins:       retencoes.valorCofins,
+        valorInss:         retencoes.valorInss,
+        valorIr:           retencoes.valorIr,
+        valorCsll:         retencoes.valorCsll,
+        issRetido:         retencoes.issRetido,
+        valorIss:          valorISS,
+        aliquota:          retencoes.aliquotaIss,
+        itemLista:         retencoes.itemLista,
+        codTributacao:     retencoes.codTributacao,
+        discriminacao:     (bol.discriminacao || 'PRESTAÇÃO DE SERVIÇOS').substring(0, 2000),
+        exigibilidadeIss:  1,
+      },
+      tomador: {
+        cnpj:        tomadorCnpj || undefined,
+        razaoSocial: tomadorRazao,
+        email:       '',
+      },
+    },
+  };
+
+  return {
+    ok: true,
+    rpsBody,
+    bol,
+    rpsNum,
+    retencoes,
+    valorISS,
+    valorLiquido,
+    tomadorCnpj,
+    tomadorRazao,
+    fonteRetencoes: retOverride ? 'override' : (Object.keys(padraoContrato).length ? 'padrao_contrato' : 'zerado'),
+  };
+}
+
+// GET /api/boletins/:id/preview-nfse → monta o RPS e retorna JSON SEM enviar.
+// Inclui padrão de retenções do contrato (se já houver) para pré-preenchimento.
+router.get('/:id/preview-nfse', async (req, res) => {
+  try {
+    const out = await _montarRpsPayload(req, { requireCert: false });
+    if (!out.ok) return res.status(out.status).json({ error: out.error });
+    res.json({
+      ok: true,
+      rps: out.rpsBody.rps,
+      retencoes: out.retencoes,
+      valor_iss: out.valorISS,
+      valor_liquido: out.valorLiquido,
+      tomador_cnpj: out.tomadorCnpj,
+      tomador_razao: out.tomadorRazao,
+      fonte_retencoes: out.fonteRetencoes,
+      boletim: {
+        id: out.bol.id, status: out.bol.status, nfse_status: out.bol.nfse_status,
+        valor_efetivo: out.bol.valor_efetivo, competencia: out.bol.competencia,
+        discriminacao: out.bol.discriminacao,
+      },
+    });
+  } catch (err) {
+    console.error('Erro preview-nfse:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:id/emitir-nfse', async (req, res) => {
+  const db = req.db;
+  const companyKey = req.companyKey;
+
+  try {
+    const out = await _montarRpsPayload(req, { requireCert: true });
+    if (!out.ok) return res.status(out.status).json({ error: out.error });
+
+    const { rpsBody, bol, retencoes, tomadorCnpj, tomadorRazao } = out;
     if (!tomadorCnpj) {
       console.warn(`[boletins] Boletim #${bol.id}: tomadorCnpj vazio — WebISS pode rejeitar. Configure insc_municipal ou contrato_ref.`);
     }
@@ -665,40 +791,8 @@ router.post('/:id/emitir-nfse', async (req, res) => {
     await db.prepare(`UPDATE bol_boletins SET nfse_status='ENVIANDO', nfse_erro=NULL, updated_at=NOW() WHERE id=?`)
       .run(bol.id);
 
-    // Fazer chamada interna ao /api/webiss/emitir
     const port = process.env.PORT || 3002;
     const token = req.headers.authorization || '';
-
-    const rpsBody = {
-      rps: {
-        numero:       rpsNum,
-        serie:        'A',
-        tipo:         1,
-        dataEmissao:  today,
-        competencia:  competenciaData,
-        servico: {
-          valorServicos:     bol.valor_efetivo,
-          valorDeducoes:     0,
-          valorPis:          0,
-          valorCofins:       0,
-          valorInss:         0,
-          valorIr:           0,
-          valorCsll:         0,
-          issRetido:         false,
-          valorIss:          valorISS,
-          aliquota:          aliqISS,
-          itemLista:         '07.17',
-          codTributacao:     '070700',
-          discriminacao:     (bol.discriminacao || 'PRESTAÇÃO DE SERVIÇOS').substring(0, 2000),
-          exigibilidadeIss:  1,
-        },
-        tomador: {
-          cnpj:        tomadorCnpj || undefined,
-          razaoSocial: tomadorRazao,
-          email:       '',
-        },
-      },
-    };
 
     const response = await fetch(`http://127.0.0.1:${port}/api/webiss/emitir`, {
       method: 'POST',
@@ -774,6 +868,28 @@ router.post('/:id/emitir-nfse', async (req, res) => {
       } catch (syncErr) {
         console.error('[boletins] Aviso: falha no auto-sync NF:', syncErr.message);
         // Não falha a resposta — NFS-e já foi emitida
+      }
+
+      // Persistir retenções como padrão do contrato (somente se vieram do body
+      // — primeira vez que o user escolheu valores; preserva entre boletins
+      // do mesmo contrato/mês seguinte sem reconfigurar tudo).
+      if (req.body?.retencoes && bol.bol_contrato_id) {
+        try {
+          const padraoJson = JSON.stringify({
+            valorPis: retencoes.valorPis,
+            valorCofins: retencoes.valorCofins,
+            valorInss: retencoes.valorInss,
+            valorIr: retencoes.valorIr,
+            valorCsll: retencoes.valorCsll,
+            valorDeducoes: retencoes.valorDeducoes,
+            issRetido: retencoes.issRetido,
+            aliquotaIss: retencoes.aliquotaIss,
+            itemLista: retencoes.itemLista,
+            codTributacao: retencoes.codTributacao,
+          });
+          await db.prepare(`UPDATE bol_contratos SET retencoes_padrao=? WHERE id=?`)
+            .run(padraoJson, bol.bol_contrato_id);
+        } catch (e) { console.warn('[boletins] não persistiu retencoes_padrao:', e.message); }
       }
 
       return res.json({
@@ -957,7 +1073,10 @@ const AZUL_ESCURO = '#2C3E6B';
 const CINZA_CLARO = '#F5F5F5';
 const CINZA_BORDA = '#CCCCCC';
 
-function gerarBoletimPDF(contrato, posto, nfNumero, dataEmissao, periodo, outputPath) {
+function gerarBoletimPDF(contrato, posto, nfNumero, dataEmissao, periodo, outputPath, nfseInfo) {
+  // nfseInfo (opcional): { numero, data_emissao, codigo_verificacao, link }
+  //   undefined/null → modo PRÉVIO (nfNumero será exibido como "PRÉVIO" se vazio)
+  //   objeto         → modo DEFINITIVO (adiciona bloco "NFS-e EMITIDA")
   const doc = new PDFDocument({ size: 'A4', margin: 30 });
   const stream = fs.createWriteStream(outputPath);
   doc.pipe(stream);
@@ -1015,10 +1134,17 @@ function gerarBoletimPDF(contrato, posto, nfNumero, dataEmissao, periodo, output
 
   // ─── NOTA FISCAL ───
   const nfY = blocoY + blocoH + 15;
-  doc.rect(margin, nfY, contentW, 22).fill(CINZA_CLARO);
+  const eDefinitivo = !!(nfseInfo && nfseInfo.numero);
+  const nfLabel = eDefinitivo
+    ? `NFS-e Nº ${nfseInfo.numero}`
+    : (nfNumero ? `NOTA FISCAL: ${nfNumero}` : 'NOTA FISCAL: PRÉVIO (aguardando emissão)');
+  const dataLabel = eDefinitivo && nfseInfo.data_emissao
+    ? `DATA DE EMISSÃO: ${nfseInfo.data_emissao}`
+    : `DATA: ${dataEmissao}`;
+  doc.rect(margin, nfY, contentW, 22).fill(eDefinitivo ? '#E8F5E9' : CINZA_CLARO);
   doc.fill('#000000').font('Helvetica-Bold').fontSize(10)
-     .text(`NOTA FISCAL: ${nfNumero}`, margin + 10, nfY + 5)
-     .text(`DATA DE EMISSÃO: ${dataEmissao}`, pageW / 2 + 30, nfY + 5);
+     .text(nfLabel, margin + 10, nfY + 5)
+     .text(dataLabel, pageW / 2 + 30, nfY + 5);
 
   // ─── TABELA DE ITENS ───
   const tableY = nfY + 35;
@@ -1037,38 +1163,58 @@ function gerarBoletimPDF(contrato, posto, nfNumero, dataEmissao, periodo, output
   // Linhas de dados
   let rowY = tableY + 20;
   let totalPosto = 0;
+  // FIX (2026-05): page break automático pra contratos com muitos postos/itens.
+  // Antes, o loop só somava rowY e rascunhava off-page → 153 páginas pra DETRAN-TO.
+  const pageBottomLimit = doc.page.height - 130;
+  const drawTableHeader = (y) => {
+    doc.rect(margin, y, contentW, 20).fill(AZUL_ESCURO);
+    doc.fill('#FFFFFF').font('Helvetica-Bold').fontSize(8);
+    let hx = margin;
+    for (let i = 0; i < headers.length; i++) {
+      doc.text(headers[i], hx + 4, y + 5, { width: colWidths[i] - 8, align: 'center' });
+      hx += colWidths[i];
+    }
+  };
 
   for (let idx = 0; idx < posto.itens.length; idx++) {
     const item = posto.itens[idx];
     const vt = item.quantidade * item.valor_unitario;
     totalPosto += vt;
 
-    // Zebra stripes
+    doc.fill('#000000').font('Helvetica').fontSize(8);
+    const descH = doc.heightOfString(item.descricao, { width: colWidths[0] - 12 });
+    const rowH = Math.max(descH + 10, 28);
+
+    // Page break antes de desenhar a linha se ela estourar a página
+    if (rowY + rowH > pageBottomLimit) {
+      doc.addPage();
+      rowY = margin;
+      drawTableHeader(rowY);
+      rowY += 20;
+    }
+
+    // Zebra stripes (já com altura correta da linha)
     if (idx % 2 === 1) {
-      doc.rect(margin, rowY, contentW, 28).fill(CINZA_CLARO);
+      doc.rect(margin, rowY, contentW, rowH).fill(CINZA_CLARO);
     }
 
     tx = margin;
     doc.fill('#000000').font('Helvetica').fontSize(8);
-
-    // Descrição (com wrap)
-    const descH = doc.heightOfString(item.descricao, { width: colWidths[0] - 12 });
-    const rowH = Math.max(descH + 10, 28);
-
     doc.text(item.descricao, tx + 6, rowY + 5, { width: colWidths[0] - 12 });
     tx += colWidths[0];
-
     doc.text(String(item.quantidade), tx + 4, rowY + 8, { width: colWidths[1] - 8, align: 'center' });
     tx += colWidths[1];
-
     doc.text(formatMoeda(item.valor_unitario), tx + 4, rowY + 8, { width: colWidths[2] - 8, align: 'right' });
     tx += colWidths[2];
-
     doc.text(formatMoeda(vt), tx + 4, rowY + 8, { width: colWidths[3] - 8, align: 'right' });
-
-    // Bordas da linha
     doc.rect(margin, rowY, contentW, rowH).strokeColor(CINZA_BORDA).lineWidth(0.3).stroke();
     rowY += rowH;
+  }
+
+  // Bloco final (TOTAL + descrições) tb pode estourar — vira página se preciso
+  if (rowY + 130 > pageBottomLimit) {
+    doc.addPage();
+    rowY = margin;
   }
 
   // Linha TOTAL
@@ -1093,6 +1239,21 @@ function gerarBoletimPDF(contrato, posto, nfNumero, dataEmissao, periodo, output
   doc.font('Helvetica-Bold').fontSize(9)
      .text('ESCALA: ', margin + 5, rowY, { continued: true });
   doc.font('Helvetica').text(contrato.escala + '.');
+
+  // ─── BLOCO NFS-e (somente PDF DEFINITIVO) ───
+  if (eDefinitivo) {
+    rowY = doc.y + 12;
+    if (rowY + 50 > pageBottomLimit) { doc.addPage(); rowY = margin; }
+    doc.rect(margin, rowY, contentW, 42).fill('#E8F5E9');
+    doc.fill('#1B5E20').font('Helvetica-Bold').fontSize(10)
+       .text('NFS-e EMITIDA', margin + 8, rowY + 5);
+    doc.font('Helvetica').fontSize(8.5).fill('#000000');
+    let ny = rowY + 19;
+    doc.text(`Número: ${nfseInfo.numero}`, margin + 8, ny);
+    if (nfseInfo.data_emissao) doc.text(`Emitida em: ${nfseInfo.data_emissao}`, margin + 180, ny);
+    if (nfseInfo.codigo_verificacao) doc.text(`Cód. verificação: ${nfseInfo.codigo_verificacao}`, margin + 8, ny + 12);
+    if (nfseInfo.link) doc.text(`Link: ${nfseInfo.link}`, margin + 8, ny + 24, { width: contentW - 20 });
+  }
 
   // ─── CAMPOS DE ASSINATURA ───
   const sigY = doc.page.height - 100;
@@ -1174,6 +1335,246 @@ function gerarResumoPDF(dadosResumo, contrato, ano, outputPath) {
   doc.end();
   return totalMensal;
 }
+
+// ─── DEBUG: escaneia bol_contratos e identifica candidatos LEGADOS ────
+// GET /api/boletins/_legados-scan
+// Heurística (mais robusta):
+//   - Para cada bol_contrato A cujo `contrato_ref` NÃO bate exato em contratos.numContrato,
+//     procura um bol_contrato B cujo `contrato_ref` BATE exato E que CONTENHA o ref de A
+//     como substring (ou vice-versa) → A é legado, B é correto.
+//   - Inclui contagens de boletins (total e EMITIDOS) pra avaliação de risco.
+router.get('/_legados-scan', async (req, res) => {
+  try {
+    const db = req.db;
+    const bolc = await db.prepare(
+      `SELECT id, nome, contratante, numero_contrato, contrato_ref, ativo
+       FROM bol_contratos ORDER BY id`).all();
+    const contratos = await db.prepare('SELECT numContrato FROM contratos').all();
+    const numSet = new Set(contratos.map(c => c.numContrato));
+    const counts = await db.prepare(
+      `SELECT contrato_id,
+              COUNT(*) AS total,
+              SUM(CASE WHEN nfse_status='EMITIDA' THEN 1 ELSE 0 END) AS emitidos
+       FROM bol_boletins GROUP BY contrato_id`).all();
+    const cntMap = {};
+    for (const c of counts) cntMap[c.contrato_id] = { total: Number(c.total), emitidos: Number(c.emitidos) };
+
+    // Marca cada bol_contrato: bate_exato e contagens
+    const enriched = bolc.map(bc => ({
+      ...bc,
+      bate_exato: !!(bc.contrato_ref && numSet.has(bc.contrato_ref)),
+      boletins: cntMap[bc.id] || { total: 0, emitidos: 0 },
+    }));
+    const corretos  = enriched.filter(e => e.bate_exato);
+    const naoBatem  = enriched.filter(e => !e.bate_exato);
+
+    // Para cada não-bate, tenta achar um CORRETO cujo ref contém o ref do não-bate
+    // (ou vice-versa, se o legado for o mais longo, raro mas possível).
+    const candidatos = [];
+    for (const legado of naoBatem) {
+      const refL = (legado.contrato_ref || legado.numero_contrato || '').trim();
+      if (!refL) continue;
+      const correspondente = corretos.find(c => {
+        const refC = (c.contrato_ref || '').trim();
+        if (!refC) return false;
+        return refC.includes(refL) || refL.includes(refC);
+      });
+      if (correspondente) {
+        candidatos.push({
+          contratante: legado.contratante,
+          legado: { id: legado.id, nome: legado.nome, contrato_ref: legado.contrato_ref,
+                    ativo: legado.ativo, boletins: legado.boletins },
+          correto: { id: correspondente.id, nome: correspondente.nome,
+                    contrato_ref: correspondente.contrato_ref,
+                    boletins: correspondente.boletins },
+        });
+      }
+    }
+    res.json({ ok: true, total: candidatos.length, candidatos });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── ADMIN: cria UNIQUE INDEX em (contrato_id, competencia) se ainda não existir ──
+// POST /api/boletins/_create-unique
+router.post('/_create-unique', async (req, res) => {
+  try {
+    await req.db.prepare(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_bol_boletins_contrato_comp
+       ON bol_boletins(contrato_id, competencia)`).run();
+    // Verifica e retorna estado pós-criação (raw count + nome do índice)
+    const found = await req.db.prepare(
+      `SELECT indexname FROM pg_indexes
+       WHERE tablename='bol_boletins' AND indexname='idx_bol_boletins_contrato_comp'`).all();
+    res.json({ ok: true, criado: found.length > 0, indices: found });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── ADMIN: ativa/desativa bol_contrato (soft-delete) ─────────────────
+// PATCH /api/boletins/_set-ativo?id=N&ativo=0|1
+// Schema legacy usa smallint (0/1) em alguns ambientes e boolean em outros;
+// passamos como integer pra cobrir os dois casos.
+router.patch('/_set-ativo', async (req, res) => {
+  try {
+    const id = parseInt(req.query.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'id obrigatório' });
+    const ativoInt = (req.query.ativo === '1' || req.query.ativo === 'true') ? 1 : 0;
+    const r = await req.db.prepare('UPDATE bol_contratos SET ativo=? WHERE id=?').run(ativoInt, id);
+    res.json({ ok: true, changes: r.changes });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── ADMIN: apaga TODOS os boletins de um bol_contrato (com guard NFS-e) ──
+// DELETE /api/boletins/_purge-contrato?id=N
+router.delete('/_purge-contrato', async (req, res) => {
+  try {
+    const id = parseInt(req.query.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'id obrigatório' });
+    const db = req.db;
+    // Guard: aborta se algum boletim já tem NFS-e EMITIDA
+    const emitidos = await db.prepare(
+      `SELECT id, nfse_numero FROM bol_boletins WHERE contrato_id=? AND nfse_status='EMITIDA'`).all(id);
+    if (emitidos.length) {
+      return res.status(400).json({
+        error: 'Existem boletins com NFS-e EMITIDA — não posso apagar',
+        emitidos,
+      });
+    }
+    const r = await db.prepare('DELETE FROM bol_boletins WHERE contrato_id=?').run(id);
+    res.json({ ok: true, apagados: r.changes });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── DEBUG: detalhe completo de bol_contrato (postos+itens) ─────────
+// GET /api/boletins/_contrato-detalhe?id=2
+router.get('/_contrato-detalhe', async (req, res) => {
+  try {
+    const id = parseInt(req.query.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'id obrigatório' });
+    const db = req.db;
+    const bc = await db.prepare('SELECT * FROM bol_contratos WHERE id=?').get(id);
+    if (!bc) return res.status(404).json({ error: 'Não encontrado' });
+    const postos = await db.prepare('SELECT id, campus_nome, municipio, ordem FROM bol_postos WHERE contrato_id=? ORDER BY ordem').all(id);
+    for (const p of postos) {
+      p.itens = await db.prepare('SELECT id, descricao, quantidade, valor_unitario FROM bol_itens WHERE posto_id=? ORDER BY ordem').all(p.id);
+    }
+    const boletins = await db.prepare(`SELECT id, competencia, status, nfse_status, valor_total FROM bol_boletins WHERE contrato_id=? ORDER BY competencia DESC, id DESC`).all(id);
+    res.json({ ok: true, bol_contrato: bc, postos, boletins });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── DEBUG: lista bol_contratos com mesmo padrão de nome (para detectar duplicações de cadastro) ──
+// GET /api/boletins/_dup-cadastro?q=DETRAN
+router.get('/_dup-cadastro', async (req, res) => {
+  try {
+    const q = (req.query.q || '').toString().trim();
+    if (!q) return res.status(400).json({ error: 'Parâmetro q obrigatório (substring do nome)' });
+    const db = req.db;
+    const bolc = await db.prepare(
+      `SELECT id, nome, contratante, numero_contrato, contrato_ref, ativo
+       FROM bol_contratos
+       WHERE nome ILIKE '%' || ? || '%' OR contratante ILIKE '%' || ? || '%' OR numero_contrato ILIKE '%' || ? || '%'
+       ORDER BY id`).all(q, q, q);
+    const contratos = await db.prepare(
+      `SELECT id, numContrato, contrato, orgao, valor_mensal_bruto, status
+       FROM contratos
+       WHERE contrato ILIKE '%' || ? || '%' OR orgao ILIKE '%' || ? || '%' OR numContrato ILIKE '%' || ? || '%'
+       ORDER BY id`).all(q, q, q);
+    res.json({ ok: true, bol_contratos: bolc, contratos_financeiros: contratos });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── DEDUP: limpa duplicatas (contrato_id, competencia) preservando o melhor ──
+// POST /api/boletins/_dedup?dry=1   → preview do que seria apagado
+// POST /api/boletins/_dedup         → executa
+// Prioridade do que fica: NFS-e EMITIDA > APROVADO > rascunho mais recente
+router.post('/_dedup', async (req, res) => {
+  try {
+    const db = req.db;
+    const dryRun = req.query.dry === '1' || req.query.dry === 'true';
+
+    // 1. Grupos duplicados + qual fica em cada grupo (DISTINCT ON + ORDER BY)
+    const winners = await db.prepare(`
+      SELECT DISTINCT ON (contrato_id, competencia)
+        id, contrato_id, competencia, status, nfse_status, valor_total
+      FROM bol_boletins
+      WHERE (contrato_id, competencia) IN (
+        SELECT contrato_id, competencia FROM bol_boletins
+        GROUP BY contrato_id, competencia HAVING COUNT(*) > 1
+      )
+      ORDER BY contrato_id, competencia,
+        CASE nfse_status WHEN 'EMITIDA' THEN 0 ELSE 1 END,
+        CASE status WHEN 'aprovado' THEN 0 WHEN 'rascunho' THEN 2 ELSE 1 END,
+        id DESC
+    `).all();
+    const keepIds = winners.map(w => Number(w.id));
+
+    const losers = await db.prepare(`
+      SELECT id, contrato_id, competencia, status, nfse_status, valor_total
+      FROM bol_boletins
+      WHERE (contrato_id, competencia) IN (
+        SELECT contrato_id, competencia FROM bol_boletins
+        GROUP BY contrato_id, competencia HAVING COUNT(*) > 1
+      )
+      ORDER BY contrato_id, competencia, id
+    `).all();
+    const deleteIds = losers.filter(l => !keepIds.includes(Number(l.id))).map(l => Number(l.id));
+
+    if (dryRun) {
+      return res.json({ ok: true, dry: true, preserva: winners, apagaria: deleteIds.length, ids_apagaria: deleteIds.slice(0, 100) });
+    }
+
+    // Block guard: se algum dos que vamos apagar tem NFS-e EMITIDA, aborta.
+    const emitidos = losers.filter(l => l.nfse_status === 'EMITIDA').map(l => Number(l.id));
+    if (emitidos.some(id => !keepIds.includes(id))) {
+      return res.status(400).json({ error: 'Há duplicatas com NFS-e EMITIDA — investigação manual necessária', emitidos });
+    }
+
+    // Executa em lote
+    let apagados = 0;
+    for (const id of deleteIds) {
+      const r = await db.prepare('DELETE FROM bol_boletins WHERE id=?').run(id);
+      apagados += r.changes || 0;
+    }
+    res.json({ ok: true, apagados, preservou: keepIds.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── DIAGNÓSTICO: índices/constraints + duplicatas (debug 2026-05) ──
+// GET /api/boletins/_diag-dup
+router.get('/_diag-dup', async (req, res) => {
+  try {
+    const db = req.db;
+    const indices = await db.prepare(
+      `SELECT indexname, indexdef FROM pg_indexes
+       WHERE tablename='bol_boletins' AND schemaname='public'`).all();
+    const constraints = await db.prepare(
+      `SELECT conname, contype::text AS contype, pg_get_constraintdef(oid) AS def
+       FROM pg_constraint WHERE conrelid='bol_boletins'::regclass`).all();
+    const duplicatas = await db.prepare(
+      `SELECT contrato_id, competencia, COUNT(*) AS n, MIN(id) AS min_id, MAX(id) AS max_id
+       FROM bol_boletins
+       GROUP BY contrato_id, competencia
+       HAVING COUNT(*) > 1
+       ORDER BY n DESC LIMIT 30`).all();
+    res.json({ ok: true, indices, constraints, duplicatas });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ─── DIAGNÓSTICO: lista boletins existentes (debug) ────────────
 // GET /api/boletins/_diag
@@ -1331,15 +1732,40 @@ function gerarBoletimPDF_inline(doc, contrato, posto, nfNumero, dataEmissao, per
 
   let rowY = tableY + 20;
   let totalPosto = 0;
+  // Margem de segurança no fim da página pra não invadir o bloco de assinaturas
+  const pageBottomLimit = doc.page.height - 130;
+
+  // Função pra desenhar o cabeçalho da tabela (reusada quando vira página)
+  const drawTableHeader = (y) => {
+    doc.rect(margin, y, contentW, 20).fill(AZUL_ESCURO);
+    doc.fill('#FFFFFF').font('Helvetica-Bold').fontSize(8);
+    let hx = margin;
+    for (let i = 0; i < headers.length; i++) {
+      doc.text(headers[i], hx + 4, y + 5, { width: colWidths[i] - 8, align: 'center' });
+      hx += colWidths[i];
+    }
+  };
+
   for (let idx = 0; idx < posto.itens.length; idx++) {
     const item = posto.itens[idx];
     const vt = (item.quantidade || 0) * (item.valor_unitario || 0);
     totalPosto += vt;
-    if (idx % 2 === 1) doc.rect(margin, rowY, contentW, 28).fill(CINZA_CLARO);
-    tx = margin;
+
     doc.fill('#000000').font('Helvetica').fontSize(8);
     const descH = doc.heightOfString(item.descricao || '', { width: colWidths[0] - 12 });
     const rowH = Math.max(descH + 10, 28);
+
+    // Page break: se a próxima linha estourar o limite, vira página e redesenha o header
+    if (rowY + rowH > pageBottomLimit) {
+      doc.addPage();
+      rowY = margin;
+      drawTableHeader(rowY);
+      rowY += 20;
+    }
+
+    if (idx % 2 === 1) doc.rect(margin, rowY, contentW, rowH).fill(CINZA_CLARO);
+    tx = margin;
+    doc.fill('#000000').font('Helvetica').fontSize(8);
     doc.text(item.descricao || '', tx + 6, rowY + 5, { width: colWidths[0] - 12 });
     tx += colWidths[0];
     doc.text(String(item.quantidade || 0), tx + 4, rowY + 8, { width: colWidths[1] - 8, align: 'center' });
@@ -1349,6 +1775,13 @@ function gerarBoletimPDF_inline(doc, contrato, posto, nfNumero, dataEmissao, per
     doc.text(formatMoeda(vt), tx + 4, rowY + 8, { width: colWidths[3] - 8, align: 'right' });
     doc.rect(margin, rowY, contentW, rowH).strokeColor(CINZA_BORDA).lineWidth(0.3).stroke();
     rowY += rowH;
+  }
+
+  // Se TOTAL e descrições não couberem na página atual, vira pra próxima
+  const blocoFinalH = 130; // TOTAL + descrições + (signatures fixas no rodapé)
+  if (rowY + blocoFinalH > pageBottomLimit) {
+    doc.addPage();
+    rowY = margin;
   }
 
   rowY += 4;
@@ -1567,30 +2000,59 @@ router.get('/painel-faturamento', async (req, res) => {
     // is not a function"). Corrigido também `bc.ativo = 1` → `bc.ativo = TRUE`
     // pra schemas em que `ativo` é boolean (compatibilidade com integer 1 mantida
     // via COALESCE — assume ativo se a coluna for NULL).
+    // FIX (2026-05): excluir contratos ENCERRADO/RESCINDIDO. O status fica na
+    // tabela `contratos` (financeira), não em bol_contratos — então resolvemos
+    // via subquery na inner e filtramos na outer pra evitar duplicar COALESCE.
     const _contratosRaw = await db.prepare(`
-      SELECT bc.*,
-        COALESCE(
-          (SELECT c1.valor_mensal_bruto FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
-          (SELECT c2.valor_mensal_bruto FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1),
-          0
-        ) AS valor_mensal_bruto,
-        COALESCE(
-          (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
-          (SELECT c2.orgao FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1),
-          ''
-        ) AS cnpj_tomador_contrato
-      FROM bol_contratos bc
-      WHERE COALESCE(bc.ativo::text, 'true') NOT IN ('0','false','f')
-      ORDER BY bc.nome
+      SELECT * FROM (
+        SELECT bc.*,
+          COALESCE(
+            (SELECT c1.valor_mensal_bruto FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+            (SELECT c2.valor_mensal_bruto FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1),
+            0
+          ) AS valor_mensal_bruto,
+          COALESCE(
+            (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+            (SELECT c2.orgao FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1),
+            ''
+          ) AS cnpj_tomador_contrato,
+          COALESCE(
+            (SELECT c1.status FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
+            (SELECT c2.status FROM contratos c2 WHERE c2.numContrato LIKE '%' || bc.numero_contrato LIMIT 1),
+            ''
+          ) AS contrato_status
+        FROM bol_contratos bc
+        WHERE COALESCE(bc.ativo::text, 'true') NOT IN ('0','false','f')
+      ) sub
+      WHERE LOWER(COALESCE(contrato_status, '')) NOT LIKE '%encerrad%'
+        AND LOWER(COALESCE(contrato_status, '')) NOT LIKE '%rescindid%'
+      ORDER BY nome
     `).all();
     const contratos = Array.isArray(_contratosRaw) ? _contratosRaw : [];
 
     const resultado = await Promise.all(contratos.map(async bc => {
       // FIX1: COALESCE(valor_total, total_geral)
+      // OPÇÃO A: busca apenas boletim consolidado (posto_id IS NULL).
+      // Boletins por-posto são contados separadamente abaixo.
       const boletim = await db.prepare(`
         SELECT *, COALESCE(valor_total, total_geral, 0) AS valor_efetivo
         FROM bol_boletins
-        WHERE contrato_id = ? AND competencia = ?
+        WHERE contrato_id = ? AND competencia = ? AND posto_id IS NULL
+      `).get(bc.id, mes);
+
+      // OPÇÃO A: agregado de boletins-por-posto (estilo UFT — 1 NF por posto)
+      const qtdPostos = await db.prepare(
+        'SELECT COUNT(*)::int AS n FROM bol_postos WHERE contrato_id=?'
+      ).get(bc.id);
+      const aggPostos = await db.prepare(`
+        SELECT
+          COUNT(*)::int AS qtd,
+          COUNT(*) FILTER (WHERE nfse_status='EMITIDA')::int AS emitidos,
+          COUNT(*) FILTER (WHERE status='aprovado' AND nfse_status<>'EMITIDA')::int AS aprovados_pend,
+          COUNT(*) FILTER (WHERE status='rascunho')::int AS rascunhos,
+          COALESCE(SUM(COALESCE(valor_total, total_geral, 0)), 0) AS valor_total
+        FROM bol_boletins
+        WHERE contrato_id=? AND competencia=? AND posto_id IS NOT NULL
       `).get(bc.id, mes);
 
       const [ano, mesNum] = mes.split('-');
@@ -1607,6 +2069,15 @@ router.get('/painel-faturamento', async (req, res) => {
         insc_municipal:    bc.insc_municipal || '',
         cnpj_tomador_contrato: bc.cnpj_tomador_contrato || '',
         mes_nome:          `${mesNome}/${ano}`,
+        // Modo Opção A: agregado de postos
+        qtd_postos:        qtdPostos?.n || 0,
+        postos_resumo: {
+          qtd:             aggPostos?.qtd || 0,
+          emitidos:        aggPostos?.emitidos || 0,
+          aprovados_pend:  aggPostos?.aprovados_pend || 0,
+          rascunhos:       aggPostos?.rascunhos || 0,
+          valor_total:     Number(aggPostos?.valor_total || 0),
+        },
         boletim: boletim ? {
           id:          boletim.id,
           status:      boletim.status,
@@ -1647,6 +2118,54 @@ router.get('/painel-faturamento', async (req, res) => {
   }
 });
 
+// ─── PAINEL POSTOS (drill-down Opção A) ───────────────────────
+// GET /api/boletins/painel-postos?contrato_id=X&mes=YYYY-MM
+// Retorna lista detalhada dos boletins-por-posto de um contrato/mês,
+// inclusive os postos que ainda não têm boletim (pra mostrar como "Sem boletim").
+router.get('/painel-postos', async (req, res) => {
+  try {
+    const { contrato_id, mes } = req.query;
+    if (!contrato_id || !mes || !/^\d{4}-\d{2}$/.test(mes)) {
+      return res.status(400).json({ error: 'contrato_id e mes (YYYY-MM) são obrigatórios' });
+    }
+    const db = req.db;
+    const postos = await db.prepare(
+      'SELECT id, campus_nome, municipio, label_resumo FROM bol_postos WHERE contrato_id=? ORDER BY ordem, campus_nome'
+    ).all(contrato_id);
+
+    const linhas = await Promise.all(postos.map(async p => {
+      const bol = await db.prepare(`
+        SELECT id, status, nfse_status, nfse_numero, nfse_erro, valor_base,
+               COALESCE(valor_total, total_geral, 0) AS valor_total,
+               glosas, acrescimos
+        FROM bol_boletins
+        WHERE contrato_id=? AND posto_id=? AND competencia=?
+      `).get(contrato_id, p.id, mes);
+      return {
+        posto_id: p.id,
+        campus_nome: p.campus_nome,
+        municipio: p.municipio,
+        label_resumo: p.label_resumo,
+        boletim: bol ? {
+          id: bol.id,
+          status: bol.status,
+          nfse_status: bol.nfse_status,
+          nfse_numero: bol.nfse_numero,
+          nfse_erro: bol.nfse_erro,
+          valor_base: Number(bol.valor_base || 0),
+          valor_total: Number(bol.valor_total || 0),
+          glosas: Number(bol.glosas || 0),
+          acrescimos: Number(bol.acrescimos || 0),
+        } : null
+      };
+    }));
+    res.json({ mes, contrato_id: Number(contrato_id), postos: linhas });
+  } catch (err) {
+    console.error('Erro painel-postos:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── GERAR MÊS (batch) ─────────────────────────────────────────
 // POST /api/boletins/gerar-mes  { mes: "YYYY-MM" }
 // Cria boletins em rascunho para TODOS os contratos ativos sem boletim no mês
@@ -1673,25 +2192,26 @@ router.post('/gerar-mes', async (req, res) => {
 
     let criados = 0, existentes = 0;
 
-    // Sem transaction wrapper — em PG cada INSERT é atômico e não precisamos
-    // de ROLLBACK se o batch falhar no meio (mais simples + sem confusão de
-    // async/sync no transaction adapter).
+    // FIX (2026-05): substituído SELECT+INSERT pelo padrão idempotente
+    // INSERT ... ON CONFLICT DO NOTHING RETURNING id. Elimina o race condition
+    // (TOCTOU) que produzia duplicatas quando o cron e o usuário disparavam
+    // simultaneamente. Depende de UNIQUE INDEX idx_bol_boletins_contrato_comp
+    // (criado por POST /_create-unique).
     for (const bc of contratos) {
-      const existe = await db.prepare('SELECT id FROM bol_boletins WHERE contrato_id=? AND competencia=?').get(bc.id, mes);
-      if (existe) { existentes++; continue; }
-
       const valor_base = Math.round((bc.valor_mensal_bruto || 0) * 100) / 100;
       const tipoServico = bc.descricao_servico || 'SERVIÇOS';
       const numContrato  = bc.contrato_ref || bc.numero_contrato || '';
       const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServico.toUpperCase()} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. VALOR MENSAL CONFORME BOLETIM DE MEDIÇÃO APROVADO.`;
 
-      // FIX: faltava await em ins.run em PG (Promise não esperada → criados++
-      // contabilizava antes do INSERT terminar)
-      await db.prepare(`INSERT INTO bol_boletins
+      const r = await db.prepare(`INSERT INTO bol_boletins
         (contrato_id, competencia, data_emissao, valor_base, valor_total, glosas, acrescimos, discriminacao, status, nfse_status)
         VALUES (?, ?, CURRENT_DATE, ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')
+        ON CONFLICT (contrato_id, competencia) DO NOTHING
+        RETURNING id
       `).run(bc.id, mes, valor_base, valor_base, discriminacao);
-      criados++;
+      // r.changes = 1 quando inseriu; 0 quando já existia (CONFLICT)
+      if (r.changes && r.changes > 0) criados++;
+      else existentes++;
     }
 
     res.json({ ok: true, mes, criados, existentes, total: contratos.length });
@@ -1699,6 +2219,193 @@ router.post('/gerar-mes', async (req, res) => {
     console.error('Erro gerar-mes:', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ─── PADRÃO OPÇÃO A: gerar N boletins (1 por posto) ─────────────
+// POST /api/boletins/gerar-boletim-postos { contrato_id, competencia }
+// Cria 1 boletim por posto cadastrado no contrato. Cada boletim será emitido
+// individualmente como NF própria (estilo UFT).
+async function _gerarBoletinsPorPostos(db, contrato_id, competencia, mesNome, ano) {
+  const postos = await db.prepare(
+    'SELECT id, campus_nome, municipio FROM bol_postos WHERE contrato_id=? ORDER BY ordem'
+  ).all(contrato_id);
+  if (!postos || postos.length === 0) {
+    return { criados: 0, existentes: 0, total_postos: 0, sem_postos: true };
+  }
+
+  const bc = await db.prepare('SELECT * FROM bol_contratos WHERE id=?').get(contrato_id);
+  const tipoServico = (bc?.descricao_servico || 'SERVIÇOS').toUpperCase();
+  const numContrato = bc?.contrato_ref || bc?.numero_contrato || '';
+
+  let criados = 0, existentes = 0;
+  for (const p of postos) {
+    const itens = await db.prepare(
+      'SELECT quantidade, valor_unitario FROM bol_itens WHERE posto_id=?'
+    ).all(p.id);
+    const valor_base = Math.round(
+      itens.reduce((s, i) => s + (Number(i.quantidade) || 0) * (Number(i.valor_unitario) || 0), 0) * 100
+    ) / 100;
+
+    const descMunicipio = p.municipio ? ` — ${p.municipio}` : '';
+    const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServico} CONFORME CONTRATO Nº ${numContrato}${descMunicipio}. COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. VALOR CONFORME BOLETIM DE MEDIÇÃO APROVADO.`;
+
+    const r = await db.prepare(`INSERT INTO bol_boletins
+      (contrato_id, posto_id, competencia, data_emissao, valor_base, valor_total, glosas, acrescimos, discriminacao, status, nfse_status)
+      VALUES (?, ?, ?, CURRENT_DATE, ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')
+      ON CONFLICT (contrato_id, posto_id, competencia) WHERE posto_id IS NOT NULL DO NOTHING
+      RETURNING id`).run(contrato_id, p.id, competencia, valor_base, valor_base, discriminacao);
+    if (r.changes && r.changes > 0) criados++;
+    else existentes++;
+  }
+  return { criados, existentes, total_postos: postos.length, sem_postos: false };
+}
+
+router.post('/gerar-boletim-postos', async (req, res) => {
+  try {
+    const { contrato_id, competencia } = req.body;
+    if (!contrato_id || !competencia || !/^\d{4}-\d{2}$/.test(competencia)) {
+      return res.status(400).json({ error: 'contrato_id e competencia (YYYY-MM) são obrigatórios' });
+    }
+    const [ano, mesNum] = competencia.split('-');
+    const mesNome = MESES_NOME_COMPLETO[parseInt(mesNum)] || competencia;
+    const out = await _gerarBoletinsPorPostos(req.db, contrato_id, competencia, mesNome, ano);
+    res.json({ ok: true, competencia, ...out });
+  } catch (err) {
+    console.error('Erro gerar-boletim-postos:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/boletins/gerar-mes-postos { mes: "YYYY-MM" }
+// Pra cada contrato ativo: cria N boletins (1 por posto).
+router.post('/gerar-mes-postos', async (req, res) => {
+  try {
+    const { mes } = req.body;
+    if (!mes || !/^\d{4}-\d{2}$/.test(mes)) {
+      return res.status(400).json({ error: 'Campo mes obrigatório (YYYY-MM)' });
+    }
+    const db = req.db;
+    const contratos = await db.prepare(`
+      SELECT bc.id, bc.nome
+      FROM bol_contratos bc
+      WHERE COALESCE(bc.ativo::text, 'true') NOT IN ('0','false','f')
+    `).all();
+    const [ano, mesNum] = mes.split('-');
+    const mesNome = MESES_NOME_COMPLETO[parseInt(mesNum)] || mes;
+
+    const resumo = [];
+    let totalCriados = 0, totalExistentes = 0, contratosSemPostos = 0;
+    for (const c of contratos) {
+      const r = await _gerarBoletinsPorPostos(db, c.id, mes, mesNome, ano);
+      resumo.push({ contrato_id: c.id, nome: c.nome, ...r });
+      totalCriados += r.criados;
+      totalExistentes += r.existentes;
+      if (r.sem_postos) contratosSemPostos++;
+    }
+    res.json({
+      ok: true, mes,
+      criados: totalCriados,
+      existentes: totalExistentes,
+      contratos_sem_postos: contratosSemPostos,
+      detalhe: resumo
+    });
+  } catch (err) {
+    console.error('Erro gerar-mes-postos:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── PDF PRÉVIO / DEFINITIVO (Opção A) ─────────────────────────
+// GET /api/boletins/:id/pdf-previo
+// GET /api/boletins/:id/pdf-definitivo
+// Reusa gerarBoletimPDF(). Boletim deve ter posto_id setado (vinculado a 1 posto).
+async function _renderBoletimPDF(req, res, modo /* 'previo'|'definitivo' */) {
+  const db = req.db;
+  const bol = await db.prepare(`
+    SELECT b.*, bc.nome as bc_nome, bc.contratante, bc.numero_contrato, bc.processo, bc.pregao,
+           bc.descricao_servico, bc.escala, bc.empresa_razao, bc.empresa_cnpj, bc.empresa_endereco,
+           bc.empresa_email, bc.empresa_telefone
+    FROM bol_boletins b
+    JOIN bol_contratos bc ON b.contrato_id = bc.id
+    WHERE b.id=?`).get(req.params.id);
+  if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+  if (!bol.posto_id) {
+    return res.status(400).json({ error: 'Boletim sem posto vinculado — use o fluxo Opção A (gerar-boletim-postos)' });
+  }
+  if (modo === 'definitivo' && bol.nfse_status !== 'EMITIDA') {
+    return res.status(400).json({ error: 'NFS-e ainda não emitida — use pdf-previo' });
+  }
+
+  const posto = await db.prepare('SELECT * FROM bol_postos WHERE id=?').get(bol.posto_id);
+  if (!posto) return res.status(404).json({ error: 'Posto vinculado não encontrado' });
+  posto.itens = await db.prepare('SELECT * FROM bol_itens WHERE posto_id=? ORDER BY ordem').all(posto.id);
+
+  // Monta contrato c/ shape esperado pelo PDF
+  const contrato = {
+    contratante: bol.contratante,
+    numero_contrato: bol.numero_contrato,
+    processo: bol.processo,
+    pregao: bol.pregao,
+    descricao_servico: bol.descricao_servico || '',
+    escala: bol.escala || '',
+    empresa_razao: bol.empresa_razao || '',
+    empresa_cnpj: bol.empresa_cnpj || '',
+    empresa_endereco: bol.empresa_endereco || '',
+    empresa_email: bol.empresa_email || '',
+    empresa_telefone: bol.empresa_telefone || '',
+  };
+
+  // Competência YYYY-MM → "Janeiro 2026" pra calcularPeriodo
+  const [ano, mesNum] = (bol.competencia || '').split('-');
+  const mesNome = MESES_NOME[parseInt(mesNum)] || '';
+  const compTexto = mesNome ? `${mesNome.charAt(0).toUpperCase() + mesNome.slice(1)} ${ano}` : bol.competencia;
+  const periodo = mesNome ? calcularPeriodo(compTexto) : bol.competencia;
+
+  const dataEmissao = bol.data_emissao
+    ? new Date(bol.data_emissao).toLocaleDateString('pt-BR')
+    : new Date().toLocaleDateString('pt-BR');
+
+  const nfseInfo = modo === 'definitivo' ? {
+    numero: bol.nfse_numero,
+    data_emissao: bol.nfse_data_emissao
+      ? new Date(bol.nfse_data_emissao).toLocaleDateString('pt-BR')
+      : '',
+    codigo_verificacao: bol.nfse_codigo_verificacao || '',
+    link: bol.nfse_link || ''
+  } : null;
+
+  const os = require('os');
+  const tmpFile = path.join(os.tmpdir(),
+    `boletim-${modo}-${bol.id}-${Date.now()}.pdf`);
+
+  gerarBoletimPDF(contrato, posto, bol.nfse_numero || '', dataEmissao, periodo, tmpFile, nfseInfo);
+
+  // gerarBoletimPDF é síncrono em escrita mas usa stream interno → espera o stream fechar
+  const waitFile = () => new Promise(resolve => {
+    const t = setInterval(() => {
+      if (fs.existsSync(tmpFile) && fs.statSync(tmpFile).size > 100) {
+        clearInterval(t); resolve();
+      }
+    }, 50);
+    setTimeout(() => { clearInterval(t); resolve(); }, 3000);
+  });
+  await waitFile();
+
+  res.setHeader('Content-Type', 'application/pdf');
+  const fname = `Boletim ${modo === 'previo' ? 'Previo' : 'Definitivo'} ${(posto.campus_nome||'').replace(/[^\w\-]/g,'_')} ${bol.competencia}.pdf`;
+  res.setHeader('Content-Disposition', `inline; filename="${fname}"`);
+  const stream = fs.createReadStream(tmpFile);
+  stream.pipe(res);
+  stream.on('close', () => { try { fs.unlinkSync(tmpFile); } catch (_) {} });
+}
+
+router.get('/:id/pdf-previo', async (req, res) => {
+  try { await _renderBoletimPDF(req, res, 'previo'); }
+  catch (err) { console.error('Erro pdf-previo:', err); res.status(500).json({ error: err.message }); }
+});
+router.get('/:id/pdf-definitivo', async (req, res) => {
+  try { await _renderBoletimPDF(req, res, 'definitivo'); }
+  catch (err) { console.error('Erro pdf-definitivo:', err); res.status(500).json({ error: err.message }); }
 });
 
 // ─── APROVAR BOLETIM ───────────────────────────────────────────
@@ -1730,6 +2437,73 @@ router.post('/:id/reabrir', async (req, res) => {
     }
     await db.prepare(`UPDATE bol_boletins SET status='rascunho', updated_at=NOW() WHERE id=?`).run(req.params.id);
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── DESFAZER RASCUNHO ────────────────────────────────────────
+// DELETE /api/boletins/:id
+// Apaga um boletim que ainda é rascunho. Bloqueia exclusão se já foi aprovado
+// ou se a NFS-e já foi emitida — proteção contra perda de dado fiscal.
+router.delete('/:id', async (req, res) => {
+  try {
+    const db = req.db;
+    const bol = await db.prepare('SELECT id, status, nfse_status FROM bol_boletins WHERE id=?').get(req.params.id);
+    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+    if (bol.nfse_status === 'EMITIDA') {
+      return res.status(400).json({ error: 'NFS-e já emitida — boletim não pode ser excluído' });
+    }
+    if (bol.status !== 'rascunho') {
+      return res.status(400).json({ error: 'Apenas boletins em rascunho podem ser desfeitos (reabra antes se preciso)' });
+    }
+    await db.prepare(`DELETE FROM bol_boletins WHERE id=?`).run(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── LISTAGEM para Painel de Faturamento → Emissão de NFS-e ───
+// GET /api/boletins/emissao?mes=YYYY-MM&nfse_status=PENDENTE
+// Retorna boletins com dados do contrato pra alimentar a tela de emissão.
+// Filtros opcionais: mes (YYYY-MM) e nfse_status (PENDENTE|ENVIANDO|EMITIDA|ERRO).
+router.get('/emissao', async (req, res) => {
+  const { mes, nfse_status } = req.query;
+  const where = [];
+  const params = [];
+  if (mes && /^\d{4}-\d{2}$/.test(mes)) {
+    where.push('b.competencia = ?');
+    params.push(mes);
+  }
+  if (nfse_status) {
+    where.push('b.nfse_status = ?');
+    params.push(nfse_status);
+  }
+  // Filtro adicional: oculta boletins de contratos ENCERRADO/RESCINDIDO.
+  // O status fica em contratos.status (financeira) e bate por contrato_ref ou numero_contrato.
+  where.push(`NOT EXISTS (
+    SELECT 1 FROM contratos c
+    WHERE (LOWER(COALESCE(c.status,'')) LIKE '%encerrad%'
+        OR LOWER(COALESCE(c.status,'')) LIKE '%rescindid%')
+      AND (
+        (bc.contrato_ref != '' AND c.numContrato = bc.contrato_ref)
+        OR c.numContrato LIKE '%' || bc.numero_contrato
+      )
+  )`);
+  const whereSql = 'WHERE ' + where.join(' AND ');
+  try {
+    const rows = await req.db.prepare(`
+      SELECT b.id, b.contrato_id, b.competencia, b.status, b.nfse_status,
+             b.valor_base, b.valor_total, b.glosas, b.acrescimos,
+             b.nfse_numero, b.nfse_data_emissao, b.nfse_erro,
+             bc.nome AS contrato_nome, bc.contratante
+      FROM bol_boletins b
+      LEFT JOIN bol_contratos bc ON bc.id = b.contrato_id
+      ${whereSql}
+      ORDER BY b.competencia DESC, bc.nome ASC
+    `).all(...params);
+    res.json({ ok: true, data: rows });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

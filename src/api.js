@@ -390,7 +390,7 @@ router.post('/retencoes/preencher', async (req, res) => {
       const esp = calcularRetencoesEsperadas(nf.valor_bruto, nf.tomador, nf.cidade, nf.retencao);
       // Ajustar proporcionalmente à retenção real (para fechar o valor)
       const fator = nf.retencao / esp.totalEsperado;
-      update.run({
+      await update.run({
         id: nf.id,
         inss: +(esp.inss * fator).toFixed(2),
         ir: +(esp.irrf * fator).toFixed(2),
@@ -1592,11 +1592,11 @@ router.post('/vinculacoes', async (req, res) => {
   const { extrato_id, contrato_num, tipo, valor } = req.body;
   if (!extrato_id || !contrato_num) return res.status(400).json({ error: 'extrato_id e contrato_num obrigatórios' });
 
-  const stmt = await req.db.prepare(`
+  const stmt = req.db.prepare(`
     INSERT INTO vinculacoes (extrato_id, contrato_num, tipo, valor)
     VALUES (@extrato_id, @contrato_num, @tipo, @valor)
   `);
-  stmt.run({ extrato_id, contrato_num, tipo: tipo || '', valor: valor || 0 });
+  await stmt.run({ extrato_id, contrato_num, tipo: tipo || '', valor: valor || 0 });
 
   // Update extrato status
   await req.db.prepare(`UPDATE extratos SET contrato_vinculado = @contrato_num, status_conciliacao = 'CONCILIADO', updated_at=NOW() WHERE id = @id`)
@@ -1666,7 +1666,7 @@ router.post('/import/extratos', (req, res, next) => getUpload(req).single("file"
         const row = {};
         header.forEach((h, idx) => { row[h.toLowerCase()] = cols[idx] || ''; });
 
-        const r = insert.run({
+        const r = await insert.run({
           id: parseInt(row.id || row.ID || i),
           mes: row.mes || row.MES || '',
           data: row.data || row.DATA || '',
@@ -1731,7 +1731,7 @@ router.post('/import/pagamentos', (req, res, next) => getUpload(req).single("fil
         const row = {};
         header.forEach((h, idx) => { row[h.toLowerCase().trim()] = cols[idx] || ''; });
 
-        insert.run({
+        await insert.run({
           ob: row['documento de pagamento'] || row.ob || '',
           gestao: row['unidade gestora'] || row.gestao || '',
           fonte: row['fonte de recurso'] || row.fonte || '',
@@ -1786,7 +1786,7 @@ router.post('/import/liquidacoes', (req, res, next) => getUpload(req).single("fi
         const row = {};
         header.forEach((h, idx) => { row[h.toLowerCase().trim()] = cols[idx] || ''; });
 
-        insert.run({
+        await insert.run({
           empenho: row.empenho || '',
           gestao: row['unidade gestora'] || row.gestao || '',
           favorecido: row.favorecido || '',
@@ -3287,7 +3287,7 @@ router.post('/import/despesas', (req, res, next) => getUpload(req).single("file"
         const descricao_row = row.descricao || row['descrição'] || '';
         const dedup_hash_row = dedupHash(req.companyKey, data_iso_row, vbruto, fornecedor_row, descricao_row);
 
-        const r = insert.run({
+        const r = await insert.run({
           categoria: cat,
           descricao: descricao_row,
           fornecedor: fornecedor_row,
@@ -4878,8 +4878,8 @@ router.post('/extratos/classificar-interno', async (req, res) => {
          AND (${buildWhere(PALAVRAS_INVESTIMENTO)})`
     );
 
-    const resInt = stmtInt.run(...buildParams(PALAVRAS_INTERNO));
-    const resInv = stmtInv.run(...buildParams(PALAVRAS_INVESTIMENTO));
+    const resInt = await stmtInt.run(...buildParams(PALAVRAS_INTERNO));
+    const resInv = await stmtInv.run(...buildParams(PALAVRAS_INVESTIMENTO));
 
     // Contagem de cada tipo após classificação
     const contagens = await db.prepare(`
@@ -5095,7 +5095,7 @@ router.post('/extratos/classificar-todos', async (req, res) => {
           });
           if (matched) {
             const status = regra.categoria;
-            stmtUpdate.run({ id: e.id, status, contrato: regra.contrato || null });
+            await stmtUpdate.run({ id: e.id, status, contrato: regra.contrato || null });
             totalAtualizados++;
             const key = regra.contrato || regra.categoria;
             porCategoria[key] = (porCategoria[key] || 0) + 1;
@@ -5631,7 +5631,7 @@ router.post('/compras/requisicoes', async (req, res) => {
       `);
       for (const it of itens) {
         if (!it.descricao) continue;
-        stmtItem.run(reqId, it.descricao, it.unidade || 'un', it.quantidade || 1, it.valor_unitario_est || null);
+        await stmtItem.run(reqId, it.descricao, it.unidade || 'un', it.quantidade || 1, it.valor_unitario_est || null);
       }
     }
 

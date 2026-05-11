@@ -274,6 +274,24 @@ tr.vinculado .vinc-sel{background:#dcfce7;border-color:#86efac}
   font-weight:700;
 }
 
+/* Sub-grupo dentro do nav-group (ex: Painel de Faturamento) */
+.nav-group-items .nav-subgroup-hdr{
+  padding:6px 14px 4px 28px;
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.5px;
+  color:#64748b;
+  text-transform:uppercase;
+  pointer-events:none;
+  margin-top:4px;
+}
+.nav-group-items .tab.nav-subitem{
+  padding-left:48px;
+}
+.nav-group-items .tab.nav-subitem.active{
+  padding-left:45px;
+}
+
 /* Main content area */
 #main-content{
   flex:1;

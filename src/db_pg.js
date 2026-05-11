@@ -301,8 +301,14 @@ class PgDb {
 }
 
 function _logQueryError(e, sql, values) {
-  // Suprime erros de migração (ALTER TABLE ADD COLUMN já existente)
-  if (e.code === "42701" || (e.message && e.message.includes("already exists"))) return;
+  // Suprime erros de schema esperados (caller geralmente captura e trata silenciosamente):
+  //   42701 = duplicate_column   (ALTER TABLE ADD COLUMN já existente)
+  //   42P07 = duplicate_table    (CREATE TABLE IF NOT EXISTS já existe — não deveria erra mas defensivo)
+  //   42P01 = undefined_table    (tabela ainda não migrou pra essa empresa — alertas dashboard)
+  //   42703 = undefined_column   (schema drift — coluna renomeada/removida)
+  //   42710 = duplicate_object   (CREATE INDEX duplicado)
+  const SILENT = new Set(["42701", "42P07", "42P01", "42703", "42710"]);
+  if (SILENT.has(e.code) || (e.message && e.message.includes("already exists"))) return;
   console.error('[db_pg] Erro na query:', e.message);
   console.error('  SQL:', sql.substring(0, 200));
   if (values?.length) console.error('  Params:', values);

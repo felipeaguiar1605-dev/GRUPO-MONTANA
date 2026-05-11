@@ -270,7 +270,7 @@ try {
         }
         // Tentar enviar WhatsApp também
         try {
-          const wppCfg = db.prepare("SELECT chave,valor FROM configuracoes WHERE chave LIKE 'whatsapp_%'").all();
+          const wppCfg = await db.prepare("SELECT chave,valor FROM configuracoes WHERE chave LIKE 'whatsapp_%'").all();
           if (wppCfg.length > 0 && globalThis.fetch) {
             globalThis.fetch(`http://127.0.0.1:${PORT}/api/whatsapp/enviar-alertas`, {
               method: 'POST',

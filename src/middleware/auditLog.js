@@ -8,14 +8,14 @@ const { getDb, COMPANIES } = require('../db');
 // ── Cria tabela audit_log em todos os bancos no require() ─────────
 const AUDIT_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS audit_log_routes (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    id          BIGSERIAL PRIMARY KEY,
     empresa     TEXT DEFAULT '',
     usuario     TEXT DEFAULT 'anon',
     metodo      TEXT NOT NULL,
     rota        TEXT NOT NULL,
     body_resumo TEXT DEFAULT '',
     ip          TEXT DEFAULT '',
-    created_at  TEXT DEFAULT (datetime('now','localtime'))
+    created_at  TIMESTAMP DEFAULT NOW()
   )
 `;
 
@@ -24,15 +24,21 @@ const AUDIT_INDEX_SQL = `
     ON audit_log_routes(created_at)
 `;
 
-for (const key of Object.keys(COMPANIES)) {
-  try {
-    const db = getDb(key);
-    db.exec(AUDIT_TABLE_SQL);
-    db.exec(AUDIT_INDEX_SQL);
-  } catch (_e) {
-    // Banco pode não estar disponível ainda — ignora silenciosamente
+// Cria tabelas em todos os bancos de forma async (fire-and-forget no require()).
+// Os Promises são deliberadamente não-awaitados — qualquer erro é absorvido pelo .catch
+// para não bloquear o boot. Se a tabela ainda não existir quando uma rota tentar gravar,
+// o INSERT inicial pode falhar uma vez antes da tabela estar pronta.
+(async () => {
+  for (const key of Object.keys(COMPANIES)) {
+    try {
+      const db = getDb(key);
+      await db.exec(AUDIT_TABLE_SQL);
+      await db.exec(AUDIT_INDEX_SQL);
+    } catch (_e) {
+      // Banco pode não estar disponível ainda — ignora silenciosamente
+    }
   }
-}
+})();
 
 // ── Rotas a ignorar ───────────────────────────────────────────────
 const ROTAS_IGNORADAS = [

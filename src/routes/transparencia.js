@@ -84,10 +84,10 @@ function normalizarPagamentos(results, fonte) {
 
 // ─── Garante tabela no banco ──────────────────────────────────────────────────
 
-function ensureTable(db) {
-  db.exec(`
+async function ensureTable(db) {
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS transparencia_palmas (
-      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      id               BIGSERIAL PRIMARY KEY,
       fonte            TEXT,
       numero_empenho   TEXT,
       data_empenho     TEXT,
@@ -157,7 +157,7 @@ router.post('/importar', async (req, res) => {
     sobrescrever = false,
   } = req.body;
 
-  ensureTable(db);
+  await ensureTable(db);
 
   let importados = 0;
   let duplicados = 0;
@@ -181,11 +181,11 @@ router.post('/importar', async (req, res) => {
       if (!results.length) break;
 
       const pagamentos = normalizarPagamentos(results, 'portal_palmas');
-      db.transaction((lista) => {
+      await db.transaction(async (lista) => {
         for (const p of lista) {
-          const existe = check.get(p.numero_empenho, p.data_pagamento, p.valor_pago);
+          const existe = await check.get(p.numero_empenho, p.data_pagamento, p.valor_pago);
           if (existe && !sobrescrever) { duplicados++; continue; }
-          insert.run(p.fonte, p.numero_empenho, p.data_empenho, p.data_liquidacao,
+          await insert.run(p.fonte, p.numero_empenho, p.data_empenho, p.data_liquidacao,
             p.data_pagamento, p.valor_pago, p.fornecedor, p.cnpj_fornecedor,
             p.elemento_despesa, p.subnatureza, p.processo, p.gestao,
             p.fonte_recurso, p.pronto_pagamento, p.raw);
@@ -209,17 +209,17 @@ router.get('/conciliar', async (req, res) => {
   const db = req.db;
   if (!db) return res.status(400).json({ error: 'Empresa não informada' });
 
-  ensureTable(db);
+  await ensureTable(db);
 
   const { mes, tolerancia = 2 } = req.query; // tolerancia em dias
   const tol = parseInt(tolerancia);
 
   try {
     // Busca pagamentos pendentes de conciliação
-    const pendentes = db.prepare(`
+    const pendentes = await db.prepare(`
       SELECT * FROM transparencia_palmas
       WHERE status_conciliacao = 'PENDENTE'
-      ${mes ? "AND strftime('%Y-%m', data_pagamento) = ?" : ''}
+      ${mes ? "AND to_char(data_pagamento::date, 'YYYY-MM') = ?" : ''}
       ORDER BY data_pagamento DESC
     `).all(...(mes ? [mes] : []));
 
@@ -233,10 +233,10 @@ router.get('/conciliar', async (req, res) => {
         if (!p.data_pagamento || !p.valor_pago) continue;
 
         // Busca extrato com valor próximo e data próxima (+/- tolerancia dias)
-        const match = db.prepare(`
+        const match = await db.prepare(`
           SELECT id, data_iso, credito FROM extratos
           WHERE ABS(credito - ?) < 0.02
-            AND date(data_iso) BETWEEN date(?, '-${tol} days') AND date(?, '+${tol} days')
+            AND data_iso::date BETWEEN (?::date - INTERVAL '${tol} days') AND (?::date + INTERVAL '${tol} days')
             AND status_conciliacao != 'CONCILIADO'
           ORDER BY ABS(credito - ?) ASC, ABS((data_iso::date - ?::date)) ASC
           LIMIT 1
@@ -249,10 +249,10 @@ router.get('/conciliar', async (req, res) => {
         }
       }
     });
-    conciliarTodos();
+    await conciliarTodos();
 
     // Resumo final
-    const resumo = db.prepare(`
+    const resumo = await db.prepare(`
       SELECT status_conciliacao, COUNT(*) qtd, SUM(valor_pago) total
       FROM transparencia_palmas GROUP BY status_conciliacao
     `).all();
@@ -265,25 +265,25 @@ router.get('/conciliar', async (req, res) => {
 
 // ─── GET /pendentes — lista pagamentos não conciliados ───────────────────────
 
-router.get('/pendentes', (req, res) => {
+router.get('/pendentes', async (req, res) => {
   const db = req.db;
   if (!db) return res.status(400).json({ error: 'Empresa não informada' });
 
-  ensureTable(db);
+  await ensureTable(db);
 
   const { mes, status = 'PENDENTE', limit = 200 } = req.query;
   try {
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT t.*, e.data_iso as extrato_data, e.credito as extrato_valor, e.historico as extrato_hist
       FROM transparencia_palmas t
       LEFT JOIN extratos e ON e.id = t.extrato_id
       WHERE t.status_conciliacao = ?
-      ${mes ? "AND strftime('%Y-%m', t.data_pagamento) = ?" : ''}
+      ${mes ? "AND to_char(t.data_pagamento::date, 'YYYY-MM') = ?" : ''}
       ORDER BY t.data_pagamento DESC
       LIMIT ?
     `).all(...([status, ...(mes ? [mes] : []), parseInt(limit)]));
 
-    const totais = db.prepare(`
+    const totais = await db.prepare(`
       SELECT COUNT(*) qtd, SUM(valor_pago) total FROM transparencia_palmas WHERE status_conciliacao=?
     `).get(status);
 
@@ -295,20 +295,20 @@ router.get('/pendentes', (req, res) => {
 
 // ─── GET /resumo ─────────────────────────────────────────────────────────────
 
-router.get('/resumo', (req, res) => {
+router.get('/resumo', async (req, res) => {
   const db = req.db;
   if (!db) return res.status(400).json({ error: 'Empresa não informada' });
 
-  ensureTable(db);
+  await ensureTable(db);
 
   try {
-    const porStatus = db.prepare(`
+    const porStatus = await db.prepare(`
       SELECT status_conciliacao, COUNT(*) qtd, COALESCE(SUM(valor_pago),0) total
       FROM transparencia_palmas GROUP BY status_conciliacao
     `).all();
 
-    const porMes = db.prepare(`
-      SELECT strftime('%Y-%m', data_pagamento) mes, COUNT(*) qtd, SUM(valor_pago) total
+    const porMes = await db.prepare(`
+      SELECT to_char(data_pagamento::date, 'YYYY-MM') mes, COUNT(*) qtd, SUM(valor_pago) total
       FROM transparencia_palmas
       WHERE data_pagamento IS NOT NULL AND data_pagamento != ''
       GROUP BY mes ORDER BY mes DESC LIMIT 24

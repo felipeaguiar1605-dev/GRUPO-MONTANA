@@ -23,12 +23,12 @@ const upload = multer({
 });
 
 // ── Garante coluna ofx_fitid na tabela extratos ───────────────────
-function ensureFitidColumn(db) {
+async function ensureFitidColumn(db) {
   try {
-    db.exec(`ALTER TABLE extratos ADD COLUMN ofx_fitid TEXT DEFAULT ''`);
+    await db.exec(`ALTER TABLE extratos ADD COLUMN IF NOT EXISTS ofx_fitid TEXT DEFAULT ''`);
   } catch (_e) { /* coluna já existe */ }
   try {
-    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_extratos_fitid ON extratos(ofx_fitid) WHERE ofx_fitid IS NOT NULL AND ofx_fitid != ''`);
+    await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_extratos_fitid ON extratos(ofx_fitid) WHERE ofx_fitid IS NOT NULL AND ofx_fitid != ''`);
   } catch (_e) {}
 }
 
@@ -114,7 +114,7 @@ router.post('/importar', async (req, res) => {
 
     try {
       const db = req.db;
-      ensureFitidColumn(db);
+      await ensureFitidColumn(db);
 
       // Detectar encoding: OFX do BB costuma usar ISO-8859-1
       let texto;
@@ -162,7 +162,7 @@ router.post('/importar', async (req, res) => {
       const importarTudo = db.transaction(async () => {
         for (const t of transacoes) {
           // Verifica duplicata via fitid
-          const existe = checkFitid.get(t.fitid);
+          const existe = await checkFitid.get(t.fitid);
           if (existe) { duplicatas++; continue; }
 
           const mes  = derivarMes(t.dataIso);
@@ -171,7 +171,7 @@ router.post('/importar', async (req, res) => {
           const data   = partes.length === 3 ? `${partes[2]}/${partes[1]}/${partes[0]}` : t.dataIso;
           const tipo   = t.credito ? 'C' : 'D';
 
-          const r = stmtInsert.run({
+          const r = await stmtInsert.run({
             mes,
             data,
             data_iso: t.dataIso,
