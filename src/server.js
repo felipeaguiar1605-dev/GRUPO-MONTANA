@@ -105,6 +105,12 @@ app.use('/api/conciliacao-robusta', require('./routes/conciliacao-robusta'));
 // ─── Alertas Operacionais (faturamento / cobranças / folha) ─────
 app.use('/api/alertas-operacionais', require('./routes/alertas-operacionais'));
 
+// ─── Alertas Dashboard (contratos, patrimônio, caixa) ────────────
+app.use('/api/alertas', require('./routes/alertas'));
+
+// ─── Contas a Pagar (aging de despesas pendentes) ─────────────────
+app.use('/api/contas-pagar', require('./routes/contas-pagar'));
+
 // ─── Fluxo de Caixa Projetado (30/60/90d) ──────────────────────
 app.use('/api/fluxo-caixa', require('./routes/fluxo-caixa-projetado'));
 
@@ -295,7 +301,7 @@ try {
       try {
         // Verifica se a empresa tem BB configurado antes de chamar
         const db  = getDb(key);
-        const cfg = db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'bb_%'`).all()
+        const cfg = (await db.prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE 'bb_%'`).all())
           .reduce((acc, r) => { acc[r.chave.replace('bb_', '')] = r.valor; return acc; }, {});
         if (!cfg.client_id || !cfg.client_secret || !cfg.app_key || !cfg.agencia || !cfg.conta) continue;
 
