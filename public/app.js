@@ -11,10 +11,24 @@ let currentCompany = localStorage.getItem('montana_company') || 'assessoria';
 function switchCompany(key) {
   currentCompany = key;
   localStorage.setItem('montana_company', key);
-  _contratos = []; // forçar reload dos contratos ao trocar empresa
-  _extMes = ''; _extMesManual = false; _extMesesDisponiveis = []; _extPage = 1; // resetar filtro mês ao trocar empresa
+  // Reset state da empresa anterior
+  _contratos = []; _contratosEmpresa = '';
+  _saudeResumo = null; _saudeByNum = {}; _saudeDataByNum = {};
+  _despCatsEmpresa = null; // força repopular categorias de despesas
+  _extMes = ''; _extMesManual = false; _extMesesDisponiveis = []; _extPage = 1;
   applyCompanyTheme();
+  // Recarrega o dashboard E a aba ativa (pode ser diferente do dashboard)
   loadDashboard();
+  // FIX 2026-05-05: recarrega a aba atual se não for o dashboard
+  // evita mostrar dados da empresa anterior em telas como Extratos, NFs, etc.
+  const activeHash = location.hash.replace('#', '');
+  if (activeHash && activeHash !== 'dash' && activeHash !== '') {
+    const pgEl = document.getElementById('pg-' + activeHash);
+    if (pgEl && pgEl.classList.contains('active')) {
+      // Usa showTab sem alterar o hash (já está correto)
+      try { showTab(activeHash, null); } catch(_) {}
+    }
+  }
 }
 
 function applyCompanyTheme() {
@@ -208,6 +222,7 @@ function showTab(id,el){
   if(id==='supervisor')window.supervisorInit && window.supervisorInit();
   if(id==='painel-pgto') window.painelPgtoInit && window.painelPgtoInit();
   if(id==='patrimonio')  window.patrimonioInit && window.patrimonioInit();
+  if(id==='contas-pagar') window.contasPagarInit && window.contasPagarInit();
   if(id==='faturamento-prev') loadFaturamentoPrevisto();
   // Sub-nav consistente entre páginas relacionadas (introduzido em 2026-04
   // para reduzir clutter do menu lateral). Páginas no mapa abaixo recebem
@@ -235,8 +250,9 @@ const _SUBNAV_GRUPO_CONCILIA = [
   { tab: 'concilia-robusta', label: '🧩 IA / Pendentes' },
 ];
 const _SUBNAV_GRUPO_DESPESAS = [
-  { tab: 'desp', label: '💸 Despesas / Contas a Pagar' },
-  { tab: 'pag',  label: '🧾 Comprovantes' },
+  { tab: 'desp',         label: '💸 Despesas' },
+  { tab: 'contas-pagar', label: '📅 Contas a Pagar' },
+  { tab: 'pag',          label: '🧾 Comprovantes' },
 ];
 const _PAGE_SUBNAVS = {
   nfs:                _SUBNAV_GRUPO_NFS,
@@ -250,6 +266,7 @@ const _PAGE_SUBNAVS = {
   conciliacao3v:      _SUBNAV_GRUPO_CONCILIA,
   'concilia-robusta': _SUBNAV_GRUPO_CONCILIA,
   desp:               _SUBNAV_GRUPO_DESPESAS,
+  'contas-pagar':     _SUBNAV_GRUPO_DESPESAS,
   pag:                _SUBNAV_GRUPO_DESPESAS,
 };
 function _renderPageSubnav(active) {
@@ -325,8 +342,17 @@ async function loadDashboard(){
   if(_to)url+='to='+_to;
   showLoading('Carregando dashboard…');
   document.getElementById('dash-kpis').innerHTML='<div class="loading">Carregando dashboard…</div>';
+  // FIX 2026-05-07: limpa header stats e chart imediatamente ao trocar empresa
+  // evita que dados da empresa anterior fiquem visíveis quando a nova tem banco vazio
+  ['h-ext','h-nfs','h-cont','h-pgs','h-vinc'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent='—';});
+  const _dc=document.getElementById('dash-chart'); if(_dc) _dc.innerHTML='';
+  const _dcl=document.getElementById('dash-chart-labels'); if(_dcl) _dcl.innerHTML='';
   let d;
   try{ d=await api(url); }catch(e){ hideLoading(); return; }
+  // FIX 2026-05-05: garante hideLoading() mesmo se DOM manipulation lançar exceção
+  let _dashLoadingDone = false;
+  const _dashFinally = () => { if(!_dashLoadingDone){ _dashLoadingDone=true; hideLoading(); } };
+  try {
 
   // Estado vazio — onboarding para empresa sem dados
   if(d.extratos && d.extratos.total===0 && d.nfs.total===0 && d.contratos.total===0){
@@ -360,7 +386,6 @@ async function loadDashboard(){
           </div>
         </div>
       </div>`;
-    hideLoading();
     return;
   }
 
@@ -446,7 +471,15 @@ async function loadDashboard(){
       <div class="kpi-v" style="color:#dc2626">${brl(d.despesas.totalImpostos||0)}</div>
       <div class="kpi-s">tributos no período</div>
     </div>
+    <div class="kpi" id="dash-cp-kpi" style="border-left:4px solid #b45309;cursor:pointer" onclick="navGo('contas-pagar',null)" title="Clique para ver Contas a Pagar">
+      <div class="kpi-l">📅 Contas a Pagar</div>
+      <div class="kpi-v" id="dash-cp-v" style="color:#b45309">—</div>
+      <div class="kpi-s" id="dash-cp-s">carregando…</div>
+    </div>
   `;
+
+  // ─── Contas a Pagar KPI (async) ───
+  _loadDashContasPagar();
 
   // ─── Gráfico Fluxo Mensal (barras CSS) ───
   const fluxo = d.fluxoMensal || [];
@@ -577,9 +610,89 @@ async function loadDashboard(){
   // Alertas de certidões — definido em app-extras.js; reaplicar após cada reload do dashboard
   if (typeof loadCertAlertas === 'function') loadCertAlertas();
 
+  // ─── Alertas Dashboard (contratos, patrimônio, caixa) ───
+  _loadDashAlertas();
+
   // ─── Widget Ponto Hoje ───
   _loadDashPonto();
-  hideLoading();
+  } catch(e) { console.error('[loadDashboard]', e); } finally { _dashFinally(); }
+}
+
+// ─── Banner de Alertas do Dashboard ─────────────────────────────
+// Mostra contratos vencendo, patrimônio depreciado, caixa crítico
+async function _loadDashAlertas() {
+  // Cria o container se não existir
+  let banner = document.getElementById('dash-alertas-banner');
+  if (!banner) {
+    const dashKpis = document.getElementById('dash-kpis');
+    if (!dashKpis) return;
+    banner = document.createElement('div');
+    banner.id = 'dash-alertas-banner';
+    banner.style.cssText = 'margin-bottom:12px';
+    dashKpis.parentNode.insertBefore(banner, dashKpis);
+  }
+  try {
+    const d = await api('/alertas');
+    const alertas = (d && d.alertas) ? d.alertas : [];
+    if (alertas.length === 0) { banner.innerHTML = ''; return; }
+
+    const NIVEL = {
+      critico: { cor: '#dc2626', fundo: '#fff5f5', borda: '#fca5a5', icone: '🔴' },
+      atencao: { cor: '#d97706', fundo: '#fffbf0', borda: '#fcd34d', icone: '🟡' },
+      info:    { cor: '#1d4ed8', fundo: '#f0f4ff', borda: '#93c5fd', icone: '🔵' },
+    };
+
+    // Agrupa: criticos primeiro
+    const ordemNivel = { critico: 0, atencao: 1, info: 2 };
+    alertas.sort((a,b) => (ordemNivel[a.nivel]??9) - (ordemNivel[b.nivel]??9));
+
+    const cards = alertas.map((al, i) => {
+      const n = NIVEL[al.nivel] || NIVEL.info;
+      const brl_v = al.valor ? ` · ${brl(al.valor)}/mês` : '';
+      return `<div id="dash-alerta-${i}" style="display:flex;align-items:flex-start;gap:8px;padding:8px 12px;background:${n.fundo};border:1px solid ${n.borda};border-radius:8px;cursor:pointer;flex:1;min-width:200px"
+        onclick="try{location.hash='${al.link.replace('#','')}';showTab('${al.link.replace('#','')}',null);}catch(e){}"
+        title="${al.descricao}">
+        <span style="font-size:14px;margin-top:1px">${n.icone}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;font-weight:700;color:${n.cor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${al.titulo}${brl_v}</div>
+          <div style="font-size:9px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px">${al.descricao}</div>
+        </div>
+        <span onclick="event.stopPropagation();document.getElementById('dash-alerta-${i}').remove()" style="color:#94a3b8;font-size:12px;cursor:pointer;padding:0 2px;line-height:1" title="Ocultar">×</span>
+      </div>`;
+    }).join('');
+
+    banner.innerHTML = `
+      <div style="margin-bottom:4px;font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.5px">
+        ⚠ ${alertas.length} alerta${alertas.length>1?'s':''} operacional${alertas.length>1?'is':''}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">${cards}</div>`;
+  } catch(e) {
+    console.error('[dash-alertas]', e);
+    banner.innerHTML = '';
+  }
+}
+
+// ─── KPI Contas a Pagar no Dashboard ────────────────────────────
+async function _loadDashContasPagar() {
+  const vEl = document.getElementById('dash-cp-v');
+  const sEl = document.getElementById('dash-cp-s');
+  if (!vEl || !sEl) return;
+  try {
+    const d = await api('/contas-pagar/resumo');
+    const brlFmt = (v) => {
+      if (!v) return 'R$ 0';
+      const s = Math.abs(v).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+      return 'R$ ' + s;
+    };
+    const vencidas = d.vencidas || { count: 0, total: 0 };
+    const total = d.total_pendente || { count: 0, total: 0 };
+    vEl.textContent = brlFmt(total.total);
+    vEl.style.color = vencidas.count > 0 ? '#dc2626' : '#b45309';
+    sEl.innerHTML = `${total.count} pendente${total.count !== 1 ? 's' : ''}${vencidas.count > 0 ? ` · <span style="color:#dc2626;font-weight:700">${vencidas.count} vencida${vencidas.count !== 1 ? 's' : ''}</span>` : ''}`;
+  } catch(e) {
+    if (vEl) vEl.textContent = '—';
+    if (sEl) sEl.textContent = 'indisponível';
+  }
 }
 
 async function _loadDashPonto() {
@@ -841,7 +954,7 @@ async function loadExtratos(){
   if(_to) url+='&to='+_to;
   if(_extMes) url+='&mes='+encodeURIComponent(_extMes);
   const d=await api(url);
-  document.getElementById('ext-mes-info').textContent=_extMes?`Filtro: ${_extMes} (${d.total} registros)`:`Total: ${d.total} registros`;
+  document.getElementById('ext-mes-info').textContent=_extMes?`Filtro: ${_extMes} (${d.total??0} registros)`:`Total: ${d.total??0} registros`;
 
   // Load contratos for dropdown (recarrega se empresa mudou)
   if(!_contratos.length || _contratosEmpresa !== currentCompany){
@@ -873,7 +986,7 @@ async function loadExtratos(){
   }).join('');
 
   document.getElementById('ext-body').innerHTML=rows;
-  document.getElementById('ext-counter').textContent=`Exibindo ${d.data.length} de ${d.total} · Página ${d.page} de ${d.pages}`;
+  document.getElementById('ext-counter').textContent=`Exibindo ${d.data?.length??0} de ${d.total??0} · Página ${d.page??1} de ${d.pages??1}`;
 
   // Set selected values for already-linked
   d.data.forEach(r=>{
@@ -884,10 +997,11 @@ async function loadExtratos(){
   });
 
   // Pagination
+  const _extPg=d.page??1, _extPgs=d.pages??1;
   document.getElementById('ext-pag').innerHTML=`
-    <button ${d.page<=1?'disabled':''} onclick="_extPage--;loadExtratos()">← Anterior</button>
-    <span>Página ${d.page} de ${d.pages} (${d.total} registros)</span>
-    <button ${d.page>=d.pages?'disabled':''} onclick="_extPage++;loadExtratos()">Próxima →</button>
+    <button ${_extPg<=1?'disabled':''} onclick="_extPage--;loadExtratos()">← Anterior</button>
+    <span>Página ${_extPg} de ${_extPgs} (${d.total??0} registros)</span>
+    <button ${_extPg>=_extPgs?'disabled':''} onclick="_extPage++;loadExtratos()">Próxima →</button>
     <button onclick="exportarExcel('extratos')" style="margin-left:10px;padding:4px 12px;font-size:10px;border:1px solid #1d4ed8;border-radius:5px;background:#eff6ff;color:#1d4ed8;cursor:pointer;font-weight:600">⬇ Excel</button>`;
 
   updateVincStats();
@@ -1047,10 +1161,11 @@ async function loadNfs(){
   const totalNum = (d.total != null) ? d.total : linhas.length;
   const somaInfo = (d.soma_bruto || d.soma_liquido) ? ` · Bruto ${brl(d.soma_bruto)} · Líquido ${brl(d.soma_liquido)}` : '';
   document.getElementById('nfs-counter').textContent=`${totalNum} nota${totalNum===1?'':'s'} fiscai${totalNum===1?'l':'s'}${_nfsBusca?` (filtro: "${_nfsBusca}")`:''}${somaInfo}`;
+  const _nfsPg=d.page??1, _nfsPgs=d.pages??1;
   document.getElementById('nfs-pag').innerHTML=`
-    <button ${d.page<=1?'disabled':''} onclick="_nfsPage--;loadNfs()">← Anterior</button>
-    <span>Página ${d.page||1} de ${d.pages||1}</span>
-    <button ${d.page>=d.pages?'disabled':''} onclick="_nfsPage++;loadNfs()">Próxima →</button>
+    <button ${_nfsPg<=1?'disabled':''} onclick="_nfsPage--;loadNfs()">← Anterior</button>
+    <span>Página ${_nfsPg} de ${_nfsPgs}</span>
+    <button ${_nfsPg>=_nfsPgs?'disabled':''} onclick="_nfsPage++;loadNfs()">Próxima →</button>
     <button onclick="exportarExcel('nfs')" style="margin-left:10px;padding:4px 12px;font-size:10px;border:1px solid #7c3aed;border-radius:5px;background:#f5f3ff;color:#7c3aed;cursor:pointer;font-weight:600">⬇ Excel</button>`;
 }
 
@@ -1175,17 +1290,22 @@ async function loadContratos(){
   }).length;
 
   const vigActivo = _contFiltroStatus === 'VENCENDO' ? 'outline:2px solid #dc2626;' : '';
-  // Se já temos dados de saúde carregados, usa-os (respeita período); senão mostra fallback
+  // Se já temos dados de saúde carregados, usa-os (respeita período);
+  // FIX 2026-05-05: quando _saudeResumo é null (saúde ainda carregando), mostra "—"
+  // em vez de s.soma_pago (acumulado histórico — inflado). O segundo render corrige.
   const per = getContPeriodo();
   const periodoBadge = `<span style="font-size:9px;background:#f1f5f9;color:#475569;padding:2px 8px;border-radius:10px;font-weight:700;margin-left:6px">${per.label}</span>`;
-  const recebidoPeriodo = _saudeResumo ? _saudeResumo.total_recebido : s.soma_pago;
-  const abertoPeriodo   = _saudeResumo ? Math.max(0, _saudeResumo.total_saldo) : s.soma_aberto;
-  const nfsPeriodo      = _saudeResumo ? _saudeResumo.total_nfs : (s.soma_pago + s.soma_aberto);
-  const pctPeriodo      = nfsPeriodo>0 ? Math.round(recebidoPeriodo/nfsPeriodo*100) : 0;
+  const recebidoPeriodo = _saudeResumo ? _saudeResumo.total_recebido : null;
+  const abertoPeriodo   = _saudeResumo ? Math.max(0, _saudeResumo.total_saldo) : null;
+  const nfsPeriodo      = _saudeResumo ? _saudeResumo.total_nfs : null;
+  const pctPeriodo      = (nfsPeriodo && nfsPeriodo>0) ? Math.round((recebidoPeriodo||0)/nfsPeriodo*100) : 0;
+  const _kpiRec  = recebidoPeriodo !== null ? brl(recebidoPeriodo) : '<span style="color:#94a3b8;font-size:14px">calculando…</span>';
+  const _kpiAb   = abertoPeriodo   !== null ? brl(abertoPeriodo)   : '<span style="color:#94a3b8;font-size:14px">calculando…</span>';
+  const _kpiPct  = recebidoPeriodo !== null ? `${pctPeriodo}% do faturado no período` : 'aguardando análise de saúde';
   document.getElementById('cont-kpis').innerHTML=`
     <div class="kpi"><div class="kpi-l">Contratos Ativos</div><div class="kpi-v blue">${todos.filter(c=>!c.status.includes('ENCERRADO')).length}</div><div class="kpi-s">${emDia} em dia · ${criticos} críticos</div></div>
-    <div class="kpi"><div class="kpi-l">Recebido ${periodoBadge}</div><div class="kpi-v green">${brl(recebidoPeriodo)}</div><div class="kpi-s">${pctPeriodo}% do faturado no período</div></div>
-    <div class="kpi"><div class="kpi-l">Em Aberto ${periodoBadge}</div><div class="kpi-v red">${brl(abertoPeriodo)}</div><div class="kpi-s">NFs sem conciliar no período</div></div>
+    <div class="kpi"><div class="kpi-l">Recebido ${periodoBadge}</div><div class="kpi-v green">${_kpiRec}</div><div class="kpi-s">${_kpiPct}</div></div>
+    <div class="kpi"><div class="kpi-l">Em Aberto ${periodoBadge}</div><div class="kpi-v red">${_kpiAb}</div><div class="kpi-s">NFs sem conciliar no período</div></div>
     <div class="kpi" style="cursor:pointer;${vigActivo}" onclick="_contFiltroStatus=(_contFiltroStatus==='VENCENDO'?'ATIVOS':'VENCENDO');loadContratos()" title="Clique para filtrar"><div class="kpi-l">Vigências ⚠</div><div class="kpi-v ${alertaVig>0?'red':'green'}">${alertaVig>0?alertaVig:'✅'}</div><div class="kpi-s">${vencidos>0?vencidos+' vencidos · ':''}${alertaVig>0?'vence em ≤60d':'todas em vigor'}</div></div>
   `;
 
@@ -1755,7 +1875,8 @@ async function loadSaudeContratos(){
     const thSt='background:#1e293b;color:#fff;padding:6px 10px;font-size:9px;font-weight:700;text-transform:uppercase;white-space:nowrap';
     const tdSt='padding:5px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;white-space:nowrap';
     const rows = ativos.map(r => {
-      const pctConc = r.total_nfs_bruto > 0 ? Math.round(r.total_recebido/r.total_nfs_bruto*100) : 0;
+      // FIX 2026-05-07: limita a 100% — pagamentos retroativos podem fazer recebido > faturado
+      const pctConc = r.total_nfs_bruto > 0 ? Math.min(Math.round(r.total_recebido/r.total_nfs_bruto*100), 100) : 0;
       const barColor = pctConc>=80?'#15803d':pctConc>=50?'#d97706':'#dc2626';
       const ultimaData = r.ultimo_pagamento
         ? new Date(r.ultimo_pagamento).toLocaleDateString('pt-BR')
@@ -1979,11 +2100,12 @@ async function loadPagamentos(){
     <td style="font-size:10px;color:#64748b">${r.data_pagamento||''}</td>
     <td class="r mono green" style="font-weight:700">${brl(r.valor_pago)}</td>
   </tr>`).join('');
-  document.getElementById('pag-counter').textContent=`${d.total} pagamentos`;
+  document.getElementById('pag-counter').textContent=`${d.total??0} pagamentos`;
+  const _pagPg=d.page??1, _pagPgs=d.pages??1;
   document.getElementById('pag-pag').innerHTML=`
-    <button ${d.page<=1?'disabled':''} onclick="_pagPage--;loadPagamentos()">← Anterior</button>
-    <span>Página ${d.page} de ${d.pages}</span>
-    <button ${d.page>=d.pages?'disabled':''} onclick="_pagPage++;loadPagamentos()">Próxima →</button>
+    <button ${_pagPg<=1?'disabled':''} onclick="_pagPage--;loadPagamentos()">← Anterior</button>
+    <span>Página ${_pagPg} de ${_pagPgs}</span>
+    <button ${_pagPg>=_pagPgs?'disabled':''} onclick="_pagPage++;loadPagamentos()">Próxima →</button>
     <button onclick="exportarExcel('pagamentos')" style="margin-left:10px;padding:4px 12px;font-size:10px;border:1px solid #15803d;border-radius:5px;background:#f0fdf4;color:#15803d;cursor:pointer;font-weight:600">⬇ Excel</button>`;
 }
 
@@ -2045,12 +2167,13 @@ function _populateDespCats(porCategoria){
   const sel=document.getElementById('df-cat');
   if(!sel) return;
   const empresaAtual=currentCompany;
-  // só repopula se empresa mudou (ou nunca foi populado)
-  if(_despCatsEmpresa === empresaAtual) return;
-  const atual=sel.value;
   const cats=(porCategoria||[]).map(c=>c.categoria).filter(c=>c!=null&&c!=='');
-  // Dedup e ordena alfabeticamente
   const uniq=[...new Set(cats)].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  // FIX 2026-05-05: só pula se empresa JÁ foi populada E o select tem opções além de "Todas"
+  // Antes, se cats fosse vazio na 1ª carga (filtro de data sem resultado), ficava vazio para sempre
+  if(_despCatsEmpresa === empresaAtual && sel.options.length > 1) return;
+  if(uniq.length === 0) return; // sem dados — tenta novamente na próxima carga
+  // Dedup e ordena alfabeticamente
   sel.innerHTML=`<option value="">Todas</option>`+uniq.map(c=>{
     const label=DESP_CAT_LABELS[c]||c;
     return `<option value="${c.replace(/"/g,'&quot;')}">${label}</option>`;
@@ -2084,15 +2207,24 @@ async function loadDespData(){
   if(ate) apParams.push('to='+ate);
   if(apParams.length) apuracaoUrl+='?'+apParams.join('&');
 
-  const [d, resumo, comp] = await Promise.all([
+  // FIX 2026-05-07: busca categorias SEM filtro de data para garantir dropdown completo
+  // O resumo com filtro pode retornar 0 categorias se não há despesas no período selecionado,
+  // deixando o select apenas com "Todas".
+  const catsPromise = (_despCatsEmpresa === currentCompany && document.getElementById('df-cat')?.options.length > 1)
+    ? Promise.resolve(null)
+    : api('/despesas/resumo');
+
+  const [d, resumo, comp, resumoCats] = await Promise.all([
     api(url),
     api(resumoUrl),
-    api(apuracaoUrl)
+    api(apuracaoUrl),
+    catsPromise
   ]);
 
   // Popula categorias do select com base nos valores REAIS do banco da empresa atual
-  // (corrige o bug onde DESP_CATS hardcoded não batia com os valores armazenados)
-  _populateDespCats(resumo.porCategoria);
+  // (usa resumo sem filtro de data para garantir que todas as categorias apareçam)
+  if(resumoCats && resumoCats.porCategoria) _populateDespCats(resumoCats.porCategoria);
+  else _populateDespCats(resumo.porCategoria);
 
   const t=resumo.totais;
   document.getElementById('desp-total-count').textContent=t.total;
@@ -2287,10 +2419,11 @@ async function loadDespData(){
     </td>
   </tr>`;}).join('');
 
+  const _despPg=d.page??1, _despPgs=d.pages??1;
   document.getElementById('desp-pag').innerHTML=`
-    <button ${d.page<=1?'disabled':''} onclick="_despPage--;loadDespData()">← Anterior</button>
-    <span>Página ${d.page} de ${d.pages} (${d.total} registros)</span>
-    <button ${d.page>=d.pages?'disabled':''} onclick="_despPage++;loadDespData()">Próxima →</button>
+    <button ${_despPg<=1?'disabled':''} onclick="_despPage--;loadDespData()">← Anterior</button>
+    <span>Página ${_despPg} de ${_despPgs} (${d.total??0} registros)</span>
+    <button ${_despPg>=_despPgs?'disabled':''} onclick="_despPage++;loadDespData()">Próxima →</button>
     <button onclick="exportarExcel('despesas')" style="margin-left:10px;padding:4px 12px;font-size:10px;border:1px solid #0891b2;border-radius:5px;background:#f0f9ff;color:#0891b2;cursor:pointer;font-weight:600">⬇ Excel</button>`;
 }
 
@@ -2318,7 +2451,7 @@ async function importNfeXml(input) {
     const url = '/api/import/nfe-xml/preview?company=' + window.currentCompany;
     const r = await fetch(url, {
       method: 'POST', body: fd,
-      headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jwt') || '') },
+      headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('montana_jwt') || '') },
     });
     const data = await r.json();
     hideLoading();

@@ -155,13 +155,16 @@ router.get('/resumo', async (req, res) => {
       )[0];
       const dias_em_aberto = maisAntiga ? diasDesde(maisAntiga.data_emissao) : 0;
 
+      // FIX 2026-05-07: pagamentos retroativos (p.ex. DETRAN quitando vários meses) podem
+      // fazer recebido > faturado do mês, gerando pct_recebido de 1873%.
+      // Exibimos máximo 100% — o excedente é evidenciado em em_aberto=0 e status=PAGO.
       resultado.push({
         tomador: grupo.tomador,
         qtd_nfs: grupo.nfs.length,
         faturado: +faturado.toFixed(2),
         recebido: +recebido.toFixed(2),
         em_aberto: +em_aberto.toFixed(2),
-        pct_recebido: faturado > 0 ? +(recebido / faturado * 100).toFixed(1) : 0,
+        pct_recebido: faturado > 0 ? +Math.min(recebido / faturado * 100, 100).toFixed(1) : 0,
         status: calcStatus(faturado, recebido, dias_em_aberto),
         dias_em_aberto,
       });

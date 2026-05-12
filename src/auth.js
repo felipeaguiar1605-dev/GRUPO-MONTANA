@@ -24,13 +24,21 @@ function authMiddleware(req, res, next) {
   if (req.path === '/drive/auth') return next();
   if (req.path === '/drive/callback') return next();
 
+  // Aceita token via header Authorization (padrão) OU via query ?token=
+  // (necessário pra downloads/PDFs abertos em nova aba, onde headers Bearer
+  // não são enviados automaticamente pelo browser).
   const authHeader = req.headers['authorization'];
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  let token = null;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.slice(7);
+  } else if (req.query && req.query.token) {
+    token = String(req.query.token);
+  }
+  if (!token) {
     return res.status(401).json({ error: 'Token de autenticação necessário', code: 'NO_TOKEN' });
   }
 
   try {
-    const token = authHeader.slice(7);
     const decoded = jwt.verify(token, JWT_SECRET);
     req.usuario = decoded;
     next();

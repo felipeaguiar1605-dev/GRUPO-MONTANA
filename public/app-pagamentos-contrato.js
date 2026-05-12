@@ -14,9 +14,11 @@
     const inputMes = document.getElementById('pgto-mes');
     if (!inputMes) return;
     if (!inputMes.value) {
+      // FIX 2026-05-09: pré-seleciona o mês ANTERIOR — mais provável de ter dados completos
       const hoje = new Date();
-      inputMes.value = hoje.getFullYear() + '-' +
-        String(hoje.getMonth() + 1).padStart(2, '0');
+      const prev = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+      inputMes.value = prev.getFullYear() + '-' +
+        String(prev.getMonth() + 1).padStart(2, '0');
     }
     pgtoCarregar();
   };

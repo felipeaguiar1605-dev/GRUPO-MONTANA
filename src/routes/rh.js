@@ -604,10 +604,10 @@ router.get('/holerite/:funcionario_id/:competencia', async (req, res) => {
   const db = req.db;
   const { funcionario_id, competencia } = req.params; // competencia = YYYY-MM
 
-  const func = db.prepare('SELECT * FROM rh_funcionarios WHERE id=?').get(funcionario_id);
+  const func = await db.prepare('SELECT * FROM rh_funcionarios WHERE id=?').get(funcionario_id);
   if (!func) return res.status(404).json({ error: 'Funcionário não encontrado' });
 
-  const folha = db.prepare(`
+  const folha = await db.prepare(`
     SELECT fi.* FROM rh_folha_itens fi
     JOIN rh_folha f ON fi.folha_id = f.id
     WHERE f.funcionario_id=? AND substr(f.competencia,1,7)=?
@@ -638,10 +638,10 @@ router.get('/holerite-html/:funcionario_id/:competencia', async (req, res) => {
   const { funcionario_id, competencia } = req.params;
   const company = req.company;
 
-  const func = db.prepare('SELECT * FROM rh_funcionarios WHERE id=?').get(funcionario_id);
+  const func = await db.prepare('SELECT * FROM rh_funcionarios WHERE id=?').get(funcionario_id);
   if (!func) return res.status(404).send('<h1>Funcionário não encontrado</h1>');
 
-  const folha = db.prepare(`
+  const folha = await db.prepare(`
     SELECT fi.* FROM rh_folha_itens fi
     JOIN rh_folha f ON fi.folha_id = f.id
     WHERE f.funcionario_id=? AND substr(f.competencia,1,7)=?

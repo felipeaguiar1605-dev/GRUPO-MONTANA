@@ -62,3 +62,7 @@ desktop.ini
 
 # Build
 dist/
+
+# Claude Code — arquivos locais do agente, não vão para o repositório
+.claude/worktrees/
+.claude/settings.local.json

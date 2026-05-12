@@ -116,16 +116,21 @@ router.get('/competencias', async (req, res) => {
     `).all();
 
     const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
-    const seen   = new Set();
-    const result = [];
+    // FIX 2026-05-09: acumula contagem para ambos os formatos (YYYY-MM e mon/AA)
+    // A apuracao usa WHERE competencia=? OR competencia=?, então o dropdown
+    // precisa somar as duas variantes para mostrar o mesmo total.
+    const seen   = new Map(); // canonical (YYYY-MM) → { value, label, cnt }
     for (const r of rows) {
       try {
         const p = parseBothFormats(r.competencia);
-        if (seen.has(p.novo)) continue;
-        seen.add(p.novo);
-        result.push({ value: p.novo, label: p.label, cnt: r.cnt });
+        if (seen.has(p.novo)) {
+          seen.get(p.novo).cnt += r.cnt; // soma os dois formatos
+        } else {
+          seen.set(p.novo, { value: p.novo, label: p.label, cnt: r.cnt });
+        }
       } catch (_) { /* pula formatos inválidos */ }
     }
+    const result = Array.from(seen.values());
     result.sort((a, b) => b.value.localeCompare(a.value));
     res.json({ ok: true, competencias: result });
   } catch (e) {

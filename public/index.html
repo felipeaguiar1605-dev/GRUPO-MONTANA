@@ -138,8 +138,10 @@
       <div class="tab" data-tab="painel-pgto" onclick="navGo('painel-pgto',this)" style="display:none">💰 Adimplência por Contrato</div>
       <!-- Faturamento Previsto: sub-aba de Contratos (2026-04). Tab oculta. -->
       <div class="tab" data-tab="faturamento-prev" onclick="navGo('faturamento-prev',this)" style="display:none">📅 Faturamento Previsto</div>
+      <!-- Painel de Faturamento — cadastro/gestão de boletins + tela separada de Emissão de NFS-e (2026-05) -->
+      <div class="tab" data-tab="fat-cadastro" onclick="navGo('fat-cadastro',this)">📊 Painel de Faturamento</div>
+      <div class="tab" data-tab="fat-emissao" onclick="navGo('fat-emissao',this)">📤 Emissão de NFS-e</div>
       <div class="tab" data-tab="faturamento" onclick="navGo('faturamento',this)">📊 Faturamento</div>
-      <div class="tab" data-tab="boletins" onclick="navGo('boletins',this)">📄 Boletins</div>
       <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
       <!-- Comprovantes de Pagamento virou sub-aba de Despesas (2026-04). Tab oculta mas rota mantida. -->
       <div class="tab" data-tab="pag" onclick="navGo('pag',this);setTimeout(()=>compListar&&compListar(),50)" style="display:none">🧾 Comprovantes de Pagamento</div>
@@ -206,6 +208,7 @@
       <div class="tab" data-tab="dre" onclick="navGo('dre',this)">📊 DRE</div>
       <div class="tab" data-tab="margem" onclick="navGo('margem',this)">💰 Margem</div>
       <div class="tab" data-tab="margem-contrato" onclick="navGo('margem-contrato',this);setTimeout(()=>margemContratoInit&&margemContratoInit(),50)">📊 Margem por Contrato</div>
+      <div class="tab" data-tab="contas-pagar" onclick="navGo('contas-pagar',this);setTimeout(()=>window.contasPagarInit&&window.contasPagarInit(),50)">📅 Contas a Pagar</div>
       <div class="tab" data-tab="fluxo" onclick="navGo('fluxo',this)">📈 Fluxo de Caixa</div>
       <!-- Caixa Livre e Fluxo Projetado viraram sub-abas de Fluxo (2026-04). Tabs ocultas mas rotas mantidas. -->
       <div class="tab" data-tab="fluxo-proj" onclick="navGo('fluxo-proj',this);setTimeout(()=>fcpCarregar&&fcpCarregar(),50)" style="display:none">🔮 Fluxo Projetado</div>
@@ -927,6 +930,49 @@
       <tbody id="subcontratados-body"></tbody>
     </table>
   </div>
+</div>
+
+<!-- Contas a Pagar -->
+<div id="pg-contas-pagar" class="pg">
+  <div id="pg-contas-pagar__subnav"></div>
+  <div class="toolbar">
+    <span style="font-size:16px">📅</span>
+    <span class="toolbar-title">CONTAS A PAGAR</span>
+    <span style="font-size:11px;color:#475569">Despesas pendentes ordenadas por vencimento</span>
+  </div>
+
+  <!-- KPI cards -->
+  <div class="kpis" id="cp-kpis"></div>
+
+  <!-- Filtros rápidos -->
+  <div style="display:flex;gap:8px;margin:12px 0 8px;flex-wrap:wrap">
+    <button data-cp-filtro="todas"   onclick="_cpSituacao='todas';  _cpPage=1;_cpLoadAging()" style="padding:5px 14px;font-size:10px;border:1px solid #e2e8f0;border-radius:20px;background:#fff;color:#64748b;cursor:pointer;font-weight:400">Todas</button>
+    <button data-cp-filtro="vencidas" onclick="_cpSituacao='vencidas';_cpPage=1;_cpLoadAging()" style="padding:5px 14px;font-size:10px;border:1px solid #e2e8f0;border-radius:20px;background:#fff;color:#64748b;cursor:pointer;font-weight:400">🔴 Vencidas</button>
+    <button data-cp-filtro="semana"  onclick="_cpSituacao='semana'; _cpPage=1;_cpLoadAging()" style="padding:5px 14px;font-size:10px;border:1px solid #e2e8f0;border-radius:20px;background:#fff;color:#64748b;cursor:pointer;font-weight:400">🟡 Esta semana</button>
+    <button data-cp-filtro="trinta"  onclick="_cpSituacao='trinta'; _cpPage=1;_cpLoadAging()" style="padding:5px 14px;font-size:10px;border:1px solid #e2e8f0;border-radius:20px;background:#fff;color:#64748b;cursor:pointer;font-weight:400">🟠 30 dias</button>
+  </div>
+
+  <!-- Tabela aging -->
+  <div class="tw">
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <thead>
+        <tr style="background:#f8fafc;font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.5px">
+          <th style="padding:8px 10px;text-align:left;border-bottom:1px solid #e2e8f0">Descrição</th>
+          <th style="padding:8px 10px;text-align:left;border-bottom:1px solid #e2e8f0">Categoria</th>
+          <th style="padding:8px 10px;text-align:left;border-bottom:1px solid #e2e8f0">Fornecedor</th>
+          <th style="padding:8px 10px;text-align:left;border-bottom:1px solid #e2e8f0">Vencimento</th>
+          <th style="padding:8px 10px;text-align:right;border-bottom:1px solid #e2e8f0">Valor</th>
+          <th style="padding:8px 10px;text-align:center;border-bottom:1px solid #e2e8f0">Aging</th>
+          <th style="padding:8px 10px;text-align:left;border-bottom:1px solid #e2e8f0">Ref.</th>
+          <th style="padding:8px 10px;text-align:center;border-bottom:1px solid #e2e8f0">Ação</th>
+        </tr>
+      </thead>
+      <tbody id="cp-body">
+        <tr><td colspan="8" style="padding:20px;text-align:center;color:#94a3b8">Selecione um filtro para carregar</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="pag" id="cp-pag" style="display:flex;align-items:center;gap:10px;padding:10px 0"></div>
 </div>
 
 <!-- NFS-e (WebISS Palmas) -->
@@ -2184,10 +2230,10 @@
   </div>
 </div>
 
-<div id="pg-boletins" class="pg">
+<div id="pg-fat-cadastro" class="pg">
   <div style="margin-bottom:14px;display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px">
     <div>
-      <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">📄 Boletins de Medição</h2>
+      <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">📊 Painel de Faturamento</h2>
       <p style="font-size:11px;color:#94a3b8">Gestão de contratos de vigilância e geração automática de boletins mensais em PDF</p>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -2244,7 +2290,82 @@
   </div>
 </div>
 
-<!-- Painel de Faturamento — aba de nível 1 (espelha pg-boletins em modo painel) -->
+<!-- ─── Painel de Faturamento → Emissão de NFS-e (2026-05) ──────────── -->
+<div id="pg-fat-emissao" class="pg">
+  <div style="margin-bottom:14px;display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px">
+    <div>
+      <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:2px">📤 Emissão de NFS-e</h2>
+      <p style="font-size:11px;color:#94a3b8">Boletins aprovados aguardando emissão de NFS-e na prefeitura</p>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button id="fat-emi-btn-bulk" onclick="fatEmiEmitirSelecionados()" disabled
+              style="padding:8px 18px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;opacity:.5">
+        📤 Emitir selecionados
+      </button>
+      <button onclick="fatEmiCarregar()" style="padding:8px 14px;background:#3b82f6;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🔄 Atualizar</button>
+    </div>
+  </div>
+
+  <!-- Filtros -->
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px">
+    <div>
+      <label style="font-size:10px;color:#64748b;font-weight:700;display:block;margin-bottom:2px">COMPETÊNCIA</label>
+      <input type="month" id="fat-emi-competencia" onchange="fatEmiCarregar()"
+             style="padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px">
+    </div>
+    <div>
+      <label style="font-size:10px;color:#64748b;font-weight:700;display:block;margin-bottom:2px">STATUS NFS-e</label>
+      <select id="fat-emi-status" onchange="fatEmiCarregar()"
+              style="padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;background:#fff">
+        <option value="PENDENTE">Pendentes</option>
+        <option value="ENVIANDO">Enviando</option>
+        <option value="ERRO">Com erro</option>
+        <option value="EMITIDA">Emitidas</option>
+        <option value="">Todos</option>
+      </select>
+    </div>
+    <div style="margin-left:auto;align-self:flex-end">
+      <span id="fat-emi-resumo" style="font-size:11px;color:#64748b"></span>
+    </div>
+  </div>
+
+  <!-- Tabela -->
+  <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="background:#f1f5f9;font-size:11px;color:#64748b">
+          <th style="padding:10px 8px;text-align:center;width:34px">
+            <input type="checkbox" id="fat-emi-chk-all" onchange="fatEmiToggleAll(this.checked)">
+          </th>
+          <th style="padding:10px 8px;text-align:left">Contrato</th>
+          <th style="padding:10px 8px;text-align:left">Contratante</th>
+          <th style="padding:10px 8px;text-align:center">Competência</th>
+          <th style="padding:10px 8px;text-align:right">Valor Total</th>
+          <th style="padding:10px 8px;text-align:center">Boletim</th>
+          <th style="padding:10px 8px;text-align:center">NFS-e</th>
+          <th style="padding:10px 8px;text-align:center">Ações</th>
+        </tr>
+      </thead>
+      <tbody id="fat-emi-body">
+        <tr><td colspan="8" style="padding:24px;text-align:center;color:#94a3b8">Carregando...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Modal detalhe NFS-e emitida / erro -->
+  <div id="fat-emi-detail" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;overflow-y:auto;padding:24px 16px">
+    <div style="max-width:560px;margin:32px auto;background:#fff;border-radius:12px;padding:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 style="font-size:16px;font-weight:800;color:#0f172a" id="fat-emi-detail-titulo">Detalhe NFS-e</h3>
+        <button onclick="document.getElementById('fat-emi-detail').style.display='none'"
+                style="background:none;border:none;font-size:20px;cursor:pointer;color:#94a3b8">×</button>
+      </div>
+      <div id="fat-emi-detail-body" style="font-size:12px;color:#1e293b"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Painel de Faturamento — aba de nível 1 (modo painel agregado, independente de pg-fat-cadastro) -->
 <div id="pg-faturamento" class="pg">
   <div id="fat-content"><div class="loading">Carregando painel…</div></div>
 </div>
@@ -3840,6 +3961,7 @@
 <script src="/app.js"></script>
 <script src="/app-extras.js"></script>
 <script src="/app-boletins.js"></script>
+<script src="/app-fat-emissao.js"></script>
 <script src="/app-compras-supervisor.js"></script>
 <script src="/app-ia.js"></script>
 <script src="/app-bb.js"></script>
@@ -3851,5 +3973,6 @@
 <script src="/app-ciclo.js"></script>
 <script src="/app-caixa-livre.js"></script>
 <script src="/app-nf-modelos.js"></script>
+<script src="/app-contas-pagar.js"></script>
 </body>
 </html>

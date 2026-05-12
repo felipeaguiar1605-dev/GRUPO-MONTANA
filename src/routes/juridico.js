@@ -89,16 +89,17 @@ router.get('/resumo', async (req, res) => {
     const em7  = new Date(Date.now() +  7*86400000).toISOString().split('T')[0];
     const em30 = new Date(Date.now() + 30*86400000).toISOString().split('T')[0];
 
-    const oficiosPendentes   = await db.prepare(`SELECT COUNT(*) as n FROM jur_oficios WHERE status='PENDENTE'`).get().n;
-    const oficiosVencidos    = await db.prepare(`SELECT COUNT(*) as n FROM jur_oficios WHERE status='PENDENTE' AND data_prazo < ?`).get(hoje).n;
-    const oficiosVencendo    = await db.prepare(`SELECT COUNT(*) as n FROM jur_oficios WHERE status='PENDENTE' AND data_prazo BETWEEN ? AND ?`).get(hoje, em7).n;
+    // FIX 2026-05-05: .n/.v deve ser acessado no resultado do await, não antes
+    const oficiosPendentes   = (await db.prepare(`SELECT COUNT(*) as n FROM jur_oficios WHERE status='PENDENTE'`).get())?.n ?? 0;
+    const oficiosVencidos    = (await db.prepare(`SELECT COUNT(*) as n FROM jur_oficios WHERE status='PENDENTE' AND data_prazo < ?`).get(hoje))?.n ?? 0;
+    const oficiosVencendo    = (await db.prepare(`SELECT COUNT(*) as n FROM jur_oficios WHERE status='PENDENTE' AND data_prazo BETWEEN ? AND ?`).get(hoje, em7))?.n ?? 0;
 
-    const processosAtivos    = await db.prepare(`SELECT COUNT(*) as n FROM jur_processos WHERE status='ATIVO'`).get().n;
-    const audienciasEm30     = await db.prepare(`SELECT COUNT(*) as n FROM jur_processos WHERE proxima_audiencia BETWEEN ? AND ?`).get(hoje, em30).n;
-    const valorRiscoTotal    = await db.prepare(`SELECT COALESCE(SUM(valor_risco),0) as v FROM jur_processos WHERE status='ATIVO'`).get().v;
+    const processosAtivos    = (await db.prepare(`SELECT COUNT(*) as n FROM jur_processos WHERE status='ATIVO'`).get())?.n ?? 0;
+    const audienciasEm30     = (await db.prepare(`SELECT COUNT(*) as n FROM jur_processos WHERE proxima_audiencia BETWEEN ? AND ?`).get(hoje, em30))?.n ?? 0;
+    const valorRiscoTotal    = (await db.prepare(`SELECT COALESCE(SUM(valor_risco),0) as v FROM jur_processos WHERE status='ATIVO'`).get())?.v ?? 0;
 
-    const riscosAltos        = await db.prepare(`SELECT COUNT(*) as n FROM jur_riscos WHERE status NOT IN ('MITIGADO','ENCERRADO') AND (probabilidade='ALTA' OR impacto='ALTO')`).get().n;
-    const riscosTotal        = await db.prepare(`SELECT COUNT(*) as n FROM jur_riscos WHERE status NOT IN ('MITIGADO','ENCERRADO')`).get().n;
+    const riscosAltos        = (await db.prepare(`SELECT COUNT(*) as n FROM jur_riscos WHERE status NOT IN ('MITIGADO','ENCERRADO') AND (probabilidade='ALTA' OR impacto='ALTO')`).get())?.n ?? 0;
+    const riscosTotal        = (await db.prepare(`SELECT COUNT(*) as n FROM jur_riscos WHERE status NOT IN ('MITIGADO','ENCERRADO')`).get())?.n ?? 0;
 
     // Ofícios com prazo vencido ou urgente
     const alertasOficios = await db.prepare(`

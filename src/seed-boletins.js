@@ -7,8 +7,9 @@ const { getDb } = require('./db');
 
 const db = getDb('seguranca');
 
+(async () => {
 // Verificar se já existe
-const existing = db.prepare("SELECT id FROM bol_contratos WHERE numero_contrato = '16/2026'").get();
+const existing = await db.prepare("SELECT id FROM bol_contratos WHERE numero_contrato = '16/2026'").get();
 if (existing) {
   console.log('⚠ Contrato UFT 16/2026 já cadastrado (id=' + existing.id + '). Seed ignorado.');
   process.exit(0);
@@ -17,7 +18,7 @@ if (existing) {
 console.log('Importando contrato UFT 16/2026...\n');
 
 // ─── Contrato ─────────────────────────────────────────────────
-const contratoResult = db.prepare(`
+const contratoResult = await db.prepare(`
   INSERT INTO bol_contratos (nome, contratante, numero_contrato, processo, pregao,
     descricao_servico, escala, empresa_razao, empresa_cnpj, empresa_endereco,
     empresa_email, empresa_telefone)
@@ -108,15 +109,16 @@ const insertItem = db.prepare(`
 `);
 
 for (const campus of campi) {
-  const postoResult = insertPosto.run(contratoId, campus.key, campus.nome, campus.municipio, campus.desc, campus.label, campus.ordem);
+  const postoResult = await insertPosto.run(contratoId, campus.key, campus.nome, campus.municipio, campus.desc, campus.label, campus.ordem);
   const postoId = postoResult.lastInsertRowid;
   console.log(`  ✅ Posto: ${campus.key} (id=${postoId})`);
 
   for (let i = 0; i < campus.itens.length; i++) {
     const item = campus.itens[i];
-    insertItem.run(postoId, item.desc, item.qtd, item.valor, i + 1);
+    await insertItem.run(postoId, item.desc, item.qtd, item.valor, i + 1);
   }
   console.log(`     └─ ${campus.itens.length} itens inseridos`);
 }
 
 console.log('\n✅ Seed completo! Contrato UFT 16/2026 importado com sucesso.');
+})().catch(e => { console.error('Erro no seed:', e); process.exit(1); });
