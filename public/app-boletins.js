@@ -8,7 +8,6 @@
   window.showTab = function(id, el) {
     _orig(id, el);
     if (id === 'fat-cadastro') loadBoletinsTab();
-    if (id === 'boletins')    loadBoletinsTab();
     // Aba de nível 1 dedicada ao Painel — não passa pela tela de listagem
     if (id === 'faturamento') abrirPainelFaturamento();
   };

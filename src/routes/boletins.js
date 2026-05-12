@@ -535,7 +535,7 @@ router.post('/gerar', async (req, res) => {
       const filename = `Boletim NF ${nfNumero} - ${cidadeArq}.pdf`;
       const filepath = path.join(outputDir, filename);
 
-      const totalPosto = gerarBoletimPDF(contrato, posto, nfNumero, data_emissao, periodo, filepath);
+      const totalPosto = await gerarBoletimPDF(contrato, posto, nfNumero, data_emissao, periodo, filepath);
       totalGeral += totalPosto;
 
       // Registrar NF no banco
@@ -1121,6 +1121,8 @@ const AZUL_ESCURO = '#2C3E6B';
 const CINZA_CLARO = '#F5F5F5';
 const CINZA_BORDA = '#CCCCCC';
 
+// Retorna Promise<number> (totalPosto) que só resolve quando o stream do PDF
+// termina de escrever. Callers DEVEM usar `await` antes de ler o arquivo.
 function gerarBoletimPDF(contrato, posto, nfNumero, dataEmissao, periodo, outputPath, nfseInfo) {
   // nfseInfo (opcional): { numero, data_emissao, codigo_verificacao, link }
   //   undefined/null → modo PRÉVIO (nfNumero será exibido como "PRÉVIO" se vazio)
@@ -1128,6 +1130,10 @@ function gerarBoletimPDF(contrato, posto, nfNumero, dataEmissao, periodo, output
   const doc = new PDFDocument({ size: 'A4', margin: 30 });
   const stream = fs.createWriteStream(outputPath);
   doc.pipe(stream);
+  const donePromise = new Promise((resolve, reject) => {
+    stream.on('finish', () => resolve());
+    stream.on('error', reject);
+  });
 
   const pageW = doc.page.width;
   const margin = 30;
@@ -1319,7 +1325,9 @@ function gerarBoletimPDF(contrato, posto, nfNumero, dataEmissao, periodo, output
   }
 
   doc.end();
-  return totalPosto;
+  // Aguarda o stream terminar antes de devolver o controle ao caller — assim
+  // quem precisar ler o arquivo logo em seguida pega o PDF completo.
+  return donePromise.then(() => totalPosto);
 }
 
 function gerarResumoPDF(dadosResumo, contrato, ano, outputPath) {
@@ -2450,18 +2458,8 @@ async function _renderBoletimPDF(req, res, modo /* 'previo'|'definitivo' */) {
   const tmpFile = path.join(os.tmpdir(),
     `boletim-${modo}-${bol.id}-${Date.now()}.pdf`);
 
-  gerarBoletimPDF(contrato, posto, bol.nfse_numero || '', dataEmissao, periodo, tmpFile, nfseInfo);
-
-  // gerarBoletimPDF é síncrono em escrita mas usa stream interno → espera o stream fechar
-  const waitFile = () => new Promise(resolve => {
-    const t = setInterval(() => {
-      if (fs.existsSync(tmpFile) && fs.statSync(tmpFile).size > 100) {
-        clearInterval(t); resolve();
-      }
-    }, 50);
-    setTimeout(() => { clearInterval(t); resolve(); }, 3000);
-  });
-  await waitFile();
+  // Aguarda o stream interno do PDF terminar antes de servir.
+  await gerarBoletimPDF(contrato, posto, bol.nfse_numero || '', dataEmissao, periodo, tmpFile, nfseInfo);
 
   res.setHeader('Content-Type', 'application/pdf');
   const fname = `Boletim ${modo === 'previo' ? 'Previo' : 'Definitivo'} ${(posto.campus_nome||'').replace(/[^\w\-]/g,'_')} ${bol.competencia}.pdf`;
