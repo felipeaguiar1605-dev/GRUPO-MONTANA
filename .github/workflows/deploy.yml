@@ -1,6 +1,9 @@
 name: Deploy Montana App
 
-# IP atualizado de 104.196.22.170 (desativado) → 35.247.236.181 em 2026-04-27.
+# Histórico de IPs:
+#   104.196.22.170 → desativado 2026-04-27
+#   35.247.236.181 → desativado 2026-05-07
+#   35.235.241.162 → atual (2026-05-07)
 # Estratégia de SCP via /tmp + sudo cp -af resolve o "Permission denied" que
 # acontecia porque /opt/montana/app_unificado/{src,public}/* são owned por root.
 # (sudo nopasswd está configurado pra `diretoria` no host.)
@@ -16,7 +19,7 @@ on:
   workflow_dispatch:  # permite disparo manual via UI
 
 env:
-  GCP_HOST: 35.247.236.181
+  GCP_HOST: 35.235.241.162
   GCP_USER: diretoria
   GCP_PATH: /opt/montana/app_unificado
 

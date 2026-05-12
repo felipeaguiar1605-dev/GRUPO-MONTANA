@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/mcp.json",
+  "mcpServers": {
+    "montana-cloud": {
+      "type": "sse",
+      "url": "https://mcp.grupomontanasec.com/sse",
+      "headers": {
+        "Authorization": "Bearer ${MONTANA_TOKEN}"
+      }
+    },
+    "montana-intel": {
+      "type": "sse",
+      "url": "https://intel.grupomontanasec.com/sse",
+      "headers": {
+        "Authorization": "Bearer ${MONTANA_TOKEN}"
+      }
+    }
+  }
+}

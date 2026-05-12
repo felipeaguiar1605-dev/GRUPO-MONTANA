@@ -141,6 +141,8 @@
       <!-- Painel de Faturamento — cadastro/gestão de boletins + tela separada de Emissão de NFS-e (2026-05) -->
       <div class="tab" data-tab="fat-cadastro" onclick="navGo('fat-cadastro',this)">📊 Painel de Faturamento</div>
       <div class="tab" data-tab="fat-emissao" onclick="navGo('fat-emissao',this)">📤 Emissão de NFS-e</div>
+      <div class="tab" data-tab="faturamento" onclick="navGo('faturamento',this)">📊 Faturamento</div>
+      <div class="tab" data-tab="boletins" onclick="navGo('boletins',this)">📄 Boletins</div>
       <div class="tab" data-tab="desp" onclick="navGo('desp',this)">💸 Despesas</div>
       <!-- Comprovantes de Pagamento virou sub-aba de Despesas (2026-04). Tab oculta mas rota mantida. -->
       <div class="tab" data-tab="pag" onclick="navGo('pag',this);setTimeout(()=>compListar&&compListar(),50)" style="display:none">🧾 Comprovantes de Pagamento</div>
@@ -2364,6 +2366,11 @@
   </div>
 </div>
 
+<!-- Painel de Faturamento — aba de nível 1 (espelha pg-boletins em modo painel) -->
+<div id="pg-faturamento" class="pg">
+  <div id="fat-content"><div class="loading">Carregando painel…</div></div>
+</div>
+
 <!-- Modal: A Receber por Contrato -->
 <div id="modal-a-receber" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;overflow-y:auto;padding:24px 16px">
   <div style="background:#fff;border-radius:16px;max-width:900px;margin:0 auto;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
@@ -3202,6 +3209,10 @@
         <div>
           <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Senha WebISS</label>
           <input id="cfg-webiss-senha" type="password" placeholder="••••••••" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+        </div>
+        <div style="grid-column:1/-1">
+          <label style="font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px">Inscrição Municipal (prestadora)</label>
+          <input id="cfg-webiss-insc" type="text" placeholder="ex: 237319" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
         </div>
       </div>
       <div style="margin-top:10px;display:flex;gap:8px;align-items:center">

@@ -129,6 +129,9 @@ app.use('/api/drive',        require('./routes/drive'));
 // ─── Módulo Estoque (equipamentos, EPIs, consumíveis) ───────────
 app.use('/api/estoque',      require('./routes/estoque'));
 
+// ─── Módulo EPI (alias /api/epi/*) — wrappers sobre estoque_ficha_epi ──
+app.use('/api/epi',          require('./routes/epi'));
+
 // ─── Módulo Sync Banco do Brasil ────────────────────────────────
 app.use('/api/bb',           require('./routes/bb-sync'));
 
