@@ -33,22 +33,27 @@ router.use(async (req, res, next) => {
     ['nfse_erro',         'TEXT'],
     ['obs',               'TEXT'],
     ['updated_at',        "TIMESTAMP DEFAULT NOW()"],
+    // Override de itens por boletim individual (Multi-contrato 2026-05-14).
+    // Quando preenchido, sobrescreve os itens vindos de bol_itens (do posto)
+    // tanto na geração do PDF quanto no cálculo do RPS. Formato:
+    //   [{ descricao, quantidade, valor_unitario }, ...]
+    ['itens_override',    'JSONB'],
   ];
   for (const [col, def] of bolCols) {
     try { await db.prepare(`ALTER TABLE bol_boletins ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
   }
 
-  // Garantia de unicidade (1 boletim por contrato/competência). Se já existem
-  // duplicatas, o CREATE UNIQUE INDEX falha com 23505 — logamos uma vez e
-  // seguimos. O usuário pode listar via GET /_duplicatas e mergear via
-  // POST /_dedup. Após a limpeza, esse próprio middleware aplica o índice
-  // na próxima request.
+  // Garantia de unicidade — versão PARCIAL (só consolidado, posto_id IS NULL).
+  // O índice global sem filter foi quebrado pela Opção A (N boletins/competência
+  // quando há postos). DROP do legado + recria parcial.
+  try { await db.prepare(`DROP INDEX IF EXISTS idx_bol_uniq_contrato_comp`).run(); } catch (_) {}
   try {
-    await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bol_uniq_contrato_comp
-                      ON bol_boletins(contrato_id, competencia)`).run();
+    await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bol_uniq_contrato_comp_null
+                      ON bol_boletins(contrato_id, competencia)
+                      WHERE posto_id IS NULL`).run();
   } catch (e) {
     if (!global._warnedBolDup) {
-      console.warn('[boletins] UNIQUE(contrato_id, competencia) não pôde ser aplicado — provável duplicata existente. Use GET /api/boletins/_duplicatas + POST /api/boletins/_dedup. Detalhe:', e.message);
+      console.warn('[boletins] UNIQUE(contrato_id, competencia) parcial não pôde ser aplicado:', e.message);
       global._warnedBolDup = true;
     }
   }
@@ -64,10 +69,38 @@ router.use(async (req, res, next) => {
     ['orgao',           "TEXT DEFAULT ''"],  // razão social do tomador para NFS-e
     ['insc_municipal',  "TEXT DEFAULT ''"],  // CNPJ do tomador (campo nomenclatura WebISS)
     ['retencoes_padrao', 'TEXT'],            // JSON com retenções default (PIS,COFINS,INSS,IR,CSLL,issRetido,aliquotaIss) — usado como pré-preenchimento no preview de emissão
+    // Multi-contrato (2026-05-14): configuração fiscal específica por contrato.
+    // Antes ficava hardcoded em _montarRpsPayload (07.17, 2% ISS, etc.) — agora vem daqui.
+    ['processo',                 'TEXT'],          // ex: '2022/20321/000361'
+    ['pregao',                   'TEXT'],          // ex: '009/2022'
+    ['item_lista_servico',       'TEXT'],          // ex: '0710' (limpeza) | '1705' (locação MdO) | '07.17' (vigilância)
+    ['codigo_tributacao_municipal', 'TEXT'],       // geralmente igual ao item_lista_servico
+    ['codigo_cnae',              'TEXT'],          // ex: '8111700'
+    ['codigo_nbs',               'TEXT'],          // ex: '118031000'
+    ['aliquota_iss_padrao',      'NUMERIC(7,4)'],  // ex: 0.05 (5%) — pode ser sobrescrito por posto
+    ['iss_retido_padrao',        'BOOLEAN'],       // tomador retém ISS? (DETRAN NÃO; UNITINS/UFT SIM)
+    ['optante_simples_nacional', 'SMALLINT'],      // 1=sim, 2=não (default 2 pra Assessoria EPP)
+    ['incentivo_fiscal',         'SMALLINT'],      // 1=sim, 2=não
+    ['ciclo_dia_inicio',         'SMALLINT'],      // NULL=mês calendário; 14=ciclo 14→13 (UNITINS); 5=ciclo 5→4 (UFT)
+    ['dados_bancarios',          'TEXT'],          // texto multilinhas pra entrar na discriminação
+    ['template_discriminacao',   'TEXT'],          // template introdutório (sem dados bancários — esses entram via dados_bancarios)
+    ['inss_aliquota',            'NUMERIC(7,4)'],  // alíquota INSS (ex: 0.11 = 11%)
+    ['inss_base_reduzida',       'BOOLEAN'],       // true = aplica sobre base com deduções (UFT); false = sobre bruto (UNITINS)
+    ['irrf_aliquota',            'NUMERIC(7,4)'],  // ex: 0.012 (1,2%)
+    ['pis_aliquota',             'NUMERIC(7,4)'],  // ex: 0.0065
+    ['cofins_aliquota',          'NUMERIC(7,4)'],  // ex: 0.03
+    ['csll_aliquota',            'NUMERIC(7,4)'],  // ex: 0.01
   ];
   for (const [col, def] of contrCols) {
     try { await db.prepare(`ALTER TABLE bol_contratos ADD COLUMN ${col} ${def}`).run(); } catch (_) {}
   }
+
+  // Multi-contrato: codigo IBGE + alíquota local por posto (override do contrato)
+  try { await db.prepare(`ALTER TABLE bol_postos ADD COLUMN codigo_municipio_ibge TEXT`).run(); } catch (_) {}
+  try { await db.prepare(`ALTER TABLE bol_postos ADD COLUMN aliquota_iss_local NUMERIC(7,4)`).run(); } catch (_) {}
+  // Deduções de base INSS por posto (UFT subtrai vale-alimentação e materiais)
+  try { await db.prepare(`ALTER TABLE bol_postos ADD COLUMN deducao_vale_alimentacao NUMERIC(14,2) DEFAULT 0`).run(); } catch (_) {}
+  try { await db.prepare(`ALTER TABLE bol_postos ADD COLUMN deducao_materiais NUMERIC(14,2) DEFAULT 0`).run(); } catch (_) {}
 
   // ─── Feature: colaboradores opt-in por posto + glosas detalhadas ───
   // Flag por posto: TRUE (default) → posto exibe lista de colaboradores no boletim/NF
@@ -150,12 +183,29 @@ const MESES = {
 };
 const MESES_NOME = Object.fromEntries(Object.entries(MESES).map(([k,v])=>[v,k]));
 
-function calcularPeriodo(competencia) {
+// LEGADO: usado pela rota POST /gerar (fluxo manual antigo).
+// Aceita "AAAA-MM" ou "Mês YYYY". Quando recebe cicloDiaInicio, calcula o período
+// cíclico (ex: 14→13 UNITINS, 5→4 UFT); senão fallback "21 a 20" do contrato Laíse.
+function calcularPeriodo(competencia, cicloDiaInicio) {
+  // Formato YYYY-MM: delega pro helper canônico
+  if (typeof competencia === 'string' && /^\d{4}-\d{2}$/.test(competencia.trim())) {
+    const per = _calcPeriodoCiclico(competencia.trim(), cicloDiaInicio);
+    return `${String(per.dia_inicio).padStart(2,'0')} de ${per.mes_inicio_txt.toLowerCase()} de ${per.ano_inicio} a ${String(per.dia_fim).padStart(2,'0')} de ${per.mes_fim_txt.toLowerCase()} de ${per.ano_fim}.`;
+  }
+  // Formato "Mês YYYY" (legado)
   const parts = competencia.toLowerCase().trim().split(/\s+/);
   const mesNome = parts[0];
   const ano = parseInt(parts[1]);
   const mesNum = MESES[mesNome];
   if (!mesNum) return competencia;
+  // Se ciclo configurado, usa-o
+  if (cicloDiaInicio && cicloDiaInicio >= 2 && cicloDiaInicio <= 28) {
+    const yyyy = String(ano).padStart(4, '0');
+    const mm = String(mesNum).padStart(2, '0');
+    const per = _calcPeriodoCiclico(`${yyyy}-${mm}`, cicloDiaInicio);
+    return `${String(per.dia_inicio).padStart(2,'0')} de ${per.mes_inicio_txt.toLowerCase()} de ${per.ano_inicio} a ${String(per.dia_fim).padStart(2,'0')} de ${per.mes_fim_txt.toLowerCase()} de ${per.ano_fim}.`;
+  }
+  // Fallback Laíse "21 a 20"
   let mesAnt = mesNum - 1, anoAnt = ano;
   if (mesAnt === 0) { mesAnt = 12; anoAnt = ano - 1; }
   return `21 de ${MESES_NOME[mesAnt]} de ${anoAnt} a 20 de ${MESES_NOME[mesNum]} de ${ano}.`;
@@ -621,20 +671,40 @@ router.post('/gerar-boletim', async (req, res) => {
 router.patch('/:id/ajustar', async (req, res) => {
   try {
     const db = req.db;
-    const { glosas, acrescimos, discriminacao, obs } = req.body;
+    const { glosas, acrescimos, discriminacao, obs, valor_base, itens } = req.body;
     const bol = await db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id);
     if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
 
     const g = parseFloat(glosas ?? bol.glosas ?? 0);
     const a = parseFloat(acrescimos ?? bol.acrescimos ?? 0);
-    const base = bol.valor_base || bol.valor_total || 0;
+
+    // Itens override: se vier array, sobrescreve. Se vier null/undefined, mantém.
+    // Recalcula valor_base a partir dos itens se override foi enviado.
+    let itensJson = null;
+    let baseAtual = bol.valor_base || bol.valor_total || 0;
+    if (Array.isArray(itens) && itens.length > 0) {
+      const norm = itens
+        .map(it => ({
+          descricao: String(it.descricao || '').trim(),
+          quantidade: Number(it.quantidade) || 0,
+          valor_unitario: Number(it.valor_unitario) || 0,
+        }))
+        .filter(it => it.descricao || it.quantidade || it.valor_unitario);
+      itensJson = JSON.stringify(norm);
+      baseAtual = Math.round(norm.reduce((s, it) => s + it.quantidade * it.valor_unitario, 0) * 100) / 100;
+    }
+
+    const base = (valor_base !== undefined && valor_base !== null && valor_base !== '')
+      ? Math.round(parseFloat(valor_base) * 100) / 100
+      : baseAtual;
     const novo_total = Math.round((base - g + a) * 100) / 100;
 
     await db.prepare(`UPDATE bol_boletins SET
-      glosas=?, acrescimos=?, valor_total=?,
+      glosas=?, acrescimos=?, valor_base=?, valor_total=?,
       discriminacao=COALESCE(?,discriminacao), obs=COALESCE(?,obs),
+      itens_override=COALESCE(?::jsonb, itens_override),
       updated_at=NOW()
-      WHERE id=?`).run(g, a, novo_total, discriminacao || null, obs || null, req.params.id);
+      WHERE id=?`).run(g, a, base, novo_total, discriminacao || null, obs || null, itensJson, req.params.id);
 
     res.json({ data: await db.prepare('SELECT * FROM bol_boletins WHERE id=?').get(req.params.id) });
   } catch (err) {
@@ -643,7 +713,151 @@ router.patch('/:id/ajustar', async (req, res) => {
   }
 });
 
+// GET /:id/edit-data — retorna boletim + posto + itens (com override se houver).
+// Usado pelo modal de edição inline no drill-down do Painel de Faturamento.
+router.get('/:id/edit-data', async (req, res) => {
+  try {
+    const db = req.db;
+    const bol = await db.prepare(`
+      SELECT b.id, b.contrato_id, b.posto_id, b.competencia, b.valor_base, b.valor_total,
+             b.glosas, b.acrescimos, b.discriminacao, b.status, b.nfse_status,
+             b.itens_override,
+             bc.nome AS contrato_nome, bc.contrato_ref, bc.numero_contrato, bc.template_discriminacao,
+             p.campus_nome, p.municipio, p.label_resumo
+      FROM bol_boletins b
+      JOIN bol_contratos bc ON bc.id = b.contrato_id
+      LEFT JOIN bol_postos p ON p.id = b.posto_id
+      WHERE b.id=?`).get(req.params.id);
+    if (!bol) return res.status(404).json({ error: 'Boletim não encontrado' });
+
+    // Itens: prioriza override; senão, lê de bol_itens via posto.
+    let itens = [];
+    if (bol.itens_override) {
+      try {
+        const parsed = typeof bol.itens_override === 'string' ? JSON.parse(bol.itens_override) : bol.itens_override;
+        if (Array.isArray(parsed)) itens = parsed;
+      } catch (_) {}
+    }
+    if (!itens.length && bol.posto_id) {
+      itens = await db.prepare(
+        'SELECT id, descricao, quantidade, valor_unitario FROM bol_itens WHERE posto_id=? ORDER BY ordem'
+      ).all(bol.posto_id);
+    }
+    res.json({
+      boletim: {
+        id: bol.id,
+        contrato_id: bol.contrato_id,
+        posto_id: bol.posto_id,
+        competencia: bol.competencia,
+        valor_base: Number(bol.valor_base || 0),
+        valor_total: Number(bol.valor_total || 0),
+        glosas: Number(bol.glosas || 0),
+        acrescimos: Number(bol.acrescimos || 0),
+        discriminacao: bol.discriminacao || '',
+        status: bol.status,
+        nfse_status: bol.nfse_status,
+        tem_override: !!bol.itens_override,
+      },
+      contrato: { nome: bol.contrato_nome, ref: bol.contrato_ref, numero: bol.numero_contrato, template_discriminacao: bol.template_discriminacao || '' },
+      posto: bol.posto_id ? { id: bol.posto_id, campus_nome: bol.campus_nome, municipio: bol.municipio, label_resumo: bol.label_resumo } : null,
+      itens: itens.map(it => ({
+        descricao: String(it.descricao || ''),
+        quantidade: Number(it.quantidade || 0),
+        valor_unitario: Number(it.valor_unitario || 0),
+      })),
+    });
+  } catch (err) {
+    console.error('Erro edit-data:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── EMITIR NFS-e VIA WEBISS ───────────────────────────────────
+
+// Multi-contrato 2026-05-14: helpers de período cíclico + discriminação dinâmica.
+//
+// Período cíclico: contratos como UNITINS faturam dia 14/M-1 → 13/M, UFT 5/M-1 → 4/M.
+// Quando ciclo_dia_inicio=null, retorna o mês calendário inteiro.
+function _calcPeriodoCiclico(competenciaYYYYMM, cicloDiaInicio) {
+  const [ano, mes] = competenciaYYYYMM.split('-').map(Number);
+  const meses = ['', 'JANEIRO', 'FEVEREIRO', 'MARCO', 'ABRIL', 'MAIO', 'JUNHO',
+                 'JULHO', 'AGOSTO', 'SETEMBRO', 'OUTUBRO', 'NOVEMBRO', 'DEZEMBRO'];
+  if (!cicloDiaInicio || cicloDiaInicio < 2 || cicloDiaInicio > 28) {
+    // Mês calendário: 01/MES a último dia do mês
+    const fim = new Date(ano, mes, 0).getDate();
+    return {
+      dia_inicio: 1, mes_inicio: mes, mes_inicio_txt: meses[mes], ano_inicio: ano,
+      dia_fim: fim, mes_fim: mes, mes_fim_txt: meses[mes], ano_fim: ano,
+    };
+  }
+  // Ciclo X→(X-1): NF de competência M cobre {X}/M-1 a {X-1}/M
+  const diaFim = cicloDiaInicio - 1;
+  const mesInicio = mes === 1 ? 12 : mes - 1;
+  const anoInicio = mes === 1 ? ano - 1 : ano;
+  return {
+    dia_inicio: cicloDiaInicio, mes_inicio: mesInicio, mes_inicio_txt: meses[mesInicio], ano_inicio: anoInicio,
+    dia_fim: diaFim, mes_fim: mes, mes_fim_txt: meses[mes], ano_fim: ano,
+  };
+}
+
+// Gera discriminação dinâmica usando template + dados banc. + bloco retenções.
+// Substitui placeholders {DIA_INI}, {MES_INI}, {ANO_INI}, etc.
+function _gerarDiscriminacao(bc, posto, valorBruto, valores, periodo) {
+  const fmtBR = (v) => Number(v || 0).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+
+  let texto = (bc.template_discriminacao || '').trim();
+  if (!texto) {
+    // Fallback genérico
+    texto = `PRESTACAO DE SERVICOS CONFORME CONTRATO Nº ${bc.contrato_ref || bc.numero_contrato || ''}.`;
+  }
+
+  // Placeholders
+  const map = {
+    '{DIA_INI}': String(periodo.dia_inicio).padStart(2, '0'),
+    '{MES_INI}': periodo.mes_inicio_txt,
+    '{ANO_INI}': periodo.ano_inicio,
+    '{DIA_FIM}': String(periodo.dia_fim).padStart(2, '0'),
+    '{MES_FIM}': periodo.mes_fim_txt,
+    '{ANO_FIM}': periodo.ano_fim,
+    '{CONTRATO}': bc.contrato_ref || bc.numero_contrato || '',
+    '{PROCESSO}': bc.processo || '',
+    '{PREGAO}': bc.pregao || '',
+    '{CIDADE}': posto?.municipio || '',
+    '{POSTO}': posto?.campus_nome || '',
+  };
+  for (const [k, v] of Object.entries(map)) {
+    texto = texto.split(k).join(String(v));
+  }
+
+  // Dados bancários (se cadastrados)
+  if (bc.dados_bancarios) {
+    texto += '\n\n' + bc.dados_bancarios.trim();
+  }
+
+  // Bloco de retenções (só inclui as ≠ 0)
+  const blocos = [];
+  if (valores.valorInss > 0) {
+    const pct = valores.aliqInssEfetiva ? (valores.aliqInssEfetiva * 100).toFixed(3).replace(/\.?0+$/, '') + '%' : '11%';
+    blocos.push(`Retencao para a Previdencia Social (${pct}): R$ ${fmtBR(valores.valorInss)}`);
+  }
+  if (valores.valorIr > 0) {
+    blocos.push(`Retencao IRRF (1,2%): R$ ${fmtBR(valores.valorIr)}`);
+  }
+  const pcc = (valores.valorPis || 0) + (valores.valorCofins || 0) + (valores.valorCsll || 0);
+  if (pcc > 0) {
+    blocos.push(`Retencao PIS/COFINS/CSLL (4,65%): R$ ${fmtBR(pcc)}`);
+  }
+  if (blocos.length > 0) {
+    texto += '\n\n' + blocos.join('\n');
+  }
+  texto += `\n\nValor Liquido R$ ${fmtBR(valores.valorLiquido)}`;
+
+  // Limite WebISS: 2000 chars / 20 linhas
+  if (texto.length > 2000) texto = texto.substring(0, 2000);
+  const linhas = texto.split('\n');
+  if (linhas.length > 20) texto = linhas.slice(0, 20).join('\n');
+  return texto;
+}
 
 // Helper: monta o RPS pronto pra enviar (ou só preview). Carrega o boletim,
 // resolve tomador e retenções (override do body > padrão do contrato > zerado).
@@ -661,6 +875,32 @@ async function _montarRpsPayload(req, opts = { requireCert: true }) {
            bc.insc_municipal as insc_contratante,
            bc.retencoes_padrao as retencoes_padrao_contrato,
            bc.id as bol_contrato_id,
+           bc.numero_contrato as bc_numero_contrato,
+           bc.processo            as bc_processo,
+           bc.pregao              as bc_pregao,
+           bc.item_lista_servico  as bc_item_lista,
+           bc.codigo_tributacao_municipal as bc_cod_trib,
+           bc.codigo_cnae         as bc_cnae,
+           bc.codigo_nbs          as bc_nbs,
+           bc.aliquota_iss_padrao as bc_aliq_iss,
+           bc.iss_retido_padrao   as bc_iss_retido,
+           bc.optante_simples_nacional as bc_optante_sn,
+           bc.incentivo_fiscal    as bc_incentivo,
+           bc.ciclo_dia_inicio    as bc_ciclo_dia,
+           bc.dados_bancarios     as bc_banco,
+           bc.template_discriminacao as bc_template,
+           bc.inss_aliquota       as bc_aliq_inss,
+           bc.inss_base_reduzida  as bc_inss_base_reduzida,
+           bc.irrf_aliquota       as bc_aliq_irrf,
+           bc.pis_aliquota        as bc_aliq_pis,
+           bc.cofins_aliquota     as bc_aliq_cofins,
+           bc.csll_aliquota       as bc_aliq_csll,
+           p.campus_nome as posto_nome,
+           p.municipio as posto_municipio,
+           p.codigo_municipio_ibge as posto_ibge,
+           p.aliquota_iss_local as posto_aliq_iss,
+           p.deducao_vale_alimentacao as posto_ded_vale,
+           p.deducao_materiais as posto_ded_mat,
            COALESCE(
              (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato = bc.contrato_ref LIMIT 1),
              (SELECT c1.orgao FROM contratos c1 WHERE bc.contrato_ref != '' AND c1.numContrato LIKE '%' || bc.contrato_ref || '%' LIMIT 1),
@@ -673,6 +913,7 @@ async function _montarRpsPayload(req, opts = { requireCert: true }) {
            ) AS num_contrato_encontrado
     FROM bol_boletins b
     JOIN bol_contratos bc ON b.contrato_id = bc.id
+    LEFT JOIN bol_postos p ON b.posto_id = p.id
     WHERE b.id=?`).get(req.params.id);
 
   if (!bol) return { ok:false, status:404, error:'Boletim não encontrado' };
@@ -711,11 +952,40 @@ async function _montarRpsPayload(req, opts = { requireCert: true }) {
   const today = new Date().toISOString().substring(0, 10);
   const competenciaData = bol.competencia.length === 7 ? `${bol.competencia}-01` : bol.competencia;
 
-  // Retenções: override do body > padrão do contrato > zeradas
+  // Multi-contrato 2026-05-14: retenções calculadas em camadas
+  //   1) Padrão hardcoded (2% ISS, demais zero) — fallback
+  //   2) Configuração do contrato (bc.aliquota_iss_padrao, bc.inss_aliquota, etc.)
+  //   3) JSON salvo em bc.retencoes_padrao (config sticky da última emissão manual)
+  //   4) Override do body (req.body.retencoes) — operador ajustando na hora
+  //
+  // INSS pode ser sobre base reduzida (UFT): bruto - vale_alimentacao - materiais
+
+  // Base INSS: se contrato marca inss_base_reduzida e posto tem deduções, aplica
+  const dedVale = Number(bol.posto_ded_vale || 0);
+  const dedMat = Number(bol.posto_ded_mat || 0);
+  const useBaseReduzida = !!bol.bc_inss_base_reduzida && (dedVale + dedMat > 0);
+  const baseInss = useBaseReduzida
+    ? Math.max(0, Number(bol.valor_efetivo) - dedVale - dedMat)
+    : Number(bol.valor_efetivo);
+
+  // Alíquota ISS: posto.aliquota_iss_local > contrato.aliquota_iss_padrao > 2% default
+  const aliqIssDoContrato = Number(bol.posto_aliq_iss || bol.bc_aliq_iss || 0.02);
+
+  // Calcula retenções automáticas do contrato (se alíquotas configuradas)
+  const auto = {
+    valorInss:   bol.bc_aliq_inss   ? Math.round(baseInss * Number(bol.bc_aliq_inss) * 100) / 100 : 0,
+    valorIr:     bol.bc_aliq_irrf   ? Math.round(Number(bol.valor_efetivo) * Number(bol.bc_aliq_irrf) * 100) / 100 : 0,
+    valorPis:    bol.bc_aliq_pis    ? Math.round(Number(bol.valor_efetivo) * Number(bol.bc_aliq_pis) * 100) / 100 : 0,
+    valorCofins: bol.bc_aliq_cofins ? Math.round(Number(bol.valor_efetivo) * Number(bol.bc_aliq_cofins) * 100) / 100 : 0,
+    valorCsll:   bol.bc_aliq_csll   ? Math.round(Number(bol.valor_efetivo) * Number(bol.bc_aliq_csll) * 100) / 100 : 0,
+  };
+
+  // Padrão sticky do contrato (JSON salvo na última emissão manual)
   let padraoContrato = {};
   if (bol.retencoes_padrao_contrato) {
     try { padraoContrato = JSON.parse(bol.retencoes_padrao_contrato) || {}; } catch (_) { padraoContrato = {}; }
   }
+
   const retencoes = {
     valorDeducoes: 0,
     valorPis:      0,
@@ -727,7 +997,15 @@ async function _montarRpsPayload(req, opts = { requireCert: true }) {
     aliquotaIss:   0.02,
     itemLista:     '07.17',
     codTributacao: '070700',
+    // Camada 1: configuração estrutural do contrato (alíquotas)
+    ...auto,
+    issRetido:     bol.bc_iss_retido != null ? !!bol.bc_iss_retido : false,
+    aliquotaIss:   aliqIssDoContrato,
+    itemLista:     bol.bc_item_lista || '07.17',
+    codTributacao: bol.bc_cod_trib || bol.bc_item_lista || '070700',
+    // Camada 2: sticky JSON (sobrescreve auto)
     ...padraoContrato,
+    // Camada 3: override do operador (sobrescreve tudo)
     ...(retOverride || {}),
   };
   // Sanitiza tipos
@@ -746,6 +1024,39 @@ async function _montarRpsPayload(req, opts = { requireCert: true }) {
     retencoes.valorPis + retencoes.valorCofins + retencoes.valorInss +
     retencoes.valorIr + retencoes.valorCsll + (retencoes.issRetido ? valorISS : 0);
   const valorLiquido = Math.round((bol.valor_efetivo - totalRetidas) * 100) / 100;
+
+  // Discriminação dinâmica (se contrato tem template)
+  let discriminacaoFinal = bol.discriminacao || '';
+  if (bol.bc_template) {
+    const periodo = _calcPeriodoCiclico(bol.competencia, bol.bc_ciclo_dia);
+    const posto = {
+      campus_nome: bol.posto_nome,
+      municipio: bol.posto_municipio,
+    };
+    const valoresPraDiscr = {
+      valorInss: retencoes.valorInss,
+      valorIr: retencoes.valorIr,
+      valorPis: retencoes.valorPis,
+      valorCofins: retencoes.valorCofins,
+      valorCsll: retencoes.valorCsll,
+      aliqInssEfetiva: bol.valor_efetivo > 0 ? retencoes.valorInss / bol.valor_efetivo : 0,
+      valorLiquido,
+    };
+    discriminacaoFinal = _gerarDiscriminacao(
+      {
+        contrato_ref: bol.contrato_ref,
+        numero_contrato: bol.bc_numero_contrato,
+        processo: bol.bc_processo,
+        pregao: bol.bc_pregao,
+        dados_bancarios: bol.bc_banco,
+        template_discriminacao: bol.bc_template,
+      },
+      posto,
+      bol.valor_efetivo,
+      valoresPraDiscr,
+      periodo
+    );
+  }
 
   const rpsBody = {
     rps: {
@@ -767,8 +1078,14 @@ async function _montarRpsPayload(req, opts = { requireCert: true }) {
         aliquota:          retencoes.aliquotaIss,
         itemLista:         retencoes.itemLista,
         codTributacao:     retencoes.codTributacao,
-        discriminacao:     (bol.discriminacao || 'PRESTAÇÃO DE SERVIÇOS').substring(0, 2000),
+        codigoCnae:        bol.bc_cnae || undefined,
+        codigoNbs:         bol.bc_nbs || undefined,
+        discriminacao:     (discriminacaoFinal || 'PRESTAÇÃO DE SERVIÇOS').substring(0, 2000),
         exigibilidadeIss:  1,
+        codigoMunicipio:   bol.posto_ibge || undefined,
+        municipioIncidencia: bol.posto_ibge || undefined,
+        optanteSimplesNacional: bol.bc_optante_sn != null ? Number(bol.bc_optante_sn) : 2,
+        incentivoFiscal:   bol.bc_incentivo != null ? Number(bol.bc_incentivo) : 2,
       },
       tomador: {
         cnpj:        tomadorCnpj || undefined,
@@ -2404,7 +2721,8 @@ async function _renderBoletimPDF(req, res, modo /* 'previo'|'definitivo' */) {
   const bol = await db.prepare(`
     SELECT b.*, bc.nome as bc_nome, bc.contratante, bc.numero_contrato, bc.processo, bc.pregao,
            bc.descricao_servico, bc.escala, bc.empresa_razao, bc.empresa_cnpj, bc.empresa_endereco,
-           bc.empresa_email, bc.empresa_telefone
+           bc.empresa_email, bc.empresa_telefone,
+           bc.ciclo_dia_inicio as bc_ciclo_dia
     FROM bol_boletins b
     JOIN bol_contratos bc ON b.contrato_id = bc.id
     WHERE b.id=?`).get(req.params.id);
@@ -2418,7 +2736,24 @@ async function _renderBoletimPDF(req, res, modo /* 'previo'|'definitivo' */) {
 
   const posto = await db.prepare('SELECT * FROM bol_postos WHERE id=?').get(bol.posto_id);
   if (!posto) return res.status(404).json({ error: 'Posto vinculado não encontrado' });
-  posto.itens = await db.prepare('SELECT * FROM bol_itens WHERE posto_id=? ORDER BY ordem').all(posto.id);
+  // Itens: prioriza override do boletim individual (edição manual); senão, lê de bol_itens.
+  let itensOverride = null;
+  if (bol.itens_override) {
+    try {
+      const parsed = typeof bol.itens_override === 'string' ? JSON.parse(bol.itens_override) : bol.itens_override;
+      if (Array.isArray(parsed) && parsed.length > 0) itensOverride = parsed;
+    } catch (_) {}
+  }
+  posto.itens = itensOverride
+    ? itensOverride.map((it, idx) => ({
+        id: -idx,
+        posto_id: posto.id,
+        descricao: it.descricao || '',
+        quantidade: Number(it.quantidade) || 0,
+        valor_unitario: Number(it.valor_unitario) || 0,
+        ordem: idx,
+      }))
+    : await db.prepare('SELECT * FROM bol_itens WHERE posto_id=? ORDER BY ordem').all(posto.id);
 
   // Monta contrato c/ shape esperado pelo PDF
   const contrato = {
@@ -2435,11 +2770,16 @@ async function _renderBoletimPDF(req, res, modo /* 'previo'|'definitivo' */) {
     empresa_telefone: bol.empresa_telefone || '',
   };
 
-  // Competência YYYY-MM → "Janeiro 2026" pra calcularPeriodo
-  const [ano, mesNum] = (bol.competencia || '').split('-');
-  const mesNome = MESES_NOME[parseInt(mesNum)] || '';
-  const compTexto = mesNome ? `${mesNome.charAt(0).toUpperCase() + mesNome.slice(1)} ${ano}` : bol.competencia;
-  const periodo = mesNome ? calcularPeriodo(compTexto) : bol.competencia;
+  // Período usando o ciclo configurado no contrato (14→13 UNITINS, 5→4 UFT, etc.)
+  // Substitui o calcularPeriodo() legado que era hardcoded "21 a 20".
+  let periodo;
+  if (bol.competencia && /^\d{4}-\d{2}$/.test(bol.competencia)) {
+    const per = _calcPeriodoCiclico(bol.competencia, bol.bc_ciclo_dia);
+    periodo = `${String(per.dia_inicio).padStart(2,'0')} de ${per.mes_inicio_txt} de ${per.ano_inicio} a ` +
+              `${String(per.dia_fim).padStart(2,'0')} de ${per.mes_fim_txt} de ${per.ano_fim}.`;
+  } else {
+    periodo = bol.competencia || '';
+  }
 
   const dataEmissao = bol.data_emissao
     ? new Date(bol.data_emissao).toLocaleDateString('pt-BR')
