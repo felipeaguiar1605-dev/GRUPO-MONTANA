@@ -642,185 +642,304 @@ async function abrirGerarBoletim(contrato_id, contrato_ref, orgao, valor_mensal)
   const mesAtual = String(hoje.getMonth() + 1).padStart(2, '0');
   const competenciaDefault = `${anoAtual}-${mesAtual}`;
 
+  // Buscar contrato completo (com postos+itens) — single source of truth do que editar.
+  let contratoFull;
+  try {
+    const token = localStorage.getItem('montana_jwt') || '';
+    const headers = { 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token };
+    contratoFull = await fetch(`/api/boletins/contratos/${contrato_id}`, { headers }).then(r => r.json());
+    if (contratoFull?.error) throw new Error(contratoFull.error);
+  } catch (err) {
+    toast('Falha ao carregar contrato: ' + (err.message || err), 'error');
+    return;
+  }
+  const postos = Array.isArray(contratoFull?.postos) ? contratoFull.postos : [];
+  const orgaoNome = orgao || contratoFull?.contratante || contratoFull?.nome || 'Contrato';
+  const numC = contrato_ref || contratoFull?.contrato_ref || contratoFull?.numero_contrato || '';
+
+  // Estado em memória pra cada posto (edição manual, override de qtd/valor item).
+  // Estrutura: { [posto_id]: { itens: [{id, descricao, quantidade, valor_unitario}], glosas, acrescimos, discriminacao, incluir } }
+  window._gbmState = {};
+  for (const p of postos) {
+    window._gbmState[p.id] = {
+      campus_nome: p.campus_nome,
+      municipio: p.municipio || '',
+      itens: (p.itens || []).map(i => ({
+        id: i.id,
+        descricao: i.descricao || '',
+        quantidade: Number(i.quantidade || 0),
+        valor_unitario: Number(i.valor_unitario || 0),
+      })),
+      glosas: 0,
+      acrescimos: 0,
+      discriminacao: '',
+      incluir: true,
+    };
+  }
+
   const overlay = document.createElement('div');
   overlay.id = 'modal-gerar-boletim';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px';
 
-  const mesesNome = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho',
-    'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-
-  const valorBase = parseFloat(valor_mensal) || 0;
-  const valorBaseFmt = brl(valorBase);
+  const semPostos = postos.length === 0;
 
   overlay.innerHTML = `
-    <div style="background:#fff;border-radius:14px;width:100%;max-width:560px;box-shadow:0 24px 80px rgba(0,0,0,.35);overflow:hidden">
-      <div style="background:#059669;color:#fff;padding:16px 20px;display:flex;justify-content:space-between;align-items:center">
+    <div style="background:#fff;border-radius:14px;width:100%;max-width:980px;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,.35);overflow:hidden">
+      <div style="background:#059669;color:#fff;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
         <div>
           <div style="font-size:15px;font-weight:800">📄 Gerar Boletim / Emitir NF-e</div>
-          <div style="font-size:11px;opacity:.85;margin-top:2px">${orgao || contrato_ref || 'Contrato'}</div>
+          <div style="font-size:11px;opacity:.85;margin-top:2px">${orgaoNome} ${numC ? '· Contrato ' + numC : ''} · ${postos.length} posto(s)</div>
         </div>
         <button onclick="document.getElementById('modal-gerar-boletim').remove()"
           style="background:rgba(255,255,255,.2);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 10px;line-height:1">×</button>
       </div>
-      <div style="padding:20px">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-          <div>
-            <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:4px">Competência (AAAA-MM)</label>
-            <input type="month" id="gbm-competencia" value="${competenciaDefault}"
-              style="width:100%;padding:8px 10px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;box-sizing:border-box"
-              onchange="_gbmRecalcular()">
+
+      <div style="padding:14px 20px;border-bottom:1px solid #e2e8f0;background:#f8fafc;display:flex;gap:14px;align-items:center;flex-shrink:0">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="font-size:12px;font-weight:700;color:#374151">Competência:</label>
+          <input type="month" id="gbm-competencia" value="${competenciaDefault}"
+            style="padding:7px 10px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px">
+        </div>
+        ${semPostos ? '' : `
+          <button onclick="_gbmToggleTodos(true)" style="padding:6px 12px;font-size:11px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer;font-weight:600">✓ Incluir todos</button>
+          <button onclick="_gbmToggleTodos(false)" style="padding:6px 12px;font-size:11px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer;font-weight:600">✗ Excluir todos</button>
+        `}
+        <div style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px">
+          <span style="color:#64748b">Total geral:</span>
+          <strong id="gbm-total-geral" style="color:#15803d;font-size:14px">R$ 0,00</strong>
+        </div>
+      </div>
+
+      <div style="flex:1;overflow-y:auto;padding:14px 20px;background:#fafbfc">
+        ${semPostos ? `
+          <div style="background:#fef9c3;border:1.5px solid #fde68a;border-radius:10px;padding:16px;color:#92400e;font-size:13px;text-align:center">
+            ⚠️ Este contrato não tem postos cadastrados. Cadastre os postos primeiro em "Editar contrato".
           </div>
-          <div>
-            <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:4px">Valor Base (contrato)</label>
-            <input type="text" value="${valorBaseFmt}" readonly
-              style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;background:#f8fafc;box-sizing:border-box;color:#64748b">
-          </div>
-        </div>
+        ` : postos.map(p => _gbmRenderPosto(p)).join('')}
+      </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-          <div>
-            <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:4px">Glosas (R$)</label>
-            <input type="number" id="gbm-glosas" value="0" min="0" step="0.01"
-              style="width:100%;padding:8px 10px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;box-sizing:border-box"
-              oninput="_gbmRecalcular()">
-          </div>
-          <div>
-            <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:4px">Acréscimos (R$)</label>
-            <input type="number" id="gbm-acrescimos" value="0" min="0" step="0.01"
-              style="width:100%;padding:8px 10px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;box-sizing:border-box"
-              oninput="_gbmRecalcular()">
-          </div>
-        </div>
+      <div id="gbm-resultado" style="padding:0 20px"></div>
 
-        <div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">
-          <span style="font-size:13px;font-weight:700;color:#166534">Valor Final da NF:</span>
-          <span id="gbm-valor-final" style="font-size:18px;font-weight:900;color:#15803d">${valorBaseFmt}</span>
-        </div>
-        <input type="hidden" id="gbm-valor-base" value="${valorBase}">
-
-        <div style="margin-bottom:16px">
-          <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:4px">Discriminação da NF <span style="font-weight:400;color:#94a3b8">(editável)</span></label>
-          <textarea id="gbm-discriminacao" rows="4"
-            style="width:100%;padding:8px 10px;border:1.5px solid #d1d5db;border-radius:8px;font-size:12px;line-height:1.5;box-sizing:border-box;resize:vertical"
-            placeholder="Texto que irá no campo Discriminação da NFS-e..."></textarea>
-        </div>
-
-        <div id="gbm-resultado" style="margin-bottom:12px"></div>
-
-        <div style="display:flex;gap:8px">
-          <button onclick="document.getElementById('modal-gerar-boletim').remove()"
-            style="flex:1;padding:10px;font-size:13px;border:1.5px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-weight:600;color:#64748b">
-            Cancelar
-          </button>
-          <button id="gbm-btn-gerar" onclick="_gbmExecutar(${contrato_id})"
-            style="flex:2;padding:10px;font-size:13px;font-weight:800;background:#059669;color:#fff;border:none;border-radius:8px;cursor:pointer">
-            📄 Gerar Boletim
-          </button>
-        </div>
+      <div style="padding:12px 20px;background:#f8fafc;border-top:1px solid #e2e8f0;display:flex;gap:8px;flex-shrink:0">
+        <button onclick="document.getElementById('modal-gerar-boletim').remove()"
+          style="flex:1;padding:10px;font-size:13px;border:1.5px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-weight:600;color:#64748b">
+          Cancelar
+        </button>
+        <button id="gbm-btn-gerar" onclick="_gbmExecutarLote(${contrato_id})" ${semPostos ? 'disabled style="flex:2;padding:10px;font-size:13px;font-weight:800;background:#cbd5e1;color:#64748b;border:none;border-radius:8px;cursor:not-allowed"' : 'style="flex:2;padding:10px;font-size:13px;font-weight:800;background:#059669;color:#fff;border:none;border-radius:8px;cursor:pointer"'}>
+          📄 Gerar Boletins (todos os selecionados)
+        </button>
       </div>
     </div>
   `;
 
   document.body.appendChild(overlay);
 
-  // Preencher discriminação gerada automaticamente pelo backend ao criar (inicialmente vazio — o backend gera)
-  // Buscar a discriminação padrão com base no contrato
-  try {
-    const bc = _bolContratos.find(c => c.id === contrato_id);
-    if (bc) {
-      const [ano, mes] = competenciaDefault.split('-');
-      const mNome = mesesNome[parseInt(mes)] || mes;
-      const tipoServ = bc.descricao_servico || bc.nome || 'SERVIÇOS';
-      const numC = bc.contrato_ref || bc.numero_contrato || '';
-      document.getElementById('gbm-discriminacao').value =
-        `PRESTAÇÃO DE SERVIÇOS DE ${tipoServ.toUpperCase()} CONFORME CONTRATO Nº ${numC}, COMPETÊNCIA ${mNome.toUpperCase()}/${ano}. VALOR MENSAL CONFORME BOLETIM DE MEDIÇÃO APROVADO.`;
-    }
-  } catch (_) {}
+  // Recalcula totais iniciais
+  for (const p of postos) _gbmRecalcPosto(p.id);
+  _gbmRecalcTotalGeral();
 }
 
-function _gbmRecalcular() {
-  const base = parseFloat(document.getElementById('gbm-valor-base')?.value) || 0;
-  const glosas = parseFloat(document.getElementById('gbm-glosas')?.value) || 0;
-  const acrescimos = parseFloat(document.getElementById('gbm-acrescimos')?.value) || 0;
-  const total = Math.round((base - glosas + acrescimos) * 100) / 100;
-  const el = document.getElementById('gbm-valor-final');
-  if (el) el.textContent = brl(total);
+// Renderiza um cartão editável por posto.
+function _gbmRenderPosto(p) {
+  const st = window._gbmState?.[p.id];
+  if (!st) return '';
+  const titulo = `${st.campus_nome}${st.municipio ? ' — ' + st.municipio : ''}`;
+  return `
+    <div id="gbm-posto-${p.id}" style="background:#fff;border:1.5px solid #e2e8f0;border-radius:10px;margin-bottom:10px;overflow:hidden;${st.incluir ? '' : 'opacity:.55'}" data-posto="${p.id}">
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f1f5f9;border-bottom:1px solid #e2e8f0">
+        <input type="checkbox" ${st.incluir ? 'checked' : ''} onchange="_gbmTogglePosto(${p.id}, this.checked)" style="width:16px;height:16px;accent-color:#059669;cursor:pointer">
+        <div style="font-weight:700;color:#0f172a;font-size:13px;flex:1">${titulo}</div>
+        <div style="font-size:11px;color:#64748b">Subtotal:</div>
+        <strong id="gbm-subtotal-${p.id}" style="color:#15803d;font-size:14px">R$ 0,00</strong>
+        <button onclick="_gbmToggleItens(${p.id})" style="margin-left:8px;padding:4px 10px;font-size:11px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer;font-weight:600">📋 Itens (${st.itens.length})</button>
+      </div>
+
+      <div id="gbm-itens-${p.id}" style="display:none;padding:10px 14px;border-bottom:1px solid #e2e8f0">
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead>
+            <tr style="background:#f8fafc;color:#475569">
+              <th style="padding:6px;text-align:left;border-bottom:1px solid #e2e8f0">Descrição</th>
+              <th style="padding:6px;text-align:center;width:90px;border-bottom:1px solid #e2e8f0">Qtd</th>
+              <th style="padding:6px;text-align:right;width:140px;border-bottom:1px solid #e2e8f0">Vl. Unitário</th>
+              <th style="padding:6px;text-align:right;width:140px;border-bottom:1px solid #e2e8f0">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${st.itens.map((it, idx) => `
+              <tr>
+                <td style="padding:4px 6px;border-bottom:1px solid #f1f5f9">
+                  <input type="text" value="${(it.descricao || '').replace(/"/g, '&quot;')}" oninput="_gbmEditarItem(${p.id}, ${idx}, 'descricao', this.value)" style="width:100%;padding:5px 7px;border:1px solid #e2e8f0;border-radius:5px;font-size:11px;box-sizing:border-box">
+                </td>
+                <td style="padding:4px 6px;border-bottom:1px solid #f1f5f9">
+                  <input type="number" step="0.01" min="0" value="${it.quantidade}" oninput="_gbmEditarItem(${p.id}, ${idx}, 'quantidade', this.value)" style="width:100%;padding:5px 7px;border:1px solid #e2e8f0;border-radius:5px;font-size:11px;text-align:center;box-sizing:border-box">
+                </td>
+                <td style="padding:4px 6px;border-bottom:1px solid #f1f5f9">
+                  <input type="number" step="0.01" min="0" value="${it.valor_unitario}" oninput="_gbmEditarItem(${p.id}, ${idx}, 'valor_unitario', this.value)" style="width:100%;padding:5px 7px;border:1px solid #e2e8f0;border-radius:5px;font-size:11px;text-align:right;box-sizing:border-box">
+                </td>
+                <td id="gbm-item-sub-${p.id}-${idx}" style="padding:4px 6px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:600;color:#0f172a">R$ 0,00</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <div style="margin-top:6px;font-size:10px;color:#94a3b8">As alterações afetam <strong>somente este boletim</strong> — não modificam o template do contrato.</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 2fr;gap:10px;padding:10px 14px">
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;display:block;margin-bottom:2px">Glosas (R$)</label>
+          <input type="number" step="0.01" min="0" value="0" oninput="_gbmEditarAjuste(${p.id}, 'glosas', this.value)" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;display:block;margin-bottom:2px">Acréscimos (R$)</label>
+          <input type="number" step="0.01" min="0" value="0" oninput="_gbmEditarAjuste(${p.id}, 'acrescimos', this.value)" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;display:block;margin-bottom:2px">Discriminação (opcional — sobrescreve o template)</label>
+          <textarea rows="2" oninput="_gbmEditarAjuste(${p.id}, 'discriminacao', this.value)" placeholder="Deixe em branco para usar o template do contrato" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:11px;line-height:1.4;resize:vertical;box-sizing:border-box;font-family:inherit"></textarea>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
-async function _gbmExecutar(contrato_id) {
+function _gbmToggleItens(posto_id) {
+  const el = document.getElementById('gbm-itens-' + posto_id);
+  if (el) el.style.display = (el.style.display === 'none' || !el.style.display) ? 'block' : 'none';
+}
+
+function _gbmTogglePosto(posto_id, checked) {
+  const st = window._gbmState?.[posto_id];
+  if (!st) return;
+  st.incluir = !!checked;
+  const card = document.getElementById('gbm-posto-' + posto_id);
+  if (card) card.style.opacity = checked ? '1' : '.55';
+  _gbmRecalcTotalGeral();
+}
+
+function _gbmToggleTodos(incluir) {
+  const st = window._gbmState || {};
+  for (const pid of Object.keys(st)) {
+    st[pid].incluir = !!incluir;
+    const cb = document.querySelector(`#gbm-posto-${pid} input[type=checkbox]`);
+    if (cb) cb.checked = !!incluir;
+    const card = document.getElementById('gbm-posto-' + pid);
+    if (card) card.style.opacity = incluir ? '1' : '.55';
+  }
+  _gbmRecalcTotalGeral();
+}
+
+function _gbmEditarItem(posto_id, idx, campo, val) {
+  const st = window._gbmState?.[posto_id];
+  if (!st || !st.itens[idx]) return;
+  if (campo === 'descricao') st.itens[idx].descricao = val;
+  else st.itens[idx][campo] = parseFloat(val) || 0;
+  _gbmRecalcPosto(posto_id);
+}
+
+function _gbmEditarAjuste(posto_id, campo, val) {
+  const st = window._gbmState?.[posto_id];
+  if (!st) return;
+  st[campo] = (campo === 'discriminacao') ? String(val || '') : (parseFloat(val) || 0);
+  _gbmRecalcPosto(posto_id);
+}
+
+function _gbmRecalcPosto(posto_id) {
+  const st = window._gbmState?.[posto_id];
+  if (!st) return 0;
+  let valorBase = 0;
+  st.itens.forEach((it, idx) => {
+    const sub = Math.round((Number(it.quantidade) || 0) * (Number(it.valor_unitario) || 0) * 100) / 100;
+    const el = document.getElementById(`gbm-item-sub-${posto_id}-${idx}`);
+    if (el) el.textContent = brl(sub);
+    valorBase += sub;
+  });
+  valorBase = Math.round(valorBase * 100) / 100;
+  st.valor_base = valorBase;
+  const total = Math.round((valorBase - (Number(st.glosas) || 0) + (Number(st.acrescimos) || 0)) * 100) / 100;
+  st.valor_total = total;
+  const sEl = document.getElementById('gbm-subtotal-' + posto_id);
+  if (sEl) sEl.textContent = brl(total);
+  _gbmRecalcTotalGeral();
+  return total;
+}
+
+function _gbmRecalcTotalGeral() {
+  const st = window._gbmState || {};
+  let total = 0;
+  for (const pid of Object.keys(st)) {
+    if (st[pid].incluir) total += Number(st[pid].valor_total) || 0;
+  }
+  const el = document.getElementById('gbm-total-geral');
+  if (el) el.textContent = brl(Math.round(total * 100) / 100);
+}
+
+async function _gbmExecutarLote(contrato_id) {
   const btn = document.getElementById('gbm-btn-gerar');
   const resultEl = document.getElementById('gbm-resultado');
   const competencia = document.getElementById('gbm-competencia')?.value?.trim();
-  const glosas = parseFloat(document.getElementById('gbm-glosas')?.value) || 0;
-  const acrescimos = parseFloat(document.getElementById('gbm-acrescimos')?.value) || 0;
-  const discriminacao = document.getElementById('gbm-discriminacao')?.value?.trim();
-
   if (!competencia) { toast('Informe a competência', 'error'); return; }
+
+  const st = window._gbmState || {};
+  const selecionados = Object.entries(st).filter(([, v]) => v.incluir);
+  if (!selecionados.length) { toast('Selecione ao menos um posto', 'error'); return; }
 
   btn.disabled = true;
   btn.textContent = '⏳ Gerando...';
+  resultEl.innerHTML = '';
 
   try {
     const token = localStorage.getItem('montana_jwt') || '';
     const headers = { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token };
 
-    // 1. Criar/obter boletim
-    const r1 = await fetch('/api/boletins/gerar-boletim', {
+    // 1. Gera N boletins (1 por posto) via Opção A.
+    const r1 = await fetch('/api/boletins/gerar-boletim-postos', {
       method: 'POST', headers,
       body: JSON.stringify({ contrato_id, competencia }),
     }).then(r => r.json());
-
     if (r1.error) throw new Error(r1.error);
-    const boletim = r1.data;
 
-    // 2. Aplicar ajustes se há glosas/acréscimos ou discriminação personalizada
-    if (glosas || acrescimos || discriminacao) {
-      await fetch(`/api/boletins/${boletim.id}/ajustar`, {
-        method: 'PATCH', headers,
-        body: JSON.stringify({ glosas, acrescimos, discriminacao: discriminacao || undefined }),
-      }).then(r => r.json());
+    // 2. Recupera os boletins criados/existentes pra mapear posto_id → boletim.id
+    const painel = await fetch(`/api/boletins/painel-postos?contrato_id=${contrato_id}&mes=${competencia}`, { headers }).then(r => r.json());
+    const mapaBolPorPosto = {};
+    for (const linha of (painel?.postos || [])) {
+      if (linha.boletim?.id) mapaBolPorPosto[linha.posto_id] = linha.boletim.id;
     }
 
-    // Recarregar boletim atualizado
-    const bolAtual = glosas || acrescimos
-      ? await fetch(`/api/boletins/historico`, { headers }).then(r => r.json())
-          .then(hist => (Array.isArray(hist) ? hist : []).find(b => b.id === boletim.id) || boletim)
-      : boletim;
-
-    const valorFinal = bolAtual.valor_total || boletim.valor_total || 0;
-    const jaExistia = !r1.novo;
+    // 3. Pra cada posto selecionado, aplica override (valor_base recalculado dos itens + glosas/acréscimos/discriminação).
+    let ajustados = 0, ignorados = 0;
+    for (const [pid, conf] of selecionados) {
+      const bolId = mapaBolPorPosto[pid];
+      if (!bolId) { ignorados++; continue; }
+      const payload = {
+        valor_base: Number(conf.valor_base) || 0,
+        glosas: Number(conf.glosas) || 0,
+        acrescimos: Number(conf.acrescimos) || 0,
+      };
+      if (conf.discriminacao && conf.discriminacao.trim()) payload.discriminacao = conf.discriminacao.trim();
+      const aj = await fetch(`/api/boletins/${bolId}/ajustar`, {
+        method: 'PATCH', headers, body: JSON.stringify(payload),
+      }).then(r => r.json());
+      if (!aj.error) ajustados++;
+    }
 
     resultEl.innerHTML = `
-      <div style="background:#dcfce7;border:1px solid #86efac;border-radius:8px;padding:12px 16px;margin-bottom:10px">
-        <div style="font-weight:700;color:#15803d;margin-bottom:4px">
-          ${jaExistia ? '♻️ Boletim já existente carregado' : '✅ Boletim gerado com sucesso!'}
-        </div>
+      <div style="background:#dcfce7;border:1px solid #86efac;border-radius:8px;padding:12px 16px;margin:10px 0">
+        <div style="font-weight:700;color:#15803d;margin-bottom:4px">✅ ${selecionados.length} boletim(ns) processado(s)</div>
         <div style="font-size:12px;color:#166534">
-          ID: <strong>#${boletim.id}</strong> · Competência: <strong>${competencia}</strong> · Valor: <strong>${brl(valorFinal)}</strong>
-          ${boletim.nfse_status === 'EMITIDA' ? ` · NFS-e: <strong>${boletim.nfse_numero}</strong>` : ''}
+          Criados: <strong>${r1.criados ?? 0}</strong> · Já existentes (ajustados): <strong>${r1.existentes ?? 0}</strong> · Ajustes aplicados: <strong>${ajustados}</strong>${ignorados ? ` · Ignorados: ${ignorados}` : ''}
         </div>
+        <div style="font-size:11px;color:#475569;margin-top:6px">Os boletins ficam em status <strong>rascunho</strong>. Aprove no Painel de Faturamento antes de emitir NFS-e.</div>
       </div>
     `;
+    btn.textContent = '✅ Boletins gerados';
+    btn.style.background = '#15803d';
+    btn.disabled = true;
 
-    // Mostrar botão de emitir NFS-e se ainda não emitida
-    if (boletim.nfse_status !== 'EMITIDA') {
-      btn.style.background = '#1d4ed8';
-      btn.textContent = '🚀 Emitir NFS-e agora';
-      btn.disabled = false;
-      btn.onclick = () => emitirNFSe(boletim.id, competencia, valorFinal);
-    } else {
-      btn.textContent = '✅ NFS-e já emitida';
-      btn.disabled = true;
-      btn.style.background = '#6b7280';
-    }
-
-    // Recarregar histórico em background
     if (typeof loadBolHistorico === 'function') loadBolHistorico();
-
   } catch (err) {
-    resultEl.innerHTML = `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;color:#dc2626;font-size:12px">❌ ${err.message}</div>`;
+    resultEl.innerHTML = `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;color:#dc2626;font-size:12px;margin:10px 0">❌ ${err.message}</div>`;
     btn.disabled = false;
-    btn.textContent = '📄 Gerar Boletim';
+    btn.textContent = '📄 Gerar Boletins (todos os selecionados)';
   }
 }
 
@@ -1578,13 +1697,17 @@ function _renderTabelaPostos(postos, mes) {
         ? `<a href="/api/boletins/${bol.id}/pdf-definitivo${_qs}" target="_blank" title="PDF do boletim com dados da NFS-e emitida"
              style="padding:4px 8px;background:#059669;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;text-decoration:none">📑 Definitivo</a>`
         : '';
+      const btnEditar = (bol.status === 'rascunho' && bol.nfse_status !== 'EMITIDA')
+        ? `<button onclick="painelPostoEditar(${bol.id})" title="Edição manual deste boletim — itens, glosas, acréscimos, discriminação"
+             style="padding:4px 9px;background:#d97706;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">✏️ Editar</button>`
+        : '';
       const btnAprovar = (bol.status === 'rascunho' && bol.nfse_status !== 'EMITIDA')
         ? `<button onclick="painelPostoAprovar(${bol.id})" style="padding:4px 9px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">✅ Aprovar</button>`
         : '';
       const btnEmitir = (bol.status === 'aprovado' && bol.nfse_status !== 'EMITIDA')
         ? `<button onclick="painelPostoEmitir(${bol.id}, ${bol.valor_total})" style="padding:4px 9px;background:#059669;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">🚀 Emitir</button>`
         : '';
-      acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${btnPdfBoletim}${btnPreviaNF}${btnPdfDefinitivo}${btnAprovar}${btnEmitir}</div>`;
+      acoes = `<div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">${btnPdfBoletim}${btnEditar}${btnPreviaNF}${btnPdfDefinitivo}${btnAprovar}${btnEmitir}</div>`;
     }
     return `
       <tr style="background:${bg};border-bottom:1px solid #f1f5f9">
@@ -1650,6 +1773,255 @@ async function painelPostoEmitir(boletim_id, valor) {
   // O usuário vê tudo que vai pro WebISS, ajusta PIS/COFINS/INSS/IR/CSLL/ISS retido,
   // e só depois confirma a emissão definitiva.
   return painelPostoPrevia(boletim_id);
+}
+
+// Modal de edição manual de um boletim em rascunho — itens (cargo, qtd, valor unit.),
+// glosas, acréscimos, discriminação. Salva via PATCH /:id/ajustar (com itens override).
+async function painelPostoEditar(boletim_id) {
+  const token = localStorage.getItem('montana_jwt') || '';
+  const headers = { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token };
+  let data;
+  try {
+    const r = await fetch(`/api/boletins/${boletim_id}/edit-data`, { headers });
+    data = await r.json();
+    if (!r.ok) throw new Error(data.error);
+  } catch (err) {
+    toast('Erro ao carregar boletim: ' + err.message, 'error');
+    return;
+  }
+  window._gbeBoletim = boletim_id;
+  window._gbeState = {
+    itens: data.itens.map(it => ({
+      descricao: it.descricao || '',
+      quantidade: Number(it.quantidade) || 0,
+      valor_unitario: Number(it.valor_unitario) || 0,
+    })),
+    glosas: Number(data.boletim.glosas) || 0,
+    acrescimos: Number(data.boletim.acrescimos) || 0,
+    discriminacao: data.boletim.discriminacao || '',
+    tem_override: !!data.boletim.tem_override,
+  };
+
+  const postoTitulo = data.posto
+    ? `${data.posto.campus_nome || ''}${data.posto.municipio ? ' — ' + data.posto.municipio : ''}`
+    : (data.boletim.posto_id ? `Posto #${data.boletim.posto_id}` : '(sem posto vinculado)');
+
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-edit-boletim';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:5000;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:14px;width:100%;max-width:900px;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,.4);overflow:hidden">
+      <div style="background:#d97706;color:#fff;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+        <div>
+          <div style="font-size:15px;font-weight:800">✏️ Editar Boletim #${data.boletim.id}</div>
+          <div style="font-size:11px;opacity:.9;margin-top:2px">${data.contrato.nome || ''} · ${postoTitulo} · Competência ${data.boletim.competencia}</div>
+        </div>
+        <button onclick="document.getElementById('modal-edit-boletim').remove()"
+          style="background:rgba(255,255,255,.2);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;padding:2px 10px;line-height:1">×</button>
+      </div>
+
+      <div style="flex:1;overflow-y:auto;padding:16px 20px;background:#fafbfc">
+        ${data.boletim.tem_override ? `
+          <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:#92400e">
+            ⚠️ Este boletim já tem itens customizados (override gravado anteriormente).
+          </div>
+        ` : ''}
+
+        <div style="background:#fff;border:1.5px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:700;color:#0f172a;font-size:13px">📋 Itens do boletim</div>
+            <button onclick="_gbeAdicionarItem()" style="padding:5px 10px;font-size:11px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer;font-weight:600">➕ Adicionar item</button>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:11px">
+            <thead>
+              <tr style="background:#f8fafc;color:#475569">
+                <th style="padding:6px;text-align:left;border-bottom:1px solid #e2e8f0">Descrição</th>
+                <th style="padding:6px;text-align:center;width:90px;border-bottom:1px solid #e2e8f0">Qtd</th>
+                <th style="padding:6px;text-align:right;width:140px;border-bottom:1px solid #e2e8f0">Vl. Unitário</th>
+                <th style="padding:6px;text-align:right;width:140px;border-bottom:1px solid #e2e8f0">Subtotal</th>
+                <th style="padding:6px;width:34px;border-bottom:1px solid #e2e8f0"></th>
+              </tr>
+            </thead>
+            <tbody id="gbe-itens-body">
+              ${window._gbeState.itens.map((it, idx) => _gbeRenderItemRow(idx, it)).join('')}
+            </tbody>
+            <tfoot>
+              <tr style="background:#f1f5f9;font-weight:700">
+                <td colspan="3" style="padding:6px;text-align:right;color:#475569">Valor Base (soma dos itens):</td>
+                <td id="gbe-valor-base" style="padding:6px;text-align:right;color:#15803d">R$ 0,00</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+          <div>
+            <label style="font-size:11px;font-weight:700;color:#374151;display:block;margin-bottom:3px">Glosas (R$)</label>
+            <input type="number" id="gbe-glosas" step="0.01" min="0" value="${window._gbeState.glosas.toFixed(2)}" oninput="_gbeRecalcular()" style="width:100%;padding:7px 10px;border:1.5px solid #d1d5db;border-radius:7px;font-size:13px;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:700;color:#374151;display:block;margin-bottom:3px">Acréscimos (R$)</label>
+            <input type="number" id="gbe-acrescimos" step="0.01" min="0" value="${window._gbeState.acrescimos.toFixed(2)}" oninput="_gbeRecalcular()" style="width:100%;padding:7px 10px;border:1.5px solid #d1d5db;border-radius:7px;font-size:13px;box-sizing:border-box">
+          </div>
+        </div>
+
+        <div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:13px;font-weight:700;color:#166534">Valor Final do Boletim:</span>
+          <span id="gbe-valor-final" style="font-size:18px;font-weight:900;color:#15803d">R$ 0,00</span>
+        </div>
+
+        <div>
+          <label style="font-size:11px;font-weight:700;color:#374151;display:block;margin-bottom:3px">Discriminação <span style="font-weight:400;color:#94a3b8">(deixe em branco para usar o template do contrato)</span></label>
+          <textarea id="gbe-discriminacao" rows="4" style="width:100%;padding:8px 10px;border:1.5px solid #d1d5db;border-radius:7px;font-size:12px;line-height:1.5;box-sizing:border-box;resize:vertical;font-family:inherit">${(window._gbeState.discriminacao || '').replace(/</g, '&lt;')}</textarea>
+        </div>
+
+        <div id="gbe-resultado" style="margin-top:10px"></div>
+      </div>
+
+      <div style="padding:12px 20px;background:#f8fafc;border-top:1px solid #e2e8f0;display:flex;gap:8px;flex-shrink:0">
+        <button onclick="document.getElementById('modal-edit-boletim').remove()"
+          style="flex:1;padding:10px;font-size:13px;border:1.5px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-weight:600;color:#64748b">
+          Cancelar
+        </button>
+        <button id="gbe-btn-salvar" onclick="_gbeSalvar()"
+          style="flex:2;padding:10px;font-size:13px;font-weight:800;background:#d97706;color:#fff;border:none;border-radius:8px;cursor:pointer">
+          💾 Salvar alterações
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  _gbeRecalcular();
+}
+
+function _gbeRenderItemRow(idx, it) {
+  return `
+    <tr data-row="${idx}">
+      <td style="padding:4px 6px;border-bottom:1px solid #f1f5f9">
+        <input type="text" value="${(it.descricao || '').replace(/"/g, '&quot;')}" oninput="_gbeEditarItem(${idx}, 'descricao', this.value)" style="width:100%;padding:5px 7px;border:1px solid #e2e8f0;border-radius:5px;font-size:11px;box-sizing:border-box">
+      </td>
+      <td style="padding:4px 6px;border-bottom:1px solid #f1f5f9">
+        <input type="number" step="0.01" min="0" value="${it.quantidade}" oninput="_gbeEditarItem(${idx}, 'quantidade', this.value)" style="width:100%;padding:5px 7px;border:1px solid #e2e8f0;border-radius:5px;font-size:11px;text-align:center;box-sizing:border-box">
+      </td>
+      <td style="padding:4px 6px;border-bottom:1px solid #f1f5f9">
+        <input type="number" step="0.01" min="0" value="${it.valor_unitario}" oninput="_gbeEditarItem(${idx}, 'valor_unitario', this.value)" style="width:100%;padding:5px 7px;border:1px solid #e2e8f0;border-radius:5px;font-size:11px;text-align:right;box-sizing:border-box">
+      </td>
+      <td id="gbe-sub-${idx}" style="padding:4px 6px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:600;color:#0f172a">R$ 0,00</td>
+      <td style="padding:4px 6px;border-bottom:1px solid #f1f5f9;text-align:center">
+        <button onclick="_gbeRemoverItem(${idx})" title="Remover item" style="background:#fee2e2;color:#b91c1c;border:none;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;font-weight:700">×</button>
+      </td>
+    </tr>
+  `;
+}
+
+function _gbeEditarItem(idx, campo, val) {
+  const st = window._gbeState;
+  if (!st || !st.itens[idx]) return;
+  if (campo === 'descricao') st.itens[idx].descricao = val;
+  else st.itens[idx][campo] = parseFloat(val) || 0;
+  _gbeRecalcular();
+}
+
+function _gbeAdicionarItem() {
+  const st = window._gbeState;
+  if (!st) return;
+  st.itens.push({ descricao: '', quantidade: 1, valor_unitario: 0 });
+  const tbody = document.getElementById('gbe-itens-body');
+  if (tbody) {
+    const idx = st.itens.length - 1;
+    tbody.insertAdjacentHTML('beforeend', _gbeRenderItemRow(idx, st.itens[idx]));
+  }
+  _gbeRecalcular();
+}
+
+function _gbeRemoverItem(idx) {
+  const st = window._gbeState;
+  if (!st) return;
+  st.itens.splice(idx, 1);
+  // Re-render tbody pra reindexar
+  const tbody = document.getElementById('gbe-itens-body');
+  if (tbody) tbody.innerHTML = st.itens.map((it, i) => _gbeRenderItemRow(i, it)).join('');
+  _gbeRecalcular();
+}
+
+function _gbeRecalcular() {
+  const st = window._gbeState;
+  if (!st) return;
+  let base = 0;
+  st.itens.forEach((it, idx) => {
+    const sub = Math.round((Number(it.quantidade) || 0) * (Number(it.valor_unitario) || 0) * 100) / 100;
+    const el = document.getElementById('gbe-sub-' + idx);
+    if (el) el.textContent = brl(sub);
+    base += sub;
+  });
+  base = Math.round(base * 100) / 100;
+  st.valor_base = base;
+  const g = parseFloat(document.getElementById('gbe-glosas')?.value) || 0;
+  const a = parseFloat(document.getElementById('gbe-acrescimos')?.value) || 0;
+  st.glosas = g; st.acrescimos = a;
+  const total = Math.round((base - g + a) * 100) / 100;
+  st.valor_total = total;
+  const elBase = document.getElementById('gbe-valor-base');
+  if (elBase) elBase.textContent = brl(base);
+  const elFinal = document.getElementById('gbe-valor-final');
+  if (elFinal) elFinal.textContent = brl(total);
+}
+
+async function _gbeSalvar() {
+  const st = window._gbeState;
+  const id = window._gbeBoletim;
+  if (!st || !id) return;
+  const btn = document.getElementById('gbe-btn-salvar');
+  const resEl = document.getElementById('gbe-resultado');
+  btn.disabled = true;
+  btn.textContent = '⏳ Salvando...';
+
+  const discriminacao = (document.getElementById('gbe-discriminacao')?.value || '').trim();
+  // Filtra itens vazios pra não gravar lixo
+  const itensValidos = st.itens.filter(it =>
+    (it.descricao && it.descricao.trim()) || it.quantidade > 0 || it.valor_unitario > 0
+  );
+
+  try {
+    const token = localStorage.getItem('montana_jwt') || '';
+    const headers = { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token };
+    const payload = {
+      glosas: Number(st.glosas) || 0,
+      acrescimos: Number(st.acrescimos) || 0,
+      itens: itensValidos,
+    };
+    if (discriminacao) payload.discriminacao = discriminacao;
+
+    const r = await fetch(`/api/boletins/${id}/ajustar`, {
+      method: 'PATCH', headers, body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+
+    resEl.innerHTML = `
+      <div style="background:#dcfce7;border:1px solid #86efac;border-radius:8px;padding:10px 14px;font-size:12px;color:#15803d">
+        ✅ Salvo! Valor base: <strong>${brl(d.data.valor_base)}</strong> · Total: <strong>${brl(d.data.valor_total)}</strong>
+      </div>
+    `;
+    btn.textContent = '✅ Salvo';
+    btn.style.background = '#15803d';
+
+    // Recarrega o drill-down em background
+    setTimeout(() => {
+      const titulo = document.querySelector('#modal-painel-postos h3')?.textContent || '';
+      const m = titulo.match(/—\s*(.+?)\s*—\s*(\d{4}-\d{2})/);
+      if (m && window._painelLastContratoId) {
+        document.getElementById('modal-painel-postos')?.remove();
+        painelAbrirPostos(window._painelLastContratoId, m[2], m[1]);
+      }
+      document.getElementById('modal-edit-boletim')?.remove();
+    }, 800);
+  } catch (err) {
+    resEl.innerHTML = `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px;color:#dc2626;font-size:12px">❌ ${err.message}</div>`;
+    btn.disabled = false;
+    btn.textContent = '💾 Salvar alterações';
+  }
 }
 
 // Abre o modal de prévia da NFS-e (RPS + retenções editáveis) sem disparar emissão.
@@ -1739,15 +2111,24 @@ function _abrirModalPreviewNfse(boletim_id, preview) {
           ${_inputRet('valorCsll',    'CSLL',     ret.valorCsll)}
           ${_inputRet('valorDeducoes','Deduções', ret.valorDeducoes)}
         </div>
-        <div style="display:flex;gap:10px;align-items:center;margin-top:10px;border-top:1px dashed #c7d2fe;padding-top:10px">
-          <label style="font-size:11px;color:#3730a3;font-weight:600">
+        <div style="display:flex;gap:14px;align-items:center;margin-top:10px;border-top:1px dashed #c7d2fe;padding-top:10px;flex-wrap:wrap">
+          <label style="font-size:11px;color:#3730a3;font-weight:600;display:flex;align-items:center;gap:5px">
             <input type="checkbox" id="ret-issRetido" ${ret.issRetido ? 'checked':''} onchange="_previewRecalc()"> ISS Retido
           </label>
-          <label style="font-size:11px;color:#3730a3;font-weight:600">
-            Alíquota ISS:
-            <input type="number" step="0.0001" id="ret-aliquotaIss" value="${ret.aliquotaIss}" style="width:70px;padding:3px 6px;border:1px solid #c7d2fe;border-radius:4px;font-size:11px" onchange="_previewRecalc()">
-            (${(ret.aliquotaIss*100).toFixed(2)}%)
-          </label>
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#3730a3;font-weight:600">
+            <span>Alíquota ISS:</span>
+            <input type="number" step="0.01" min="0" id="ret-aliquotaIss-pct" value="${(ret.aliquotaIss*100).toFixed(2)}"
+              onchange="_previewSyncIssFromPct()" oninput="_previewSyncIssFromPct()"
+              title="Alíquota ISS em %"
+              style="width:70px;padding:5px 7px;border:1px solid #c7d2fe;border-radius:5px;font-size:11px;font-weight:600;color:#5b21b6;background:#faf5ff">
+            <span style="color:#6366f1">%</span>
+            <span style="color:#6366f1">·</span>
+            <span>decimal:</span>
+            <input type="number" step="0.0001" min="0" id="ret-aliquotaIss" value="${Number(ret.aliquotaIss).toFixed(4)}"
+              onchange="_previewSyncIssFromDecimal()" oninput="_previewSyncIssFromDecimal()"
+              title="Mesmo valor em decimal (0.05 = 5%)"
+              style="width:80px;padding:5px 7px;border:1px solid #c7d2fe;border-radius:5px;font-size:11px">
+          </div>
         </div>
       </div>
 
@@ -1785,12 +2166,57 @@ function _abrirModalPreviewNfse(boletim_id, preview) {
 }
 
 function _inputRet(name, label, val) {
+  // Cada campo tem 2 inputs sincronizados: % (esquerda) e R$ (direita).
+  // Editar um recalcula o outro com base no valor bruto da NF (window._previewValorBruto).
+  const bruto = Number(window._previewValorBruto || 0);
+  const valor = Number(val || 0);
+  const pct = bruto > 0 ? (valor / bruto * 100) : 0;
   return `<div>
-    <label style="font-size:10px;font-weight:700;color:#3730a3;display:block;margin-bottom:2px">${label} (R$)</label>
-    <input type="number" step="0.01" min="0" id="ret-${name}" value="${Number(val||0).toFixed(2)}"
-      onchange="_previewRecalc()" oninput="_previewRecalc()"
-      style="width:100%;padding:6px 8px;border:1px solid #c7d2fe;border-radius:5px;font-size:12px;font-weight:600;color:#1e293b">
+    <label style="font-size:10px;font-weight:700;color:#3730a3;display:block;margin-bottom:2px">${label}</label>
+    <div style="display:flex;gap:4px">
+      <input type="number" step="0.0001" min="0" id="ret-${name}-pct" value="${pct.toFixed(4)}"
+        onchange="_previewSyncFromPct('${name}')" oninput="_previewSyncFromPct('${name}')"
+        title="Alíquota %"
+        style="width:55px;padding:6px 4px;border:1px solid #c7d2fe;border-radius:5px;font-size:11px;font-weight:600;color:#5b21b6;background:#faf5ff">
+      <span style="font-size:10px;color:#6366f1;align-self:center">%</span>
+      <input type="number" step="0.01" min="0" id="ret-${name}" value="${valor.toFixed(2)}"
+        onchange="_previewSyncFromValor('${name}')" oninput="_previewSyncFromValor('${name}')"
+        title="Valor R$"
+        style="flex:1;padding:6px 8px;border:1px solid #c7d2fe;border-radius:5px;font-size:12px;font-weight:600;color:#1e293b">
+    </div>
   </div>`;
+}
+
+// Quando o usuário edita o %, recalcula o valor R$ e dispara o recalc geral
+function _previewSyncFromPct(name) {
+  const bruto = Number(window._previewValorBruto || 0);
+  const pct = Number(document.getElementById('ret-' + name + '-pct').value || 0);
+  const valor = Math.round(bruto * pct / 100 * 100) / 100;
+  document.getElementById('ret-' + name).value = valor.toFixed(2);
+  _previewRecalc();
+}
+
+// Quando o usuário edita o R$, recalcula o % e dispara o recalc geral
+function _previewSyncFromValor(name) {
+  const bruto = Number(window._previewValorBruto || 0);
+  const valor = Number(document.getElementById('ret-' + name).value || 0);
+  const pct = bruto > 0 ? (valor / bruto * 100) : 0;
+  document.getElementById('ret-' + name + '-pct').value = pct.toFixed(4);
+  _previewRecalc();
+}
+
+// Sincronizadores específicos da Alíquota ISS (que é guardada como decimal 0.05 mas
+// editada também em %). Editar % atualiza decimal; editar decimal atualiza %.
+function _previewSyncIssFromPct() {
+  const pct = Number(document.getElementById('ret-aliquotaIss-pct').value || 0);
+  const dec = pct / 100;
+  document.getElementById('ret-aliquotaIss').value = dec.toFixed(4);
+  _previewRecalc();
+}
+function _previewSyncIssFromDecimal() {
+  const dec = Number(document.getElementById('ret-aliquotaIss').value || 0);
+  document.getElementById('ret-aliquotaIss-pct').value = (dec * 100).toFixed(2);
+  _previewRecalc();
 }
 
 function _previewLerRetencoes() {
