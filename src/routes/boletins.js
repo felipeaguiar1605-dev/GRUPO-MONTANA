@@ -3527,17 +3527,19 @@ router.get('/:id/nf', async (req, res) => {
 });
 
 // ─── DEDUPLICAÇÃO DE BOLETINS ───────────────────────────────────
-// Diagnóstico e cleanup de duplicatas (mesmo contrato_id + competencia).
-// O middleware no topo tenta aplicar UNIQUE INDEX automaticamente; se há
-// dups pré-existentes, esses 2 endpoints permitem listar e mergear.
+// Diagnóstico e cleanup de duplicatas no caso CONSOLIDADO (posto_id IS NULL).
+// Sob Opção A (1 NF = 1 boletim por posto), N boletins/competência com
+// posto_id distintos são legítimos e não devem ser tocados aqui — o índice
+// UNIQUE é parcial (idx_bol_uniq_contrato_comp_null) e aceita isso.
 
-// GET /api/boletins/_duplicatas — lista grupos com mais de 1 boletim
+// GET /api/boletins/_duplicatas — lista grupos consolidados com mais de 1 boletim
 router.get('/_duplicatas', async (req, res) => {
   try {
     const grupos = await req.db.prepare(`
       SELECT contrato_id, competencia, COUNT(*) AS qtd,
              ARRAY_AGG(id ORDER BY id) AS ids
       FROM bol_boletins
+      WHERE posto_id IS NULL
       GROUP BY contrato_id, competencia
       HAVING COUNT(*) > 1
       ORDER BY contrato_id, competencia
@@ -3573,6 +3575,7 @@ router.post('/_dedup', async (req, res) => {
     const grupos = await req.db.prepare(`
       SELECT contrato_id, competencia, ARRAY_AGG(id ORDER BY id) AS ids
       FROM bol_boletins
+      WHERE posto_id IS NULL
       GROUP BY contrato_id, competencia
       HAVING COUNT(*) > 1
     `).all();
@@ -3630,14 +3633,9 @@ router.post('/_dedup', async (req, res) => {
       }
     }
 
-    // Tenta aplicar a UNIQUE constraint depois do dedup
-    if (!dryRun) {
-      try {
-        await req.db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bol_uniq_contrato_comp
-                              ON bol_boletins(contrato_id, competencia)`).run();
-        global._warnedBolDup = false;
-      } catch (_) {}
-    }
+    // Índice UNIQUE é criado/garantido pelo boot do módulo (versão parcial,
+    // WHERE posto_id IS NULL). Não recriar aqui — sob Opção A, a versão
+    // global (sem filter) sempre vai falhar por boletins multi-posto válidos.
 
     res.json({
       ok: true,
