@@ -2702,6 +2702,38 @@ async function painelPostoPrevia(boletim_id) {
   _abrirModalPreviewNfse(boletim_id, preview);
 }
 
+// Tooltips fiscais — usados nos ⓘ ao lado de cada termo (N-P0-03).
+const _BOL_FISCAL_TOOLTIPS = {
+  pis:     'PIS — Programa de Integração Social. Tributo federal sobre o faturamento; 0,65% padrão no lucro presumido.',
+  cofins:  'COFINS — Contribuição para Financiamento da Seguridade Social. 3,00% padrão no lucro presumido.',
+  inss:    'INSS — Contribuição previdenciária retida sobre serviços. 11% sobre a base (pode ser reduzida em contratos como UFT).',
+  irrf:    'IRRF — Imposto de Renda Retido na Fonte sobre serviços. 1,20% padrão pra vigilância/limpeza.',
+  csll:    'CSLL — Contribuição Social sobre Lucro Líquido. 1,00% no regime de retenção.',
+  deducoes:'Deduções — valores subtraídos da base de cálculo de retenção (ex: materiais separados, vale alimentação já tributado).',
+  issRetido:'ISS Retido — quando o tomador (contratante) desconta o ISS antes de pagar. Use Sim pra UFT/UNITINS; Não pra DETRAN.',
+  aliquotaIss:'Alíquota ISS — definida pelo município da prestação. Palmas/TO cobra 2-5% conforme item LC 116.',
+  baseReduzida:'Base reduzida — UFT permite deduzir vale alimentação + materiais antes do INSS. Configurado no contrato + posto.',
+  itemLista:'Item LC 116 — código do serviço pela Lei Complementar 116/2003. Ex: 07.17 vigilância, 07.10 limpeza, 17.05 locação MdO.',
+};
+
+// Helper: ícone ⓘ com tooltip nativo (title) — barato e acessível
+function _bolTip(chave) {
+  const t = _BOL_FISCAL_TOOLTIPS[chave];
+  if (!t) return '';
+  return `<span title="${t.replace(/"/g, '&quot;')}" style="display:inline-block;width:14px;height:14px;background:#dbeafe;color:#1e40af;border-radius:50%;font-size:9px;font-weight:800;text-align:center;line-height:14px;cursor:help;margin-left:4px">ⓘ</span>`;
+}
+
+// Badge da fonte das retenções (N-P0-02) — destaque visual em vez de texto 10px no canto.
+function _bolBadgeFonte(fonte) {
+  const map = {
+    'override':        { bg: '#fef3c7', cor: '#92400e', txt: '✏️ editado nesta sessão' },
+    'padrao_contrato': { bg: '#dcfce7', cor: '#166534', txt: '✓ padrão do contrato' },
+    'zerado':          { bg: '#fee2e2', cor: '#991b1b', txt: '⚠ primeira emissão — zerado' },
+  };
+  const m = map[fonte] || { bg: '#f1f5f9', cor: '#475569', txt: fonte || '?' };
+  return `<span style="background:${m.bg};color:${m.cor};padding:3px 10px;border-radius:9px;font-size:11px;font-weight:700">${m.txt}</span>`;
+}
+
 function _abrirModalPreviewNfse(boletim_id, preview) {
   // Remove modal pré-existente se houver
   document.getElementById('modal-preview-nfse')?.remove();
@@ -2710,11 +2742,6 @@ function _abrirModalPreviewNfse(boletim_id, preview) {
   const rps = preview.rps;
   const ret = preview.retencoes;
   const valor = Number(rps.servico.valorServicos);
-  const fonteLabel = {
-    'override': 'editado nesta sessão',
-    'padrao_contrato': '✓ usando padrão do contrato',
-    'zerado': '⚠ primeira emissão — zerado',
-  }[preview.fonte_retencoes] || '';
 
   const podeEmitir = preview.boletim?.status === 'aprovado' && preview.boletim?.nfse_status !== 'EMITIDA';
   const avisoStatus = !podeEmitir
@@ -2726,7 +2753,7 @@ function _abrirModalPreviewNfse(boletim_id, preview) {
   overlay.id = 'modal-preview-nfse';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow:auto';
   overlay.innerHTML = `
-    <div style="background:#fff;border-radius:12px;max-width:920px;width:100%;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,0.3)">
+    <div style="background:#fff;border-radius:12px;max-width:780px;width:100%;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,0.3)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;border-bottom:2px solid #e2e8f0;padding-bottom:12px">
         <h3 style="margin:0;font-size:16px;font-weight:800;color:#1e293b">🧾 Prévia NFS-e — antes de emitir</h3>
         <button onclick="document.getElementById('modal-preview-nfse').remove()"
@@ -2734,80 +2761,97 @@ function _abrirModalPreviewNfse(boletim_id, preview) {
       </div>
       ${avisoStatus}
 
-      <!-- Dados RPS -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;font-size:12px">
-        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-          <div style="font-weight:700;color:#1e293b;margin-bottom:6px">📋 RPS</div>
-          <div>Número: <strong>${rps.numero}</strong></div>
-          <div>Série: <strong>${rps.serie}</strong></div>
-          <div>Emissão: <strong>${rps.dataEmissao}</strong></div>
-          <div>Competência: <strong>${rps.competencia}</strong></div>
-          <div>Item lista serv.: <strong>${rps.servico.itemLista}</strong></div>
-        </div>
-        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-          <div style="font-weight:700;color:#1e293b;margin-bottom:6px">👤 Tomador</div>
-          <div>Razão: <strong>${preview.tomador_razao || '<em>vazio</em>'}</strong></div>
-          <div>CNPJ: <strong>${preview.tomador_cnpj || '<em style=color:#dc2626>FALTA — configure no contrato</em>'}</strong></div>
-        </div>
-      </div>
-
-      <!-- Discriminação -->
-      <div style="margin-bottom:14px">
-        <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">Discriminação dos Serviços</label>
-        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:11px;color:#1e293b;max-height:80px;overflow:auto">${rps.servico.discriminacao}</div>
-      </div>
-
-      <!-- Retenções -->
-      <div style="border:1px solid #c7d2fe;background:#eef2ff;border-radius:8px;padding:14px;margin-bottom:14px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <div style="font-weight:800;color:#3730a3;font-size:13px">⚙️ Retenções</div>
-          <div style="font-size:10px;color:#6366f1">${fonteLabel}</div>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:11px">
-          ${_inputRet('valorPis',     'PIS',      ret.valorPis)}
-          ${_inputRet('valorCofins',  'COFINS',   ret.valorCofins)}
-          ${_inputRet('valorInss',    'INSS',     ret.valorInss)}
-          ${_inputRet('valorIr',      'IR',       ret.valorIr)}
-          ${_inputRet('valorCsll',    'CSLL',     ret.valorCsll)}
-          ${_inputRet('valorDeducoes','Deduções', ret.valorDeducoes)}
-        </div>
-        <div style="display:flex;gap:14px;align-items:center;margin-top:10px;border-top:1px dashed #c7d2fe;padding-top:10px;flex-wrap:wrap">
-          <label style="font-size:11px;color:#3730a3;font-weight:600;display:flex;align-items:center;gap:5px">
-            <input type="checkbox" id="ret-issRetido" ${ret.issRetido ? 'checked':''} onchange="_previewRecalc()"> ISS Retido
-          </label>
-          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#3730a3;font-weight:600">
-            <span>Alíquota ISS:</span>
-            <input type="number" step="0.01" min="0" id="ret-aliquotaIss-pct" value="${(ret.aliquotaIss*100).toFixed(2)}"
-              onchange="_previewSyncIssFromPct()" oninput="_previewSyncIssFromPct()"
-              title="Alíquota ISS em %"
-              style="width:70px;padding:5px 7px;border:1px solid #c7d2fe;border-radius:5px;font-size:11px;font-weight:600;color:#5b21b6;background:#faf5ff">
-            <span style="color:#6366f1">%</span>
-            <span style="color:#6366f1">·</span>
-            <span>decimal:</span>
-            <input type="number" step="0.0001" min="0" id="ret-aliquotaIss" value="${Number(ret.aliquotaIss).toFixed(4)}"
-              onchange="_previewSyncIssFromDecimal()" oninput="_previewSyncIssFromDecimal()"
-              title="Mesmo valor em decimal (0.05 = 5%)"
-              style="width:80px;padding:5px 7px;border:1px solid #c7d2fe;border-radius:5px;font-size:11px">
+      <!-- Dados da nota — compacto -->
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px">
+        <div style="font-weight:700;color:#1e293b;margin-bottom:8px">📋 Dados da nota</div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px 18px">
+          <div><span style="color:#64748b">RPS:</span> <strong>${rps.numero}/${rps.serie}</strong></div>
+          <div><span style="color:#64748b">Emissão:</span> <strong>${rps.dataEmissao}</strong></div>
+          <div><span style="color:#64748b">Competência:</span> <strong>${rps.competencia}</strong></div>
+          <div><span style="color:#64748b">Item LC 116${_bolTip('itemLista')}:</span> <strong>${rps.servico.itemLista}</strong></div>
+          <div style="grid-column:1/-1;border-top:1px dashed #cbd5e1;margin-top:4px;padding-top:6px">
+            <div><span style="color:#64748b">Tomador:</span> <strong>${preview.tomador_razao || '<em>vazio</em>'}</strong></div>
+            <div><span style="color:#64748b">CNPJ:</span> <strong>${preview.tomador_cnpj || '<em style=color:#dc2626>FALTA — configure no contrato</em>'}</strong></div>
           </div>
         </div>
       </div>
 
-      <!-- Totais -->
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px">
-        <div style="background:#f1f5f9;border-radius:8px;padding:12px;text-align:center">
-          <div style="font-size:10px;color:#64748b;font-weight:700">VALOR BRUTO</div>
-          <div style="font-size:18px;font-weight:800;color:#1e293b" id="prev-bruto">${brl(valor)}</div>
+      <!-- Discriminação -->
+      <details style="margin-bottom:14px">
+        <summary style="cursor:pointer;font-size:11px;font-weight:700;color:#475569;list-style:none">
+          ▾ Discriminação dos serviços (clique pra ver)
+        </summary>
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:11px;color:#1e293b;max-height:140px;overflow:auto;margin-top:6px;line-height:1.5">${rps.servico.discriminacao}</div>
+      </details>
+
+      <!-- BLOCO 1: VALOR BRUTO -->
+      <div style="background:#f1f5f9;border-radius:10px;padding:14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:10px;color:#475569;font-weight:700;letter-spacing:.3px">1 · VALOR BRUTO DO SERVIÇO</div>
+          <div style="font-size:11px;color:#64748b;margin-top:2px">soma dos itens do boletim</div>
         </div>
-        <div style="background:#fef2f2;border-radius:8px;padding:12px;text-align:center">
-          <div style="font-size:10px;color:#991b1b;font-weight:700">RETENÇÕES</div>
-          <div style="font-size:18px;font-weight:800;color:#dc2626" id="prev-retido">${brl(valor - preview.valor_liquido)}</div>
+        <div style="font-size:22px;font-weight:900;color:#1e293b" id="prev-bruto">${brl(valor)}</div>
+      </div>
+
+      <!-- BLOCO 2: TRIBUTAÇÃO FEDERAL -->
+      <div style="border:1px solid #c7d2fe;background:#eef2ff;border-radius:10px;padding:14px;margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px">
+          <div style="font-weight:800;color:#3730a3;font-size:12px">2 · TRIBUTAÇÃO FEDERAL <span style="font-weight:400;color:#6366f1">(sobre o valor bruto)</span></div>
+          ${_bolBadgeFonte(preview.fonte_retencoes)}
         </div>
-        <div style="background:#d1fae5;border-radius:8px;padding:12px;text-align:center">
-          <div style="font-size:10px;color:#065f46;font-weight:700">LÍQUIDO A RECEBER</div>
-          <div style="font-size:18px;font-weight:800;color:#059669" id="prev-liquido">${brl(preview.valor_liquido)}</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:11px">
+          ${_inputRet('valorPis',     'PIS'      + _bolTip('pis'),      ret.valorPis)}
+          ${_inputRet('valorCofins',  'COFINS'   + _bolTip('cofins'),   ret.valorCofins)}
+          ${_inputRet('valorCsll',    'CSLL'     + _bolTip('csll'),     ret.valorCsll)}
+          ${_inputRet('valorInss',    'INSS'     + _bolTip('inss'),     ret.valorInss)}
+          ${_inputRet('valorIr',      'IRRF'     + _bolTip('irrf'),     ret.valorIr)}
+          ${_inputRet('valorDeducoes','Deduções' + _bolTip('deducoes'), ret.valorDeducoes)}
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;border-top:1px dashed #c7d2fe;padding-top:10px;font-size:12px">
+          <span style="color:#3730a3;font-weight:600">Subtotal federal</span>
+          <span id="prev-fed-subtotal" style="color:#3730a3;font-weight:800">R$ 0,00</span>
         </div>
       </div>
-      <div style="font-size:10px;color:#64748b;margin-bottom:14px">ISS calculado: <span id="prev-iss">${brl(preview.valor_iss)}</span> (somado ao retido apenas se ISS Retido marcado)</div>
+
+      <!-- BLOCO 3: ISS MUNICIPAL -->
+      <div style="border:1px solid #fbcfe8;background:#fdf2f8;border-radius:10px;padding:14px;margin-bottom:12px">
+        <div style="font-weight:800;color:#9d174d;font-size:12px;margin-bottom:10px">3 · ISS MUNICIPAL</div>
+        <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#9d174d;font-weight:600">
+            <span>Alíquota ISS${_bolTip('aliquotaIss')}:</span>
+            <input type="number" step="0.01" min="0" id="ret-aliquotaIss-pct" value="${(ret.aliquotaIss*100).toFixed(2)}"
+              onchange="_previewSyncIssFromPct()" oninput="_previewSyncIssFromPct()"
+              style="width:70px;padding:5px 7px;border:1px solid #fbcfe8;border-radius:5px;font-size:11px;font-weight:700;color:#831843;background:#fff">
+            <span style="color:#be185d">%</span>
+            <!-- input decimal removido (N-P2-03): só % na UI -->
+            <input type="hidden" id="ret-aliquotaIss" value="${Number(ret.aliquotaIss).toFixed(4)}">
+          </div>
+          <label style="font-size:11px;color:#9d174d;font-weight:600;display:flex;align-items:center;gap:5px">
+            <input type="checkbox" id="ret-issRetido" ${ret.issRetido ? 'checked':''} onchange="_previewRecalc()">
+            Tomador retém o ISS${_bolTip('issRetido')}
+          </label>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;border-top:1px dashed #fbcfe8;padding-top:10px">
+          <span style="color:#9d174d;font-weight:600">ISS calculado <span style="font-size:10px;color:#be185d">(somente entra no retido se "tomador retém" estiver marcado)</span></span>
+          <span id="prev-iss" style="color:#9d174d;font-weight:800">${brl(preview.valor_iss)}</span>
+        </div>
+      </div>
+
+      <!-- BLOCO 4: LÍQUIDO A RECEBER -->
+      <div style="background:linear-gradient(to right, #f1f5f9, #d1fae5);border-radius:10px;padding:14px;margin-bottom:18px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;margin-bottom:8px">
+          <div><span style="color:#475569">Bruto</span></div>
+          <div style="text-align:right" id="prev-resumo-bruto">${brl(valor)}</div>
+          <div><span style="color:#475569">− Retenções</span></div>
+          <div style="text-align:right;color:#dc2626" id="prev-retido">- ${brl(valor - preview.valor_liquido)}</div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;border-top:2px solid #86efac;padding-top:10px">
+          <div>
+            <div style="font-size:10px;color:#065f46;font-weight:700;letter-spacing:.3px">4 · LÍQUIDO A RECEBER</div>
+          </div>
+          <div style="font-size:22px;font-weight:900;color:#059669" id="prev-liquido">${brl(preview.valor_liquido)}</div>
+        </div>
+      </div>
 
       <!-- Ações -->
       <div style="display:flex;gap:10px;justify-content:flex-end;border-top:2px solid #e2e8f0;padding-top:14px">
@@ -2823,6 +2867,7 @@ function _abrirModalPreviewNfse(boletim_id, preview) {
     </div>`;
   document.body.appendChild(overlay);
   window._previewValorBruto = valor;
+  _previewRecalc();
 }
 
 function _inputRet(name, label, val) {
@@ -2897,11 +2942,17 @@ function _previewRecalc() {
   const bruto = window._previewValorBruto || 0;
   const r = _previewLerRetencoes();
   const valorIss = Math.round(bruto * r.aliquotaIss * 100) / 100;
-  const retido = r.valorPis + r.valorCofins + r.valorInss + r.valorIr + r.valorCsll + (r.issRetido ? valorIss : 0);
+  const fedSubtotal = Math.round((r.valorPis + r.valorCofins + r.valorInss + r.valorIr + r.valorCsll) * 100) / 100;
+  const retido = fedSubtotal + (r.issRetido ? valorIss : 0);
   const liquido = Math.round((bruto - retido) * 100) / 100;
-  document.getElementById('prev-retido').textContent = brl(retido);
-  document.getElementById('prev-liquido').textContent = brl(liquido);
-  document.getElementById('prev-iss').textContent = brl(valorIss);
+
+  // Layout em 4 blocos (N-P0-01) — elementos novos têm IDs distintos.
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('prev-fed-subtotal', brl(fedSubtotal));
+  set('prev-retido',       '- ' + brl(retido));
+  set('prev-liquido',      brl(liquido));
+  set('prev-iss',          brl(valorIss));
+  set('prev-resumo-bruto', brl(bruto));
 }
 
 async function _previewConfirmarEmissao(boletim_id) {
