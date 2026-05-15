@@ -331,22 +331,63 @@ router.get('/contratos/:id/postos', async (req, res) => {
   res.json(postos);
 });
 
+// Helper: campos fiscais/locais do posto (B-P0-03).
+// `aliquota_iss_local`/`deducao_*` ficam null se vazios — preservam herança do contrato.
+function _pickPosto(b) {
+  const num = v => (v === '' || v === null || v === undefined) ? null : Number(v);
+  const bool = v => (v === true || v === 'true' || v === 1 || v === '1');
+  return {
+    codigo_municipio_ibge:    b.codigo_municipio_ibge || null,
+    aliquota_iss_local:       num(b.aliquota_iss_local),
+    deducao_vale_alimentacao: num(b.deducao_vale_alimentacao),
+    deducao_materiais:        num(b.deducao_materiais),
+    // mostrar_colaboradores tem default TRUE no schema; aqui só envia explicitamente
+    // quando o cliente mandou o campo. Se vier undefined, deixamos o default valer.
+    mostrar_colaboradores:    b.mostrar_colaboradores === undefined ? null : bool(b.mostrar_colaboradores),
+  };
+}
+
 router.post('/contratos/:id/postos', async (req, res) => {
   const b = req.body;
+  const f = _pickPosto(b);
   const maxOrdem = await req.db.prepare('SELECT COALESCE(MAX(ordem),0) as m FROM bol_postos WHERE contrato_id=?').get(req.params.id);
+  // Default explicit: se cliente não mandou mostrar_colaboradores, vai TRUE
+  const mostrar = f.mostrar_colaboradores === null ? true : f.mostrar_colaboradores;
   const r = await req.db.prepare(`
-    INSERT INTO bol_postos (contrato_id, campus_key, campus_nome, municipio, descricao_posto, label_resumo, ordem)
-    VALUES (?,?,?,?,?,?,?)
-  `).run(req.params.id, b.campus_key, b.campus_nome, b.municipio||'', b.descricao_posto||'', b.label_resumo||b.campus_nome, (maxOrdem?.m||0)+1);
+    INSERT INTO bol_postos (contrato_id, campus_key, campus_nome, municipio, descricao_posto,
+      label_resumo, ordem, codigo_municipio_ibge, aliquota_iss_local,
+      deducao_vale_alimentacao, deducao_materiais, mostrar_colaboradores)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    req.params.id, b.campus_key, b.campus_nome, b.municipio||'',
+    b.descricao_posto||'', b.label_resumo||b.campus_nome, (maxOrdem?.m||0)+1,
+    f.codigo_municipio_ibge, f.aliquota_iss_local,
+    f.deducao_vale_alimentacao, f.deducao_materiais, mostrar
+  );
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 
 router.put('/postos/:id', async (req, res) => {
   const b = req.body;
+  const f = _pickPosto(b);
+  // mostrar_colaboradores: se cliente não mandou, mantém o atual (COALESCE).
+  // Aqui, como sempre mandamos do form, o else null daria FALSE — tratamos como
+  // 'preserva atual' lendo de bol_postos.
   await req.db.prepare(`
-    UPDATE bol_postos SET campus_key=?, campus_nome=?, municipio=?, descricao_posto=?, label_resumo=?, ordem=?
+    UPDATE bol_postos SET campus_key=?, campus_nome=?, municipio=?, descricao_posto=?,
+      label_resumo=?, ordem=?,
+      codigo_municipio_ibge=?, aliquota_iss_local=?,
+      deducao_vale_alimentacao=?, deducao_materiais=?,
+      mostrar_colaboradores=COALESCE(?, mostrar_colaboradores)
     WHERE id=?
-  `).run(b.campus_key, b.campus_nome, b.municipio||'', b.descricao_posto||'', b.label_resumo||'', b.ordem||0, req.params.id);
+  `).run(
+    b.campus_key, b.campus_nome, b.municipio||'', b.descricao_posto||'',
+    b.label_resumo||'', b.ordem||0,
+    f.codigo_municipio_ibge, f.aliquota_iss_local,
+    f.deducao_vale_alimentacao, f.deducao_materiais,
+    f.mostrar_colaboradores,
+    req.params.id
+  );
   res.json({ ok: true });
 });
 
@@ -764,8 +805,9 @@ router.patch('/:id/ajustar', async (req, res) => {
   }
 });
 
-// GET /:id/edit-data — retorna boletim + posto + itens (com override se houver).
+// GET /:id/edit-data — retorna boletim + posto + itens (com override se houver) + fiscal aplicável.
 // Usado pelo modal de edição inline no drill-down do Painel de Faturamento.
+// B-P0-04: agora retorna também as alíquotas e códigos pra a seção Fiscal read-only.
 router.get('/:id/edit-data', async (req, res) => {
   try {
     const db = req.db;
@@ -774,7 +816,13 @@ router.get('/:id/edit-data', async (req, res) => {
              b.glosas, b.acrescimos, b.discriminacao, b.status, b.nfse_status,
              b.itens_override,
              bc.nome AS contrato_nome, bc.contrato_ref, bc.numero_contrato, bc.template_discriminacao,
-             p.campus_nome, p.municipio, p.label_resumo
+             bc.item_lista_servico, bc.codigo_cnae, bc.codigo_nbs,
+             bc.aliquota_iss_padrao, bc.iss_retido_padrao,
+             bc.inss_aliquota, bc.inss_base_reduzida,
+             bc.irrf_aliquota, bc.pis_aliquota, bc.cofins_aliquota, bc.csll_aliquota,
+             bc.optante_simples_nacional, bc.ciclo_dia_inicio,
+             p.campus_nome, p.municipio, p.label_resumo,
+             p.aliquota_iss_local, p.deducao_vale_alimentacao, p.deducao_materiais
       FROM bol_boletins b
       JOIN bol_contratos bc ON bc.id = b.contrato_id
       LEFT JOIN bol_postos p ON p.id = b.posto_id
@@ -794,6 +842,35 @@ router.get('/:id/edit-data', async (req, res) => {
         'SELECT id, descricao, quantidade, valor_unitario FROM bol_itens WHERE posto_id=? ORDER BY ordem'
       ).all(bol.posto_id);
     }
+    // Fiscal aplicável: combina contrato + override do posto (se houver) com fonte explícita.
+    // Frontend usa pra mostrar a aba Fiscal read-only no modal de edição (B-P0-04).
+    const aliquotaIssDoPosto = bol.aliquota_iss_local !== null && bol.aliquota_iss_local !== undefined
+      ? Number(bol.aliquota_iss_local) : null;
+    const aliquotaIssDoContrato = bol.aliquota_iss_padrao !== null && bol.aliquota_iss_padrao !== undefined
+      ? Number(bol.aliquota_iss_padrao) : null;
+    const fiscal = {
+      item_lista_servico: bol.item_lista_servico,
+      codigo_cnae:        bol.codigo_cnae,
+      codigo_nbs:         bol.codigo_nbs,
+      iss: {
+        aliquota: aliquotaIssDoPosto != null ? aliquotaIssDoPosto : aliquotaIssDoContrato,
+        fonte:    aliquotaIssDoPosto != null ? 'posto' : (aliquotaIssDoContrato != null ? 'contrato' : 'nao_configurado'),
+        retido:   bol.iss_retido_padrao,
+      },
+      inss: {
+        aliquota: bol.inss_aliquota,
+        base_reduzida: bol.inss_base_reduzida,
+        deducao_vale_alimentacao: bol.deducao_vale_alimentacao,
+        deducao_materiais: bol.deducao_materiais,
+      },
+      irrf:   bol.irrf_aliquota,
+      pis:    bol.pis_aliquota,
+      cofins: bol.cofins_aliquota,
+      csll:   bol.csll_aliquota,
+      optante_simples_nacional: bol.optante_simples_nacional,
+      ciclo_dia_inicio: bol.ciclo_dia_inicio,
+    };
+
     res.json({
       boletim: {
         id: bol.id,
@@ -816,6 +893,7 @@ router.get('/:id/edit-data', async (req, res) => {
         quantidade: Number(it.quantidade || 0),
         valor_unitario: Number(it.valor_unitario || 0),
       })),
+      fiscal,
     });
   } catch (err) {
     console.error('Erro edit-data:', err);
@@ -2720,6 +2798,74 @@ router.post('/gerar-boletim-postos', async (req, res) => {
     res.json({ ok: true, competencia, ...out });
   } catch (err) {
     console.error('Erro gerar-boletim-postos:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/boletins/gerar-mes-auto { mes: "YYYY-MM" }
+// B-P0-02 (2026-05): decide o modelo POR CONTRATO.
+//   • Contrato com postos cadastrados → 1 boletim por posto (Opção A).
+//   • Contrato sem postos             → 1 boletim consolidado.
+// Operadora aciona um único botão e o servidor escolhe certo.
+router.post('/gerar-mes-auto', async (req, res) => {
+  try {
+    const { mes } = req.body;
+    if (!mes || !/^\d{4}-\d{2}$/.test(mes)) {
+      return res.status(400).json({ error: 'Campo mes obrigatório (YYYY-MM)' });
+    }
+    const db = req.db;
+    const [ano, mesNum] = mes.split('-');
+    const mesNome = MESES_NOME_COMPLETO[parseInt(mesNum)] || mes;
+
+    const contratos = await db.prepare(`
+      SELECT bc.*, c.valor_mensal_bruto,
+             (SELECT COUNT(*) FROM bol_postos bp WHERE bp.contrato_id = bc.id) AS n_postos
+      FROM bol_contratos bc
+      LEFT JOIN contratos c ON bc.contrato_ref = c.numContrato
+      WHERE COALESCE(bc.ativo::text, 'true') NOT IN ('0','false','f')
+    `).all();
+
+    let criadosConsolidado = 0, existentesConsolidado = 0;
+    let criadosPostos = 0, existentesPostos = 0;
+    const detalhe = [];
+
+    for (const bc of contratos) {
+      const nPostos = Number(bc.n_postos) || 0;
+      if (nPostos > 0) {
+        // Modelo "por posto"
+        const r = await _gerarBoletinsPorPostos(db, bc.id, mes, mesNome, ano);
+        criadosPostos += r.criados;
+        existentesPostos += r.existentes;
+        detalhe.push({ contrato_id: bc.id, nome: bc.nome, modelo: 'por_posto', ...r });
+      } else {
+        // Modelo "consolidado"
+        const valor_base = Math.round((bc.valor_mensal_bruto || 0) * 100) / 100;
+        const tipoServico = bc.descricao_servico || 'SERVIÇOS';
+        const numContrato = bc.contrato_ref || bc.numero_contrato || '';
+        const discriminacao = `PRESTAÇÃO DE SERVIÇOS DE ${tipoServico.toUpperCase()} CONFORME CONTRATO Nº ${numContrato}, COMPETÊNCIA ${mesNome.toUpperCase()}/${ano}. VALOR MENSAL CONFORME BOLETIM DE MEDIÇÃO APROVADO.`;
+        const r = await db.prepare(`INSERT INTO bol_boletins
+          (contrato_id, competencia, data_emissao, valor_base, valor_total, glosas, acrescimos, discriminacao, status, nfse_status)
+          VALUES (?, ?, CURRENT_DATE, ?, ?, 0, 0, ?, 'rascunho', 'PENDENTE')
+          ON CONFLICT (contrato_id, competencia) DO NOTHING
+          RETURNING id
+        `).run(bc.id, mes, valor_base, valor_base, discriminacao);
+        if (r.changes && r.changes > 0) criadosConsolidado++;
+        else existentesConsolidado++;
+        detalhe.push({ contrato_id: bc.id, nome: bc.nome, modelo: 'consolidado',
+          criado: r.changes && r.changes > 0 });
+      }
+    }
+
+    res.json({
+      ok: true, mes,
+      criados: criadosConsolidado + criadosPostos,
+      existentes: existentesConsolidado + existentesPostos,
+      consolidados: { criados: criadosConsolidado, existentes: existentesConsolidado },
+      por_posto: { criados: criadosPostos, existentes: existentesPostos },
+      detalhe,
+    });
+  } catch (err) {
+    console.error('Erro gerar-mes-auto:', err);
     res.status(500).json({ error: err.message });
   }
 });
