@@ -230,32 +230,76 @@ router.get('/contratos/:id', async (req, res) => {
   res.json(c);
 });
 
+// Helper: campos fiscais expostos pela aba Fiscal (PR F-P0-01).
+// Numéricos vêm como Number do JSON ou null. Booleans vêm como boolean ou null.
+// Mantemos null pra preservar "não configurado" — não converter pra 0/false (mudaria semântica).
+function _pickFiscal(b) {
+  const num = v => (v === '' || v === null || v === undefined) ? null : Number(v);
+  const bool = v => (v === true || v === 'true' || v === 1 || v === '1');
+  const opt = v => (v === '' || v === null || v === undefined) ? null : Number(v); // 1=sim, 2=não
+  return {
+    item_lista_servico:           b.item_lista_servico ?? null,
+    codigo_tributacao_municipal:  b.codigo_tributacao_municipal ?? null,
+    codigo_cnae:                  b.codigo_cnae ?? null,
+    codigo_nbs:                   b.codigo_nbs ?? null,
+    aliquota_iss_padrao:          num(b.aliquota_iss_padrao),
+    iss_retido_padrao:            b.iss_retido_padrao === null || b.iss_retido_padrao === undefined ? null : bool(b.iss_retido_padrao),
+    optante_simples_nacional:     opt(b.optante_simples_nacional),
+    incentivo_fiscal:             opt(b.incentivo_fiscal),
+    ciclo_dia_inicio:             num(b.ciclo_dia_inicio),
+    inss_aliquota:                num(b.inss_aliquota),
+    inss_base_reduzida:           b.inss_base_reduzida === null || b.inss_base_reduzida === undefined ? null : bool(b.inss_base_reduzida),
+    irrf_aliquota:                num(b.irrf_aliquota),
+    pis_aliquota:                 num(b.pis_aliquota),
+    cofins_aliquota:              num(b.cofins_aliquota),
+    csll_aliquota:                num(b.csll_aliquota),
+    dados_bancarios:              b.dados_bancarios ?? null,
+    template_discriminacao:       b.template_discriminacao ?? null,
+  };
+}
+
 router.post('/contratos', async (req, res) => {
   const b = req.body;
+  const f = _pickFiscal(b);
   // Mesmos campos aceitos pelo PUT — permite que o form único Novo/Editar grave
-  // contrato_ref/orgao/insc_municipal já na criação (em vez de criar mínimo e editar).
+  // contrato_ref/orgao/insc_municipal e os 17 campos fiscais já na criação.
   const r = await req.db.prepare(`
     INSERT INTO bol_contratos (nome, contratante, numero_contrato, processo, pregao,
       descricao_servico, escala, empresa_razao, empresa_cnpj, empresa_endereco,
-      empresa_email, empresa_telefone, contrato_ref, orgao, insc_municipal)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      empresa_email, empresa_telefone, contrato_ref, orgao, insc_municipal,
+      item_lista_servico, codigo_tributacao_municipal, codigo_cnae, codigo_nbs,
+      aliquota_iss_padrao, iss_retido_padrao, optante_simples_nacional, incentivo_fiscal,
+      ciclo_dia_inicio, inss_aliquota, inss_base_reduzida, irrf_aliquota,
+      pis_aliquota, cofins_aliquota, csll_aliquota, dados_bancarios, template_discriminacao)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     b.nome, b.contratante, b.numero_contrato, b.processo||'', b.pregao||'',
     b.descricao_servico||'', b.escala||'12x36', b.empresa_razao||'',
     b.empresa_cnpj||'', b.empresa_endereco||'', b.empresa_email||'', b.empresa_telefone||'',
-    b.contrato_ref||'', b.orgao||'', b.insc_municipal||''
+    b.contrato_ref||'', b.orgao||'', b.insc_municipal||'',
+    f.item_lista_servico, f.codigo_tributacao_municipal, f.codigo_cnae, f.codigo_nbs,
+    f.aliquota_iss_padrao, f.iss_retido_padrao, f.optante_simples_nacional, f.incentivo_fiscal,
+    f.ciclo_dia_inicio, f.inss_aliquota, f.inss_base_reduzida, f.irrf_aliquota,
+    f.pis_aliquota, f.cofins_aliquota, f.csll_aliquota, f.dados_bancarios, f.template_discriminacao
   );
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 
 router.put('/contratos/:id', async (req, res) => {
   const b = req.body;
+  const f = _pickFiscal(b);
   // FIX2: inclui contrato_ref, orgao (CNPJ tomador), insc_municipal
+  // F-P0-01: inclui os 17 campos fiscais (item_lista..csll_aliquota, dados_bancarios, template_discriminacao)
   await req.db.prepare(`
     UPDATE bol_contratos SET nome=?, contratante=?, numero_contrato=?, processo=?, pregao=?,
       descricao_servico=?, escala=?, empresa_razao=?, empresa_cnpj=?, empresa_endereco=?,
       empresa_email=?, empresa_telefone=?,
       contrato_ref=?, orgao=?, insc_municipal=?,
+      item_lista_servico=?, codigo_tributacao_municipal=?, codigo_cnae=?, codigo_nbs=?,
+      aliquota_iss_padrao=?, iss_retido_padrao=?, optante_simples_nacional=?, incentivo_fiscal=?,
+      ciclo_dia_inicio=?, inss_aliquota=?, inss_base_reduzida=?, irrf_aliquota=?,
+      pis_aliquota=?, cofins_aliquota=?, csll_aliquota=?, dados_bancarios=?, template_discriminacao=?,
       updated_at=NOW()
     WHERE id=?
   `).run(
@@ -263,6 +307,10 @@ router.put('/contratos/:id', async (req, res) => {
     b.descricao_servico||'', b.escala||'12x36', b.empresa_razao||'',
     b.empresa_cnpj||'', b.empresa_endereco||'', b.empresa_email||'', b.empresa_telefone||'',
     b.contrato_ref||'', b.orgao||'', b.insc_municipal||'',
+    f.item_lista_servico, f.codigo_tributacao_municipal, f.codigo_cnae, f.codigo_nbs,
+    f.aliquota_iss_padrao, f.iss_retido_padrao, f.optante_simples_nacional, f.incentivo_fiscal,
+    f.ciclo_dia_inicio, f.inss_aliquota, f.inss_base_reduzida, f.irrf_aliquota,
+    f.pis_aliquota, f.cofins_aliquota, f.csll_aliquota, f.dados_bancarios, f.template_discriminacao,
     req.params.id
   );
   res.json({ ok: true });

@@ -517,13 +517,30 @@ function _bolTrocarAba(aba) {
   overlay.querySelector('div[style*="border-radius:14px"]').outerHTML = _bolRenderModal();
 }
 
-// Salva valores atuais dos inputs em st.initial pra não perder ao trocar de aba
+// Salva valores atuais de todos os controles em st.initial pra não perder ao trocar de aba.
+// Cobre: input text/number/email/tel, textarea, select, checkbox e radio (via name).
 function _bolSnapshotInputs() {
   const st = window._bolModalState;
   if (!st) return;
-  document.querySelectorAll('[id^="bec-"]').forEach(inp => {
-    const key = inp.id.replace(/^bec-/, '');
-    st.initial[key] = inp.value;
+  // input/textarea/select com id="bec-X"
+  document.querySelectorAll('#modal-contrato-bol [id^="bec-"]').forEach(el => {
+    const id = el.id;
+    if (id.endsWith('-err')) return;
+    const key = id.replace(/^bec-/, '');
+    if (el.type === 'checkbox') {
+      st.initial[key] = !!el.checked;
+    } else {
+      st.initial[key] = el.value;
+    }
+  });
+  // radios usam name="bec-X" (sem id único)
+  const visto = new Set();
+  document.querySelectorAll('#modal-contrato-bol input[type=radio][name^="bec-"]').forEach(r => {
+    const key = r.name.replace(/^bec-/, '');
+    if (visto.has(key)) return;
+    const checked = document.querySelector(`#modal-contrato-bol input[type=radio][name="${r.name}"]:checked`);
+    st.initial[key] = checked ? checked.value : '';
+    visto.add(key);
   });
 }
 
@@ -546,7 +563,7 @@ function _bolFld(label, key, opts = {}) {
 
 function _bolRenderAba(aba) {
   if (aba === 'identif') return _bolAbaIdentificacao();
-  if (aba === 'fiscal')  return _bolAbaStub('Fiscal', 'F-P0-01', 'Aqui virão alíquotas (PIS/COFINS/INSS/IRRF/CSLL/ISS), códigos LC 116 / CNAE / NBS, ciclo de faturamento e base reduzida INSS. Hoje esses campos só são configurados via seed/SQL — esta aba destrava a operadora.');
+  if (aba === 'fiscal')  return _bolAbaFiscal();
   if (aba === 'postos')  return _bolAbaStub('Postos', 'B-P0-03', 'Lista de postos com override de alíquota ISS local, deduções (vale alimentação + materiais) e flag "mostrar colaboradores". Por enquanto, use o detalhamento do contrato (← Voltar).');
   if (aba === 'bancario')return _bolAbaStub('Bancário', 'F-P1-03', 'Banco, agência, conta + template de discriminação com placeholders ({{contratante}}, {{processo}}, …) e preview ao vivo.');
   if (aba === 'hist')    return _bolAbaStub('Histórico', 'F-P1-04', 'Audit log das mudanças fiscais (quem alterou alíquota, quando, valor anterior).');
@@ -596,6 +613,152 @@ function _bolAbaIdentificacao() {
         ${_bolFld('Telefone', 'empresa_telefone')}
       </div>
     </div>`;
+}
+
+// Input numérico com sufixo (% ou R$) — guarda decimal no state.
+// `key` é a coluna do banco. As alíquotas são armazenadas em decimal (0.05 = 5%);
+// na UI mostramos em %, convertendo na hora de salvar.
+function _bolFldPct(label, key, hint) {
+  const st = window._bolModalState;
+  const dec = st.initial[key];
+  const pct = (dec === null || dec === undefined || dec === '') ? '' : (Number(dec) * 100).toFixed(4).replace(/\.?0+$/, '');
+  const hintHtml = hint ? `<span style="font-weight:400;color:#94a3b8"> — ${hint}</span>` : '';
+  return `
+    <div style="margin-bottom:10px">
+      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:3px">${label}${hintHtml}</label>
+      <div style="position:relative">
+        <input id="bec-${key}" type="number" step="0.0001" min="0" max="100" value="${pct}"
+          data-kind="pct"
+          style="width:100%;padding:7px 28px 7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+        <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:11px;color:#94a3b8;font-weight:600;pointer-events:none">%</span>
+      </div>
+      <div id="bec-${key}-err" style="font-size:10px;color:#dc2626;margin-top:2px;min-height:12px"></div>
+    </div>`;
+}
+
+function _bolFldSelect(label, key, opcoes, hint) {
+  const st = window._bolModalState;
+  const val = (st.initial[key] ?? '').toString();
+  const hintHtml = hint ? `<span style="font-weight:400;color:#94a3b8"> — ${hint}</span>` : '';
+  const optsHtml = opcoes.map(o =>
+    `<option value="${o.value}" ${o.value.toString() === val ? 'selected' : ''}>${o.label}</option>`
+  ).join('');
+  return `
+    <div style="margin-bottom:10px">
+      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:3px">${label}${hintHtml}</label>
+      <select id="bec-${key}"
+        style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box;background:#fff">
+        ${optsHtml}
+      </select>
+    </div>`;
+}
+
+function _bolFldRadio(label, key, opcoes, hint) {
+  const st = window._bolModalState;
+  const val = (st.initial[key] ?? '').toString();
+  const hintHtml = hint ? `<div style="font-size:10px;color:#94a3b8;margin-top:2px">${hint}</div>` : '';
+  const inputs = opcoes.map((o, i) => `
+    <label style="display:inline-flex;align-items:center;gap:6px;margin-right:18px;font-size:12px;color:#1e293b;cursor:pointer">
+      <input type="radio" name="bec-${key}" value="${o.value}" ${o.value.toString() === val ? 'checked' : ''}
+        data-key="${key}" data-kind="radio"
+        style="margin:0">
+      ${o.label}
+    </label>`).join('');
+  return `
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:5px">${label}</label>
+      <div>${inputs}</div>
+      ${hintHtml}
+    </div>`;
+}
+
+function _bolFldCheckbox(label, key, hint) {
+  const st = window._bolModalState;
+  const checked = st.initial[key] === true || st.initial[key] === 'true' || st.initial[key] === 1 || st.initial[key] === '1';
+  const hintHtml = hint ? `<div style="font-size:10px;color:#94a3b8;margin-top:2px;margin-left:24px">${hint}</div>` : '';
+  return `
+    <div style="margin-bottom:12px">
+      <label style="display:inline-flex;align-items:center;gap:8px;font-size:12px;color:#1e293b;cursor:pointer">
+        <input type="checkbox" id="bec-${key}" ${checked ? 'checked' : ''} data-kind="checkbox" style="margin:0">
+        <span style="font-weight:700;color:#475569">${label}</span>
+      </label>
+      ${hintHtml}
+    </div>`;
+}
+
+function _bolFldTextarea(label, key, hint, rows = 4) {
+  const st = window._bolModalState;
+  const val = (st.initial[key] ?? '').toString().replace(/</g, '&lt;');
+  const hintHtml = hint ? `<span style="font-weight:400;color:#94a3b8"> — ${hint}</span>` : '';
+  return `
+    <div style="margin-bottom:10px">
+      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:3px">${label}${hintHtml}</label>
+      <textarea id="bec-${key}" rows="${rows}"
+        style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box;font-family:inherit;resize:vertical">${val}</textarea>
+    </div>`;
+}
+
+function _bolAbaFiscal() {
+  // Opções de ciclo: NULL (calendário) + dias 2..28
+  const opCiclo = [{ value: '', label: 'Mês calendário (1 → último dia)' }];
+  for (let d = 2; d <= 28; d++) opCiclo.push({ value: d, label: `Dia ${d} → ${d - 1} do mês seguinte` });
+
+  return `
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#1e40af">
+      ⓘ Estes campos saem diretamente na NFS-e. Em caso de dúvida, conferir com o contador <strong>antes</strong> de emitir.
+    </div>
+
+    <div style="font-size:11px;font-weight:800;color:#1e293b;margin:6px 0 8px;letter-spacing:.3px">CLASSIFICAÇÃO DO SERVIÇO</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+      ${_bolFld('Item LC 116', 'item_lista_servico', { placeholder: '07.17', hint: 'ex: 07.17 (vigilância), 07.10 (limpeza)' })}
+      ${_bolFld('Cód. tributação municipal', 'codigo_tributacao_municipal', { placeholder: '070700', hint: 'vazio = usa item LC 116' })}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+      ${_bolFld('CNAE', 'codigo_cnae', { placeholder: '8111700', hint: 'ex: 8111700 (vigilância)' })}
+      ${_bolFld('NBS', 'codigo_nbs', { placeholder: '118031000' })}
+    </div>
+
+    <div style="font-size:11px;font-weight:800;color:#1e293b;margin:18px 0 8px;letter-spacing:.3px">REGIME TRIBUTÁRIO</div>
+    ${_bolFldRadio('Optante do Simples Nacional?', 'optante_simples_nacional',
+      [{ value: 2, label: 'Não' }, { value: 1, label: 'Sim' }],
+      'Lucro presumido = "Não". Simples Nacional = "Sim".'
+    )}
+    ${_bolFldRadio('Tem incentivo fiscal?', 'incentivo_fiscal',
+      [{ value: 2, label: 'Não' }, { value: 1, label: 'Sim' }]
+    )}
+
+    <div style="font-size:11px;font-weight:800;color:#1e293b;margin:18px 0 8px;letter-spacing:.3px">ALÍQUOTAS FEDERAIS</div>
+    <div style="background:#fafbfc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+      <div style="font-size:10px;color:#64748b;margin-bottom:8px">Calculadas sobre o valor bruto do serviço.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 14px">
+        ${_bolFldPct('PIS', 'pis_aliquota', '0,65% padrão')}
+        ${_bolFldPct('COFINS', 'cofins_aliquota', '3,00% padrão')}
+        ${_bolFldPct('CSLL', 'csll_aliquota', '1,00% padrão')}
+      </div>
+      ${_bolFldPct('IRRF', 'irrf_aliquota', '1,20% padrão')}
+    </div>
+
+    <div style="font-size:11px;font-weight:800;color:#1e293b;margin:18px 0 8px;letter-spacing:.3px">INSS</div>
+    <div style="background:#fafbfc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+      ${_bolFldPct('Alíquota INSS', 'inss_aliquota', '11,00% padrão')}
+      ${_bolFldRadio('Base de cálculo', 'inss_base_reduzida',
+        [{ value: 'false', label: 'Bruto (sobre o valor total)' }, { value: 'true', label: 'Reduzida (deduzir vale alimentação + materiais)' }],
+        'Base reduzida aplica-se a contratos como UFT, onde vale alimentação e materiais são deduzidos do bruto antes do INSS. As deduções vêm de cada posto (próximo PR).'
+      )}
+    </div>
+
+    <div style="font-size:11px;font-weight:800;color:#1e293b;margin:18px 0 8px;letter-spacing:.3px">ISS (MUNICIPAL)</div>
+    <div style="background:#fafbfc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+      ${_bolFldPct('Alíquota ISS padrão', 'aliquota_iss_padrao', 'pode ser sobrescrita por posto (próximo PR)')}
+      ${_bolFldCheckbox('Tomador retém o ISS', 'iss_retido_padrao',
+        'Marque quando o tomador desconta o ISS antes de pagar (ex: UFT, UNITINS). Desmarque para contratos onde a Montana recolhe ISS direto (ex: DETRAN).'
+      )}
+    </div>
+
+    <div style="font-size:11px;font-weight:800;color:#1e293b;margin:18px 0 8px;letter-spacing:.3px">CICLO DE FATURAMENTO</div>
+    ${_bolFldSelect('Início do ciclo', 'ciclo_dia_inicio', opCiclo,
+      'Define o período coberto pelo boletim. Ex: UFT fatura ciclo 5→4; UNITINS fatura 14→13.'
+    )}`;
 }
 
 function _bolAbaStub(nome, backlogId, descricao) {
@@ -680,6 +843,30 @@ async function _bolSalvarContrato() {
     return;
   }
 
+  // Converte % digitado pelo usuário (ex: "5") em decimal (0.05) pra persistir.
+  // String vazia vira null — preserva semântica "não configurado".
+  const pct = key => {
+    const v = get(key);
+    if (v === '' || v === null || v === undefined) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n / 100 : null;
+  };
+  const numOuNull = key => {
+    const v = get(key);
+    if (v === '' || v === null || v === undefined) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const strOuNull = key => {
+    const v = get(key);
+    return (v === '' || v === null || v === undefined) ? null : v;
+  };
+  const boolOuNull = key => {
+    const v = st.initial[key];
+    if (v === '' || v === null || v === undefined) return null;
+    return (v === true || v === 'true' || v === 1 || v === '1');
+  };
+
   const btn = document.getElementById('bol-modal-salvar');
   if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
   const token = localStorage.getItem('montana_jwt') || '';
@@ -699,6 +886,22 @@ async function _bolSalvarContrato() {
     contrato_ref:      get('contrato_ref'),
     orgao:             get('orgao'),
     insc_municipal:    cnpjTomador,
+    // Aba Fiscal (F-P0-01): alíquotas em decimal; flags como bool/num; strings como null se vazias
+    item_lista_servico:          strOuNull('item_lista_servico'),
+    codigo_tributacao_municipal: strOuNull('codigo_tributacao_municipal'),
+    codigo_cnae:                 strOuNull('codigo_cnae'),
+    codigo_nbs:                  strOuNull('codigo_nbs'),
+    aliquota_iss_padrao:         pct('aliquota_iss_padrao'),
+    iss_retido_padrao:           boolOuNull('iss_retido_padrao'),
+    optante_simples_nacional:    numOuNull('optante_simples_nacional'),
+    incentivo_fiscal:            numOuNull('incentivo_fiscal'),
+    ciclo_dia_inicio:            numOuNull('ciclo_dia_inicio'),
+    inss_aliquota:               pct('inss_aliquota'),
+    inss_base_reduzida:          boolOuNull('inss_base_reduzida'),
+    irrf_aliquota:               pct('irrf_aliquota'),
+    pis_aliquota:                pct('pis_aliquota'),
+    cofins_aliquota:             pct('cofins_aliquota'),
+    csll_aliquota:               pct('csll_aliquota'),
   };
   try {
     const url = st.id ? '/api/boletins/contratos/' + st.id : '/api/boletins/contratos';
