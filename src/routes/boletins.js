@@ -232,15 +232,18 @@ router.get('/contratos/:id', async (req, res) => {
 
 router.post('/contratos', async (req, res) => {
   const b = req.body;
+  // Mesmos campos aceitos pelo PUT — permite que o form único Novo/Editar grave
+  // contrato_ref/orgao/insc_municipal já na criação (em vez de criar mínimo e editar).
   const r = await req.db.prepare(`
     INSERT INTO bol_contratos (nome, contratante, numero_contrato, processo, pregao,
       descricao_servico, escala, empresa_razao, empresa_cnpj, empresa_endereco,
-      empresa_email, empresa_telefone)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      empresa_email, empresa_telefone, contrato_ref, orgao, insc_municipal)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     b.nome, b.contratante, b.numero_contrato, b.processo||'', b.pregao||'',
     b.descricao_servico||'', b.escala||'12x36', b.empresa_razao||'',
-    b.empresa_cnpj||'', b.empresa_endereco||'', b.empresa_email||'', b.empresa_telefone||''
+    b.empresa_cnpj||'', b.empresa_endereco||'', b.empresa_email||'', b.empresa_telefone||'',
+    b.contrato_ref||'', b.orgao||'', b.insc_municipal||''
   );
   res.json({ ok: true, id: r.lastInsertRowid });
 });

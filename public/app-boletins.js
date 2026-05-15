@@ -377,36 +377,48 @@ async function bolExecutarGeracao(contratoId) {
   btn.textContent = '📄 Gerar Boletins (PDFs)';
 }
 
-// ─── CRUD HELPERS (MODAIS SIMPLES VIA PROMPT) ─────────────────
+// ─── CRUD HELPERS — Modal unificado Novo/Editar com abas ──────
+//
+// REVIEW_PAINEL_FATURAMENTO.md · C-P0-01/02/03 (2026-05-15):
+//   • bolNovoContrato e bolEditarContrato agora delegam a bolAbrirModalContrato,
+//     que renderiza o mesmo modal em 5 abas (Identif./Fiscal/Postos/Bancário/Hist).
+//   • Sai dos 11 prompt() nativos; entrada em form único com validação inline.
+//   • Fiscal/Bancário/Postos/Hist são stubs nesta fase — preenchidos pelos
+//     próximos PRs (F-P0-01, B-P0-03, F-P1-03, F-P1-04).
+
+// CNPJ checksum (mod 11) — usado pra validação inline
+function _bolValidaCnpj(raw) {
+  const c = (raw || '').replace(/\D/g, '');
+  if (c.length !== 14) return false;
+  if (/^(\d)\1{13}$/.test(c)) return false;
+  const calcDv = (base, pesos) => {
+    let s = 0;
+    for (let i = 0; i < base.length; i++) s += Number(base[i]) * pesos[i];
+    const r = s % 11;
+    return r < 2 ? 0 : 11 - r;
+  };
+  const p1 = [5,4,3,2,9,8,7,6,5,4,3,2];
+  const p2 = [6,5,4,3,2,9,8,7,6,5,4,3,2];
+  const dv1 = calcDv(c.slice(0,12), p1);
+  const dv2 = calcDv(c.slice(0,12) + dv1, p2);
+  return Number(c[12]) === dv1 && Number(c[13]) === dv2;
+}
+
+function _bolMascaraCnpj(raw) {
+  const c = (raw || '').replace(/\D/g, '').slice(0, 14);
+  if (c.length <= 2)  return c;
+  if (c.length <= 5)  return `${c.slice(0,2)}.${c.slice(2)}`;
+  if (c.length <= 8)  return `${c.slice(0,2)}.${c.slice(2,5)}.${c.slice(5)}`;
+  if (c.length <= 12) return `${c.slice(0,2)}.${c.slice(2,5)}.${c.slice(5,8)}/${c.slice(8)}`;
+  return `${c.slice(0,2)}.${c.slice(2,5)}.${c.slice(5,8)}/${c.slice(8,12)}-${c.slice(12)}`;
+}
 
 async function bolNovoContrato() {
-  const nome = prompt('Nome do contrato (ex: UFT, UNITINS):');
-  if (!nome) return;
-  const contratante = prompt('Nome do contratante:');
-  if (!contratante) return;
-  const numero = prompt('Número do contrato:');
-  if (!numero) return;
+  await bolAbrirModalContrato(null);
+}
 
-  const token = localStorage.getItem('montana_jwt') || '';
-  await fetch('/api/boletins/contratos', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
-    body: JSON.stringify({
-      nome, contratante, numero_contrato: numero,
-      processo: prompt('Processo:') || '',
-      pregao: prompt('Pregão:') || '',
-      descricao_servico: prompt('Descrição do serviço:') || '',
-      escala: prompt('Escala (ex: 12x36):') || '12x36',
-      empresa_razao: prompt('Razão social da empresa:') || '',
-      empresa_cnpj: prompt('CNPJ da empresa:') || '',
-      empresa_endereco: prompt('Endereço:') || '',
-      empresa_email: prompt('E-mail:') || '',
-      empresa_telefone: prompt('Telefone:') || ''
-    })
-  });
-  toast('Contrato criado!');
-  await loadBolContratos();
-  renderBolLista();
+function bolEditarContrato(id) {
+  return bolAbrirModalContrato(id);
 }
 
 async function bolDeletarContrato(id) {
@@ -421,100 +433,292 @@ async function bolDeletarContrato(id) {
   renderBolLista();
 }
 
-function bolEditarContrato(id) {
-  const c = _bolContratoSelecionado;
-  if (!c) return;
-  document.getElementById('modal-editar-contrato-bol')?.remove();
+// Estado do modal — mantido em window pra HTML inline acessar
+window._bolModalState = null;
+
+async function bolAbrirModalContrato(id) {
+  // id=null → criação; id=número → edição. Se for edição e ainda não temos o
+  // contrato em memória, busca pelo endpoint /:id pra trazer também postos.
+  let c = { id: null };
+  if (id) {
+    if (_bolContratoSelecionado && _bolContratoSelecionado.id === id) {
+      c = _bolContratoSelecionado;
+    } else {
+      try {
+        c = await api('/boletins/contratos/' + id);
+      } catch (err) {
+        toast('Erro ao carregar contrato: ' + err.message, 'error');
+        return;
+      }
+    }
+  }
+  window._bolModalState = {
+    id: c.id || null,
+    abaAtiva: 'identif',
+    // snapshot inicial — só leitura, usado pra montar os inputs
+    initial: { ...c },
+  };
+
+  document.getElementById('modal-contrato-bol')?.remove();
   const overlay = document.createElement('div');
-  overlay.id = 'modal-editar-contrato-bol';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;overflow-y:auto;padding:20px';
-
-  const fld = (lbl, key, hint) => `
-    <div style="margin-bottom:10px">
-      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:3px">${lbl}${hint?`<span style="font-weight:400;color:#94a3b8"> — ${hint}</span>`:''}</label>
-      <input id="bec-${key}" value="${(c[key]||'').replace(/"/g,'&quot;')}"
-        style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
-    </div>`;
-
-  overlay.innerHTML = `
-    <div style="background:#fff;border-radius:14px;padding:28px;width:560px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.35)">
-      <h3 style="margin:0 0 18px;font-size:16px;font-weight:800;color:#1e293b">✏️ Editar Contrato de Boletim</h3>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
-        ${fld('Nome','nome')}
-        ${fld('Nº Contrato','numero_contrato')}
-      </div>
-      ${fld('Contratante (Razão Social do Órgão)','contratante')}
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
-        ${fld('Processo','processo')}
-        ${fld('Pregão','pregao')}
-      </div>
-      ${fld('Descrição do Serviço','descricao_servico')}
-      ${fld('Escala','escala')}
-
-      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;margin:12px 0">
-        <div style="font-size:11px;font-weight:800;color:#1d4ed8;margin-bottom:8px">🔗 Vinculação Financeira (necessário para emissão NFS-e)</div>
-        ${fld('Referência do Contrato Financeiro','contrato_ref','numContrato exato da tabela contratos — ex: UFT 16/2025')}
-        ${fld('CNPJ do Tomador','insc_municipal','CNPJ do órgão contratante — 18 caracteres c/ máscara')}
-        ${fld('Orgão/Campo auxiliar','orgao','deixe vazio — preenchido automaticamente se contrato_ref estiver correto')}
-      </div>
-
-      <div style="background:#f8fafc;border-radius:8px;padding:12px;margin:12px 0">
-        <div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:8px">Dados da Empresa Emitente</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
-          ${fld('Razão Social','empresa_razao')}
-          ${fld('CNPJ','empresa_cnpj')}
-        </div>
-        ${fld('Endereço','empresa_endereco')}
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
-          ${fld('E-mail','empresa_email')}
-          ${fld('Telefone','empresa_telefone')}
-        </div>
-      </div>
-
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
-        <button onclick="document.getElementById('modal-editar-contrato-bol').remove()"
-          style="padding:8px 18px;background:#f1f5f9;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600">Cancelar</button>
-        <button id="bec-salvar-btn" onclick="_bolSalvarContrato(${id})"
-          style="padding:8px 18px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">💾 Salvar</button>
-      </div>
-    </div>`;
+  overlay.id = 'modal-contrato-bol';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:30px 20px';
+  overlay.innerHTML = _bolRenderModal();
   document.body.appendChild(overlay);
 }
 
-async function _bolSalvarContrato(id) {
-  const btn = document.getElementById('bec-salvar-btn');
+function _bolTabBtn(key, label, ativa) {
+  const bg = ativa ? '#2563eb' : '#f1f5f9';
+  const cor = ativa ? '#fff' : '#475569';
+  return `<button data-aba="${key}" onclick="_bolTrocarAba('${key}')"
+    style="padding:8px 14px;background:${bg};color:${cor};border:none;border-radius:7px 7px 0 0;font-size:12px;font-weight:700;cursor:pointer;border-bottom:2px solid ${ativa?'#1d4ed8':'transparent'}">
+    ${label}</button>`;
+}
+
+function _bolRenderModal() {
+  const st = window._bolModalState;
+  const novo = !st.id;
+  const titulo = novo ? '➕ Novo Contrato' : `✏️ Editar Contrato — ${st.initial.nome || '?'}`;
+  return `
+    <div style="background:#fff;border-radius:14px;width:640px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden">
+      <div style="padding:18px 24px 0 24px">
+        <h3 style="margin:0 0 14px;font-size:16px;font-weight:800;color:#1e293b">${titulo}</h3>
+        <div style="display:flex;gap:4px;border-bottom:1px solid #e2e8f0">
+          ${_bolTabBtn('identif',  'Identificação', st.abaAtiva==='identif')}
+          ${_bolTabBtn('fiscal',   'Fiscal',        st.abaAtiva==='fiscal')}
+          ${_bolTabBtn('postos',   'Postos',        st.abaAtiva==='postos')}
+          ${_bolTabBtn('bancario', 'Bancário',      st.abaAtiva==='bancario')}
+          ${_bolTabBtn('hist',     'Histórico',     st.abaAtiva==='hist')}
+        </div>
+      </div>
+
+      <div id="bol-modal-conteudo" style="padding:18px 24px 6px 24px;max-height:60vh;overflow-y:auto">
+        ${_bolRenderAba(st.abaAtiva)}
+      </div>
+
+      <div style="padding:14px 24px;background:#f8fafc;border-top:1px solid #e2e8f0;display:flex;gap:8px;justify-content:flex-end">
+        <button onclick="document.getElementById('modal-contrato-bol').remove()"
+          style="padding:8px 18px;background:#fff;border:1px solid #cbd5e1;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600;color:#475569">Cancelar</button>
+        <button id="bol-modal-salvar" onclick="_bolSalvarContrato()"
+          style="padding:8px 22px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">💾 Salvar</button>
+      </div>
+    </div>`;
+}
+
+function _bolTrocarAba(aba) {
+  const st = window._bolModalState;
+  if (!st) return;
+  // preserva o que o usuário já digitou na aba atual antes de re-renderizar
+  _bolSnapshotInputs();
+  st.abaAtiva = aba;
+  // re-renderiza só o conteúdo + barra de abas (mais barato que remontar overlay)
+  const overlay = document.getElementById('modal-contrato-bol');
+  if (!overlay) return;
+  overlay.querySelector('div[style*="border-radius:14px"]').outerHTML = _bolRenderModal();
+}
+
+// Salva valores atuais dos inputs em st.initial pra não perder ao trocar de aba
+function _bolSnapshotInputs() {
+  const st = window._bolModalState;
+  if (!st) return;
+  document.querySelectorAll('[id^="bec-"]').forEach(inp => {
+    const key = inp.id.replace(/^bec-/, '');
+    st.initial[key] = inp.value;
+  });
+}
+
+function _bolFld(label, key, opts = {}) {
+  const st = window._bolModalState;
+  const val = (st.initial[key] ?? '').toString().replace(/"/g, '&quot;');
+  const obrig = opts.required ? '<span style="color:#dc2626">*</span>' : '';
+  const hint = opts.hint ? `<span style="font-weight:400;color:#94a3b8"> — ${opts.hint}</span>` : '';
+  const oninput = opts.oninput ? `oninput="${opts.oninput}"` : '';
+  const placeholder = opts.placeholder ? `placeholder="${opts.placeholder}"` : '';
+  const tipo = opts.type || 'text';
+  return `
+    <div style="margin-bottom:10px">
+      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:3px">${label}${obrig}${hint}</label>
+      <input id="bec-${key}" type="${tipo}" value="${val}" ${oninput} ${placeholder}
+        style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+      <div id="bec-${key}-err" style="font-size:10px;color:#dc2626;margin-top:2px;min-height:12px"></div>
+    </div>`;
+}
+
+function _bolRenderAba(aba) {
+  if (aba === 'identif') return _bolAbaIdentificacao();
+  if (aba === 'fiscal')  return _bolAbaStub('Fiscal', 'F-P0-01', 'Aqui virão alíquotas (PIS/COFINS/INSS/IRRF/CSLL/ISS), códigos LC 116 / CNAE / NBS, ciclo de faturamento e base reduzida INSS. Hoje esses campos só são configurados via seed/SQL — esta aba destrava a operadora.');
+  if (aba === 'postos')  return _bolAbaStub('Postos', 'B-P0-03', 'Lista de postos com override de alíquota ISS local, deduções (vale alimentação + materiais) e flag "mostrar colaboradores". Por enquanto, use o detalhamento do contrato (← Voltar).');
+  if (aba === 'bancario')return _bolAbaStub('Bancário', 'F-P1-03', 'Banco, agência, conta + template de discriminação com placeholders ({{contratante}}, {{processo}}, …) e preview ao vivo.');
+  if (aba === 'hist')    return _bolAbaStub('Histórico', 'F-P1-04', 'Audit log das mudanças fiscais (quem alterou alíquota, quando, valor anterior).');
+  return '';
+}
+
+function _bolAbaIdentificacao() {
+  return `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+      ${_bolFld('Nome', 'nome', { required: true, placeholder: 'UFT, UNITINS, DETRAN' })}
+      ${_bolFld('Nº Contrato', 'numero_contrato', { required: true })}
+    </div>
+    ${_bolFld('Contratante (Razão Social do Órgão)', 'contratante', { required: true })}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+      ${_bolFld('Processo', 'processo')}
+      ${_bolFld('Pregão', 'pregao')}
+    </div>
+    ${_bolFld('Descrição do Serviço', 'descricao_servico')}
+    ${_bolFld('Escala', 'escala', { placeholder: '12x36, Mensal, 8x5' })}
+
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;margin:12px 0">
+      <div style="font-size:11px;font-weight:800;color:#1d4ed8;margin-bottom:8px">🔗 Vinculação NFS-e</div>
+      ${_bolFld('Referência do contrato financeiro', 'contrato_ref', {
+        hint: 'igual ao numContrato da tabela contratos — ex: UFT 16/2025'
+      })}
+      ${_bolFld('Razão social do tomador', 'orgao', {
+        hint: 'sai na NFS-e como nome do tomador'
+      })}
+      ${_bolFld('CNPJ do tomador', 'insc_municipal', {
+        hint: '14 dígitos — ex: 00.000.000/0000-00',
+        oninput: '_bolValidarCnpjTomador(this)'
+      })}
+    </div>
+
+    <div style="background:#f8fafc;border-radius:8px;padding:12px;margin:12px 0">
+      <div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:8px">Dados da empresa emitente</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+        ${_bolFld('Razão social', 'empresa_razao')}
+        ${_bolFld('CNPJ', 'empresa_cnpj', {
+          hint: '14 dígitos',
+          oninput: '_bolValidarCnpjEmitente(this)'
+        })}
+      </div>
+      ${_bolFld('Endereço', 'empresa_endereco')}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+        ${_bolFld('E-mail', 'empresa_email', { type: 'email' })}
+        ${_bolFld('Telefone', 'empresa_telefone')}
+      </div>
+    </div>`;
+}
+
+function _bolAbaStub(nome, backlogId, descricao) {
+  return `
+    <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:24px;text-align:center">
+      <div style="font-size:32px;margin-bottom:8px">🚧</div>
+      <div style="font-size:14px;font-weight:800;color:#92400e;margin-bottom:6px">Aba "${nome}" em construção</div>
+      <div style="font-size:12px;color:#78350f;max-width:420px;margin:0 auto 8px">${descricao}</div>
+      <div style="font-size:10px;color:#a16207;font-weight:600">Backlog: ${backlogId} — ver REVIEW_PAINEL_FATURAMENTO.md</div>
+    </div>`;
+}
+
+// Validação inline do CNPJ — escreve "✓ válido" ou erro no <div id="bec-X-err">
+function _bolValidarCnpjGenerico(inp, label) {
+  const errEl = document.getElementById(inp.id + '-err');
+  // Aplica máscara — mantém o cursor após o último dígito que o usuário digitou
+  // (atalho simples: leva pro fim do texto mascarado). É raro alguém editar
+  // CNPJ no meio; UX adequada pra entrada normal.
+  const semMascara = inp.value.replace(/\D/g, '');
+  inp.value = _bolMascaraCnpj(inp.value);
+  try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (_) {}
+  if (!errEl) return;
+  if (!semMascara) { errEl.textContent = ''; return; }
+  if (semMascara.length < 14) {
+    errEl.textContent = `${label} incompleto (${semMascara.length}/14)`;
+    errEl.style.color = '#dc2626';
+    return;
+  }
+  if (_bolValidaCnpj(semMascara)) {
+    errEl.textContent = '✓ válido';
+    errEl.style.color = '#059669';
+  } else {
+    errEl.textContent = `${label} inválido (dígito verificador errado)`;
+    errEl.style.color = '#dc2626';
+  }
+}
+function _bolValidarCnpjTomador(inp)  { _bolValidarCnpjGenerico(inp, 'CNPJ do tomador'); }
+function _bolValidarCnpjEmitente(inp) { _bolValidarCnpjGenerico(inp, 'CNPJ da emitente'); }
+
+async function _bolSalvarContrato() {
+  _bolSnapshotInputs();
+  const st = window._bolModalState;
+  if (!st) return;
+  const get = key => (st.initial[key] ?? '').toString();
+
+  // Validação de obrigatórios (apenas aba Identificação no momento)
+  const obrigatorios = [
+    ['nome', 'Nome'],
+    ['numero_contrato', 'Nº Contrato'],
+    ['contratante', 'Contratante'],
+  ];
+  const faltando = obrigatorios.filter(([k]) => !get(k).trim()).map(([, l]) => l);
+  if (faltando.length) {
+    // Se algum obrigatório falta, força aba Identificação e marca erros
+    if (st.abaAtiva !== 'identif') {
+      st.abaAtiva = 'identif';
+      const overlay = document.getElementById('modal-contrato-bol');
+      if (overlay) overlay.querySelector('div[style*="border-radius:14px"]').outerHTML = _bolRenderModal();
+    }
+    setTimeout(() => {
+      for (const [k] of obrigatorios) {
+        const errEl = document.getElementById('bec-' + k + '-err');
+        if (errEl && !get(k).trim()) {
+          errEl.textContent = 'obrigatório';
+          errEl.style.color = '#dc2626';
+        }
+      }
+    }, 30);
+    toast('Preencha: ' + faltando.join(', '), 'error');
+    return;
+  }
+
+  // CNPJs — se preenchidos, têm que ser válidos (string vazia é aceita)
+  const cnpjTomador = get('insc_municipal').replace(/\D/g, '');
+  if (cnpjTomador && !_bolValidaCnpj(cnpjTomador)) {
+    toast('CNPJ do tomador inválido', 'error');
+    return;
+  }
+  const cnpjEmitente = get('empresa_cnpj').replace(/\D/g, '');
+  if (cnpjEmitente && !_bolValidaCnpj(cnpjEmitente)) {
+    toast('CNPJ da empresa emitente inválido', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('bol-modal-salvar');
   if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
-  const get = key => document.getElementById('bec-'+key)?.value || '';
   const token = localStorage.getItem('montana_jwt') || '';
+  const body = {
+    nome:              get('nome'),
+    contratante:       get('contratante'),
+    numero_contrato:   get('numero_contrato'),
+    processo:          get('processo'),
+    pregao:            get('pregao'),
+    descricao_servico: get('descricao_servico'),
+    escala:            get('escala') || '12x36',
+    empresa_razao:     get('empresa_razao'),
+    empresa_cnpj:      cnpjEmitente,
+    empresa_endereco:  get('empresa_endereco'),
+    empresa_email:     get('empresa_email'),
+    empresa_telefone:  get('empresa_telefone'),
+    contrato_ref:      get('contrato_ref'),
+    orgao:             get('orgao'),
+    insc_municipal:    cnpjTomador,
+  };
   try {
-    const r = await fetch('/api/boletins/contratos/' + id, {
-      method: 'PUT',
+    const url = st.id ? '/api/boletins/contratos/' + st.id : '/api/boletins/contratos';
+    const method = st.id ? 'PUT' : 'POST';
+    const r = await fetch(url, {
+      method,
       headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({
-        nome:              get('nome'),
-        contratante:       get('contratante'),
-        numero_contrato:   get('numero_contrato'),
-        processo:          get('processo'),
-        pregao:            get('pregao'),
-        descricao_servico: get('descricao_servico'),
-        escala:            get('escala') || '12x36',
-        empresa_razao:     get('empresa_razao'),
-        empresa_cnpj:      get('empresa_cnpj'),
-        empresa_endereco:  get('empresa_endereco'),
-        empresa_email:     get('empresa_email'),
-        empresa_telefone:  get('empresa_telefone'),
-        // FIX2: campos de vinculação financeira
-        contrato_ref:      get('contrato_ref'),
-        orgao:             get('orgao'),
-        insc_municipal:    get('insc_municipal'),
-      })
+      body: JSON.stringify(body),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Erro ao salvar');
-    document.getElementById('modal-editar-contrato-bol')?.remove();
-    toast('✅ Contrato atualizado!', 'success');
-    bolAbrirContrato(id);
+    document.getElementById('modal-contrato-bol')?.remove();
+    toast(st.id ? '✅ Contrato atualizado!' : '✅ Contrato criado!', 'success');
+    await loadBolContratos();
+    if (st.id) {
+      // se estava editando, recarrega o detalhe; senão volta pra listagem
+      bolAbrirContrato(st.id);
+    } else {
+      renderBolLista();
+    }
   } catch (err) {
     toast('Erro: ' + err.message, 'error');
     if (btn) { btn.disabled = false; btn.textContent = '💾 Salvar'; }
