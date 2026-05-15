@@ -453,10 +453,33 @@ async function bolAbrirModalContrato(id) {
     }
   }
   window._bolModalState = {
+    tipo: 'contrato',
     id: c.id || null,
     abaAtiva: 'identif',
-    // snapshot inicial — só leitura, usado pra montar os inputs
     initial: { ...c },
+  };
+
+  document.getElementById('modal-contrato-bol')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'modal-contrato-bol';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:30px 20px';
+  overlay.innerHTML = _bolRenderModal();
+  document.body.appendChild(overlay);
+}
+
+// Modal único de POSTO — usado por bolNovoPosto e bolEditarPosto.
+// Reusa o sistema de abas/state/_bolFld já criado pra contrato.
+async function bolAbrirModalPosto(contratoId, postoId) {
+  let posto = { id: null };
+  if (postoId) {
+    posto = (_bolContratoSelecionado?.postos || []).find(p => p.id === postoId) || { id: null };
+  }
+  window._bolModalState = {
+    tipo: 'posto',
+    id: posto.id || null,
+    contratoId,
+    abaAtiva: 'identif',
+    initial: { ...posto },
   };
 
   document.getElementById('modal-contrato-bol')?.remove();
@@ -478,17 +501,21 @@ function _bolTabBtn(key, label, ativa) {
 function _bolRenderModal() {
   const st = window._bolModalState;
   const novo = !st.id;
-  const titulo = novo ? '➕ Novo Contrato' : `✏️ Editar Contrato — ${st.initial.nome || '?'}`;
+  const isPosto = st.tipo === 'posto';
+  const titulo = isPosto
+    ? (novo ? '➕ Novo Posto' : `✏️ Editar Posto — ${st.initial.campus_nome || st.initial.campus_key || '?'}`)
+    : (novo ? '➕ Novo Contrato' : `✏️ Editar Contrato — ${st.initial.nome || '?'}`);
+  const abas = isPosto
+    ? [['identif', 'Identificação'], ['fiscal', 'Fiscal']]
+    : [['identif', 'Identificação'], ['fiscal', 'Fiscal'], ['postos', 'Postos'], ['bancario', 'Bancário'], ['hist', 'Histórico']];
+  const onSalvar = isPosto ? '_bolSalvarPosto()' : '_bolSalvarContrato()';
+
   return `
     <div style="background:#fff;border-radius:14px;width:640px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden">
       <div style="padding:18px 24px 0 24px">
         <h3 style="margin:0 0 14px;font-size:16px;font-weight:800;color:#1e293b">${titulo}</h3>
         <div style="display:flex;gap:4px;border-bottom:1px solid #e2e8f0">
-          ${_bolTabBtn('identif',  'Identificação', st.abaAtiva==='identif')}
-          ${_bolTabBtn('fiscal',   'Fiscal',        st.abaAtiva==='fiscal')}
-          ${_bolTabBtn('postos',   'Postos',        st.abaAtiva==='postos')}
-          ${_bolTabBtn('bancario', 'Bancário',      st.abaAtiva==='bancario')}
-          ${_bolTabBtn('hist',     'Histórico',     st.abaAtiva==='hist')}
+          ${abas.map(([k, l]) => _bolTabBtn(k, l, st.abaAtiva === k)).join('')}
         </div>
       </div>
 
@@ -499,7 +526,7 @@ function _bolRenderModal() {
       <div style="padding:14px 24px;background:#f8fafc;border-top:1px solid #e2e8f0;display:flex;gap:8px;justify-content:flex-end">
         <button onclick="document.getElementById('modal-contrato-bol').remove()"
           style="padding:8px 18px;background:#fff;border:1px solid #cbd5e1;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600;color:#475569">Cancelar</button>
-        <button id="bol-modal-salvar" onclick="_bolSalvarContrato()"
+        <button id="bol-modal-salvar" onclick="${onSalvar}"
           style="padding:8px 22px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">💾 Salvar</button>
       </div>
     </div>`;
@@ -562,12 +589,164 @@ function _bolFld(label, key, opts = {}) {
 }
 
 function _bolRenderAba(aba) {
+  const st = window._bolModalState;
+  const isPosto = st?.tipo === 'posto';
+  if (isPosto) {
+    if (aba === 'identif') return _bolPostoAbaIdentificacao();
+    if (aba === 'fiscal')  return _bolPostoAbaFiscal();
+    return '';
+  }
   if (aba === 'identif') return _bolAbaIdentificacao();
   if (aba === 'fiscal')  return _bolAbaFiscal();
-  if (aba === 'postos')  return _bolAbaStub('Postos', 'B-P0-03', 'Lista de postos com override de alíquota ISS local, deduções (vale alimentação + materiais) e flag "mostrar colaboradores". Por enquanto, use o detalhamento do contrato (← Voltar).');
+  if (aba === 'postos')  return _bolAbaStub('Postos', 'F-P0-02', 'Listagem de postos do contrato com override de alíquota ISS local e herança visível. Por enquanto, use o detalhamento do contrato (← Voltar).');
   if (aba === 'bancario')return _bolAbaStub('Bancário', 'F-P1-03', 'Banco, agência, conta + template de discriminação com placeholders ({{contratante}}, {{processo}}, …) e preview ao vivo.');
   if (aba === 'hist')    return _bolAbaStub('Histórico', 'F-P1-04', 'Audit log das mudanças fiscais (quem alterou alíquota, quando, valor anterior).');
   return '';
+}
+
+// ─── Modal de POSTO — abas e save ─────────────────────────────
+
+function _bolPostoAbaIdentificacao() {
+  return `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+      ${_bolFld('Chave do campus', 'campus_key', { required: true, placeholder: 'PALMAS', hint: 'identificador curto, sem espaços' })}
+      ${_bolFld('Município', 'municipio', { placeholder: 'PALMAS/TO' })}
+    </div>
+    ${_bolFld('Nome completo do campus', 'campus_nome', { required: true, placeholder: 'Campus Palmas' })}
+    ${_bolFld('Descrição do posto', 'descricao_posto', { hint: 'aparece no detalhe' })}
+    ${_bolFld('Label no resumo', 'label_resumo', { hint: 'texto curto pra tabela; vazio = usa chave' })}
+    ${_bolFld('Código IBGE do município', 'codigo_municipio_ibge', {
+      placeholder: '1721000',
+      hint: 'necessário pro WebISS — ex: 1721000 = Palmas/TO'
+    })}
+    ${_bolFldCheckbox('Mostrar nomes dos colaboradores na NF-e', 'mostrar_colaboradores',
+      'Desmarque pra contratos com sigilo (ex: vigilância armada onde o tomador exige confidencialidade).'
+    )}`;
+}
+
+function _bolPostoAbaFiscal() {
+  return `
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#1e40af">
+      ⓘ Estes campos <strong>sobrescrevem</strong> a configuração fiscal do contrato apenas para este posto. Deixe em branco pra herdar do contrato.
+    </div>
+
+    <div style="font-size:11px;font-weight:800;color:#1e293b;margin:6px 0 8px;letter-spacing:.3px">OVERRIDE DE ISS</div>
+    <div style="background:#fafbfc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+      ${_bolFldPct('Alíquota ISS local', 'aliquota_iss_local',
+        'vazio = usa alíquota padrão do contrato. Ex: Porto Nacional cobra 4% mesmo quando o contrato padrão é 5%.'
+      )}
+    </div>
+
+    <div style="font-size:11px;font-weight:800;color:#1e293b;margin:18px 0 8px;letter-spacing:.3px">DEDUÇÕES DA BASE INSS</div>
+    <div style="background:#fafbfc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+      <div style="font-size:10px;color:#64748b;margin-bottom:8px">
+        Usado apenas quando o contrato está marcado como "Base reduzida (UFT)".
+        Estes valores são deduzidos do bruto antes do cálculo do INSS.
+      </div>
+      ${_bolFldMoeda('Vale alimentação (R$/mês)', 'deducao_vale_alimentacao', 'soma do vale alimentação dos colaboradores deste posto')}
+      ${_bolFldMoeda('Materiais (R$/mês)', 'deducao_materiais', 'soma de materiais consumíveis cobrados ao tomador')}
+    </div>`;
+}
+
+function _bolFldMoeda(label, key, hint) {
+  const st = window._bolModalState;
+  const v = st.initial[key];
+  const val = (v === null || v === undefined || v === '') ? '' : Number(v).toFixed(2);
+  const hintHtml = hint ? `<span style="font-weight:400;color:#94a3b8"> — ${hint}</span>` : '';
+  return `
+    <div style="margin-bottom:10px">
+      <label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:3px">${label}${hintHtml}</label>
+      <div style="position:relative">
+        <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:11px;color:#94a3b8;font-weight:600;pointer-events:none">R$</span>
+        <input id="bec-${key}" type="number" step="0.01" min="0" value="${val}"
+          data-kind="moeda"
+          style="width:100%;padding:7px 10px 7px 32px;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;box-sizing:border-box">
+      </div>
+    </div>`;
+}
+
+async function _bolSalvarPosto() {
+  _bolSnapshotInputs();
+  const st = window._bolModalState;
+  if (!st || st.tipo !== 'posto') return;
+  const get = key => (st.initial[key] ?? '').toString();
+
+  const obrigatorios = [
+    ['campus_key', 'Chave'],
+    ['campus_nome', 'Nome do campus'],
+  ];
+  const faltando = obrigatorios.filter(([k]) => !get(k).trim()).map(([, l]) => l);
+  if (faltando.length) {
+    if (st.abaAtiva !== 'identif') {
+      st.abaAtiva = 'identif';
+      const overlay = document.getElementById('modal-contrato-bol');
+      if (overlay) overlay.querySelector('div[style*="border-radius:14px"]').outerHTML = _bolRenderModal();
+    }
+    setTimeout(() => {
+      for (const [k] of obrigatorios) {
+        const errEl = document.getElementById('bec-' + k + '-err');
+        if (errEl && !get(k).trim()) {
+          errEl.textContent = 'obrigatório';
+          errEl.style.color = '#dc2626';
+        }
+      }
+    }, 30);
+    toast('Preencha: ' + faltando.join(', '), 'error');
+    return;
+  }
+
+  const pct = key => {
+    const v = get(key);
+    if (v === '' || v === null || v === undefined) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n / 100 : null;
+  };
+  const numOuNull = key => {
+    const v = get(key);
+    if (v === '' || v === null || v === undefined) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const boolOuFalse = key => {
+    const v = st.initial[key];
+    return (v === true || v === 'true' || v === 1 || v === '1');
+  };
+
+  const btn = document.getElementById('bol-modal-salvar');
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+  const token = localStorage.getItem('montana_jwt') || '';
+  const body = {
+    campus_key:        get('campus_key'),
+    campus_nome:       get('campus_nome'),
+    municipio:         get('municipio'),
+    descricao_posto:   get('descricao_posto'),
+    label_resumo:      get('label_resumo') || get('campus_key'),
+    codigo_municipio_ibge:    get('codigo_municipio_ibge') || null,
+    aliquota_iss_local:       pct('aliquota_iss_local'),
+    deducao_vale_alimentacao: numOuNull('deducao_vale_alimentacao'),
+    deducao_materiais:        numOuNull('deducao_materiais'),
+    mostrar_colaboradores:    boolOuFalse('mostrar_colaboradores'),
+  };
+  try {
+    const url = st.id
+      ? '/api/boletins/postos/' + st.id
+      : '/api/boletins/contratos/' + st.contratoId + '/postos';
+    const method = st.id ? 'PUT' : 'POST';
+    if (st.id) body.ordem = st.initial.ordem;
+    const r = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Erro ao salvar');
+    document.getElementById('modal-contrato-bol')?.remove();
+    toast(st.id ? '✅ Posto atualizado!' : '✅ Posto criado!', 'success');
+    bolAbrirContrato(st.contratoId);
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Salvar'; }
+  }
 }
 
 function _bolAbaIdentificacao() {
@@ -929,44 +1108,11 @@ async function _bolSalvarContrato() {
 }
 
 async function bolNovoPosto(contratoId) {
-  const campus_key = prompt('Chave do campus (ex: PALMAS):');
-  if (!campus_key) return;
-  const campus_nome = prompt('Nome completo do campus:');
-  if (!campus_nome) return;
-  const municipio = prompt('Município (ex: PALMAS/TO):') || '';
-  const descricao_posto = prompt('Descrição do posto:') || '';
-  const label_resumo = prompt('Label no resumo:', campus_key) || campus_key;
-
-  const token = localStorage.getItem('montana_jwt') || '';
-  await fetch('/api/boletins/contratos/' + contratoId + '/postos', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
-    body: JSON.stringify({ campus_key, campus_nome, municipio, descricao_posto, label_resumo })
-  });
-  toast('Posto criado!');
-  bolAbrirContrato(contratoId);
+  await bolAbrirModalPosto(contratoId, null);
 }
 
 async function bolEditarPosto(postoId, contratoId) {
-  const posto = (_bolContratoSelecionado?.postos || []).find(p => p.id === postoId);
-  if (!posto) return;
-  const campus_key = prompt('Chave:', posto.campus_key);
-  if (campus_key === null) return;
-  const token = localStorage.getItem('montana_jwt') || '';
-  await fetch('/api/boletins/postos/' + postoId, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
-    body: JSON.stringify({
-      campus_key,
-      campus_nome: prompt('Nome:', posto.campus_nome) || posto.campus_nome,
-      municipio: prompt('Município:', posto.municipio) || '',
-      descricao_posto: prompt('Descrição:', posto.descricao_posto) || '',
-      label_resumo: prompt('Label resumo:', posto.label_resumo) || '',
-      ordem: posto.ordem
-    })
-  });
-  toast('Posto atualizado!');
-  bolAbrirContrato(contratoId);
+  await bolAbrirModalPosto(contratoId, postoId);
 }
 
 async function bolDeletarPosto(postoId, contratoId) {
@@ -1793,17 +1939,66 @@ async function renderPainelFaturamento() {
     </div>
   </div>` : ''}
 
+  <!-- Glossário: dois modelos de boletim coexistem (B-P0-01) -->
+  <details style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:0;margin-bottom:14px">
+    <summary style="cursor:pointer;padding:10px 14px;font-size:12px;font-weight:700;color:#0c4a6e;list-style:none;display:flex;align-items:center;justify-content:space-between">
+      <span>ⓘ Como funciona o faturamento — dois modelos de boletim</span>
+      <span style="font-size:10px;color:#0369a1;font-weight:600">▾ expandir</span>
+    </summary>
+    <div style="padding:0 14px 14px;font-size:12px;color:#0c4a6e;line-height:1.5">
+      <p style="margin:6px 0">Cada contrato gera boletins por <strong>competência</strong> (mês). Existem dois modelos:</p>
+      <table style="width:100%;border-collapse:collapse;margin:8px 0;font-size:11px">
+        <thead>
+          <tr style="background:#e0f2fe">
+            <th style="padding:6px 8px;text-align:left;color:#075985">Modelo</th>
+            <th style="padding:6px 8px;text-align:left;color:#075985">Quando aparece</th>
+            <th style="padding:6px 8px;text-align:left;color:#075985">Quantos boletins/mês</th>
+            <th style="padding:6px 8px;text-align:left;color:#075985">Notas fiscais</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="background:#fff">
+            <td style="padding:6px 8px;vertical-align:top"><strong>◯ Consolidado</strong></td>
+            <td style="padding:6px 8px;vertical-align:top">Contrato <strong>sem postos cadastrados</strong> (ex: serviços únicos, mustang interno).</td>
+            <td style="padding:6px 8px;vertical-align:top;text-align:center">1</td>
+            <td style="padding:6px 8px;vertical-align:top">1 NFS-e por boletim.</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 8px;vertical-align:top"><strong>●●● Por posto</strong></td>
+            <td style="padding:6px 8px;vertical-align:top">Contrato <strong>com postos cadastrados</strong> (ex: UFT, UNITINS).</td>
+            <td style="padding:6px 8px;vertical-align:top;text-align:center">1 por posto</td>
+            <td style="padding:6px 8px;vertical-align:top">1 NFS-e por boletim (= 1 NF por posto). Conhecida como "Opção A".</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="margin:6px 0 0;font-size:11px;color:#075985">
+        Use <strong>⚡ Gerar Todos</strong> para o consolidado e <strong>🧩 Gerar Mês por Postos</strong> para os por-posto. A coluna "Status" do painel reflete o boletim "mais vivo" de cada contrato (em caso de duplicata).
+      </p>
+    </div>
+  </details>
+
   <!-- Ações em lote -->
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
-    <button onclick="painelGerarTodos('${mes}')"
-      style="padding:8px 16px;background:#0f172a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">
-      ⚡ Gerar Todos (${stats.sem_boletim} sem boletim)
+    <button onclick="painelGerarMesAuto('${mes}')"
+      title="Para cada contrato: se tem postos cadastrados, cria 1 boletim por posto. Se não tem, cria 1 boletim consolidado. Servidor decide automaticamente."
+      style="padding:8px 18px;background:#0f172a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:800;cursor:pointer">
+      ⚡ Gerar pendentes (${stats.sem_boletim})
     </button>
-    <button onclick="painelGerarMesPostos('${mes}')"
-      title="Para cada contrato com postos cadastrados, cria 1 boletim por posto (estilo UFT: 1 NF = 1 boletim)"
-      style="padding:8px 16px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">
-      🧩 Gerar Mês por Postos
-    </button>
+    <details style="position:relative">
+      <summary style="padding:8px 14px;background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;list-style:none">
+        Forçar modelo ▾
+      </summary>
+      <div style="position:absolute;top:36px;left:0;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 8px 20px rgba(0,0,0,.12);padding:6px;display:flex;flex-direction:column;gap:4px;min-width:240px;z-index:10">
+        <button onclick="painelGerarTodos('${mes}')"
+          style="padding:8px 12px;background:#fff;color:#0f172a;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;text-align:left">
+          ⚡ Só consolidado <span style="color:#94a3b8">(força 1/contrato)</span>
+        </button>
+        <button onclick="painelGerarMesPostos('${mes}')"
+          style="padding:8px 12px;background:#fff;color:#0f172a;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;text-align:left">
+          🧩 Só por posto <span style="color:#94a3b8">(força 1/posto)</span>
+        </button>
+      </div>
+    </details>
     <button onclick="painelAprovarTodos('${mes}')"
       style="padding:8px 16px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">
       ✅ Aprovar Todos Rascunhos (${stats.rascunho})
@@ -2207,6 +2402,9 @@ async function painelPostoEditar(boletim_id) {
     acrescimos: Number(data.boletim.acrescimos) || 0,
     discriminacao: data.boletim.discriminacao || '',
     tem_override: !!data.boletim.tem_override,
+    contrato_id: data.boletim.contrato_id,
+    posto_id: data.boletim.posto_id,
+    fiscal: data.fiscal || null,
   };
 
   const postoTitulo = data.posto
@@ -2283,6 +2481,8 @@ async function painelPostoEditar(boletim_id) {
           <textarea id="gbe-discriminacao" rows="4" style="width:100%;padding:8px 10px;border:1.5px solid #d1d5db;border-radius:7px;font-size:12px;line-height:1.5;box-sizing:border-box;resize:vertical;font-family:inherit">${(window._gbeState.discriminacao || '').replace(/</g, '&lt;')}</textarea>
         </div>
 
+        ${_gbeRenderFiscal(window._gbeState.fiscal, window._gbeState.contrato_id, window._gbeState.posto_id)}
+
         <div id="gbe-resultado" style="margin-top:10px"></div>
       </div>
 
@@ -2300,6 +2500,59 @@ async function painelPostoEditar(boletim_id) {
   `;
   document.body.appendChild(overlay);
   _gbeRecalcular();
+}
+
+// B-P0-04: seção colapsável "Fiscal aplicado a este boletim" no modal de edição.
+// Read-only por enquanto — resolve F2.6 (operadora vê alíquotas sem precisar
+// abrir Prévia). Edição definitiva fica num PR próprio (override por-boletim).
+function _gbeRenderFiscal(f, contratoId, postoId) {
+  if (!f) return '';
+  const pctFmt = v => (v === null || v === undefined || v === '') ? '<span style="color:#94a3b8">não config.</span>' : `${(Number(v) * 100).toFixed(2)}%`;
+  const txt = v => (v === null || v === undefined || v === '') ? '<span style="color:#94a3b8">não config.</span>' : v;
+  const sim = v => v === true ? '✅ Sim' : (v === false ? '❌ Não' : '<span style="color:#94a3b8">não config.</span>');
+  const fonteIss = f.iss?.fonte === 'posto'
+    ? '<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:9px;font-size:10px;font-weight:700;margin-left:4px">override do posto</span>'
+    : (f.iss?.fonte === 'contrato'
+      ? '<span style="background:#dbeafe;color:#1e40af;padding:1px 6px;border-radius:9px;font-size:10px;font-weight:700;margin-left:4px">padrão do contrato</span>'
+      : '<span style="background:#fee2e2;color:#991b1b;padding:1px 6px;border-radius:9px;font-size:10px;font-weight:700;margin-left:4px">não configurado</span>');
+  return `
+    <details style="margin-top:12px;background:#fafbfc;border:1px solid #e2e8f0;border-radius:8px">
+      <summary style="cursor:pointer;padding:10px 14px;font-size:12px;font-weight:700;color:#1e293b;list-style:none;display:flex;align-items:center;justify-content:space-between">
+        <span>🧾 Fiscal aplicado a este boletim</span>
+        <span style="font-size:10px;color:#64748b;font-weight:600">▾ expandir</span>
+      </summary>
+      <div style="padding:0 14px 14px;font-size:11px;color:#1e293b">
+        <div style="margin:6px 0 10px;font-size:10px;color:#64748b">
+          Estes valores são <strong>read-only</strong> e vêm do contrato/posto. Pra ajustar,
+          ${contratoId ? `<a href="#" onclick="document.getElementById('modal-edit-boletim').remove();bolEditarContrato(${contratoId});return false" style="color:#2563eb;text-decoration:underline;font-weight:600">editar contrato</a>` : 'editar o contrato'}
+          ${postoId ? ` ou <a href="#" onclick="document.getElementById('modal-edit-boletim').remove();bolEditarPosto(${postoId}, ${contratoId});return false" style="color:#2563eb;text-decoration:underline;font-weight:600">editar posto</a>` : ''}.
+        </div>
+        <table style="width:100%;border-collapse:collapse">
+          <tbody>
+            <tr><td style="padding:5px 8px;color:#64748b;width:160px">Item LC 116</td>
+                <td style="padding:5px 8px;font-weight:600">${txt(f.item_lista_servico)}</td></tr>
+            <tr><td style="padding:5px 8px;color:#64748b">CNAE / NBS</td>
+                <td style="padding:5px 8px;font-weight:600">${txt(f.codigo_cnae)} / ${txt(f.codigo_nbs)}</td></tr>
+            <tr><td style="padding:5px 8px;color:#64748b">Ciclo de faturamento</td>
+                <td style="padding:5px 8px;font-weight:600">${f.ciclo_dia_inicio ? `dia ${f.ciclo_dia_inicio} → ${f.ciclo_dia_inicio - 1} do mês seguinte` : 'mês calendário'}</td></tr>
+            <tr><td colspan="2" style="padding:8px 0 4px;font-size:10px;font-weight:800;color:#1e293b;letter-spacing:.3px">ALÍQUOTAS FEDERAIS (sobre o bruto)</td></tr>
+            <tr><td style="padding:5px 8px;color:#64748b">PIS</td><td style="padding:5px 8px;font-weight:600">${pctFmt(f.pis)}</td></tr>
+            <tr><td style="padding:5px 8px;color:#64748b">COFINS</td><td style="padding:5px 8px;font-weight:600">${pctFmt(f.cofins)}</td></tr>
+            <tr><td style="padding:5px 8px;color:#64748b">CSLL</td><td style="padding:5px 8px;font-weight:600">${pctFmt(f.csll)}</td></tr>
+            <tr><td style="padding:5px 8px;color:#64748b">IRRF</td><td style="padding:5px 8px;font-weight:600">${pctFmt(f.irrf)}</td></tr>
+            <tr><td colspan="2" style="padding:8px 0 4px;font-size:10px;font-weight:800;color:#1e293b;letter-spacing:.3px">INSS</td></tr>
+            <tr><td style="padding:5px 8px;color:#64748b">Alíquota</td><td style="padding:5px 8px;font-weight:600">${pctFmt(f.inss?.aliquota)}</td></tr>
+            <tr><td style="padding:5px 8px;color:#64748b">Base reduzida?</td><td style="padding:5px 8px;font-weight:600">${sim(f.inss?.base_reduzida)}</td></tr>
+            ${f.inss?.base_reduzida ? `
+              <tr><td style="padding:5px 8px;color:#64748b">— Vale alimentação</td><td style="padding:5px 8px;font-weight:600">${f.inss?.deducao_vale_alimentacao ? 'R$ ' + Number(f.inss.deducao_vale_alimentacao).toFixed(2) : '<span style="color:#94a3b8">não config.</span>'}</td></tr>
+              <tr><td style="padding:5px 8px;color:#64748b">— Materiais</td><td style="padding:5px 8px;font-weight:600">${f.inss?.deducao_materiais ? 'R$ ' + Number(f.inss.deducao_materiais).toFixed(2) : '<span style="color:#94a3b8">não config.</span>'}</td></tr>` : ''}
+            <tr><td colspan="2" style="padding:8px 0 4px;font-size:10px;font-weight:800;color:#1e293b;letter-spacing:.3px">ISS (MUNICIPAL)</td></tr>
+            <tr><td style="padding:5px 8px;color:#64748b">Alíquota</td><td style="padding:5px 8px;font-weight:600">${pctFmt(f.iss?.aliquota)}${fonteIss}</td></tr>
+            <tr><td style="padding:5px 8px;color:#64748b">Tomador retém</td><td style="padding:5px 8px;font-weight:600">${sim(f.iss?.retido)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>`;
 }
 
 function _gbeRenderItemRow(idx, it) {
@@ -2681,6 +2934,29 @@ async function _previewConfirmarEmissao(boletim_id) {
   } catch (err) {
     toast('Erro emissão: ' + err.message, 'error');
     if (btn) { btn.disabled = false; btn.textContent = '🚀 Emitir NFS-e definitivamente'; }
+  }
+}
+
+async function painelGerarMesAuto(mes) {
+  // B-P0-02: botão único que decide o modelo por contrato.
+  // Backend examina cada contrato e escolhe consolidado vs. por posto.
+  const token = localStorage.getItem('montana_jwt') || '';
+  const btn = event?.target;
+  if (btn) { btn.disabled = true; btn.textContent = 'Gerando...'; }
+  try {
+    const r = await fetch('/api/boletins/gerar-mes-auto', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Company': currentCompany, 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ mes }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    const c = d.consolidados, p = d.por_posto;
+    toast(`✅ ${d.criados} criado(s) · consolidado ${c.criados}/${c.criados + c.existentes}, por posto ${p.criados}/${p.criados + p.existentes}`, 'success');
+    renderPainelFaturamento();
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; }
   }
 }
 
